@@ -189,6 +189,112 @@ def test_provision_returns_config_error_on_unknown_cli():
     assert "claude-cod" in err.getvalue() or "unknown cli" in err.getvalue()
 
 
+# ── _pick_claude_seed (2026-06-08 docker login-loop fix) ─────────
+
+
+def _write(tmp: Path, name: str, body: str) -> Path:
+    p = tmp / name
+    p.write_text(body)
+    return p
+
+
+def test_pick_claude_seed_prefers_account_over_stub():
+    """The Dockerfile stub /root/.claude.json (no oauthAccount) sorts
+    before the real /root/host-claude.json mount; the helper must skip
+    the stub and pick the account-bearing file regardless of order."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        stub = _write(tmp, "stub.json", '{"firstStartTime":"x","userID":"u"}')
+        full = _write(tmp, "full.json", '{"oauthAccount":{"emailAddress":"a@b"}}')
+        # stub first in priority order — still must return the account file
+        assert lifecycle._pick_claude_seed([stub, full]) == full.read_bytes()
+
+
+def test_pick_claude_seed_returns_first_account_when_in_priority_slot():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        full = _write(tmp, "full.json", '{"oauthAccount":{"emailAddress":"a@b"}}')
+        stub = _write(tmp, "stub.json", '{"userID":"u"}')
+        assert lifecycle._pick_claude_seed([full, stub]) == full.read_bytes()
+
+
+def test_pick_claude_seed_falls_back_to_first_readable_when_no_account():
+    """No source carries an account → still seed *something* so the
+    onboarding/migration flags land (better than claude writing a bare
+    stub of its own)."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        a = _write(tmp, "a.json", '{"userID":"first"}')
+        b = _write(tmp, "b.json", '{"userID":"second"}')
+        assert lifecycle._pick_claude_seed([a, b]) == a.read_bytes()
+
+
+def test_pick_claude_seed_skips_unreadable_candidates():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        missing = tmp / "nope.json"  # never created
+        full = _write(tmp, "full.json", '{"oauthAccount":{"x":1}}')
+        assert lifecycle._pick_claude_seed([missing, full]) == full.read_bytes()
+
+
+def test_pick_claude_seed_none_when_nothing_readable():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        assert lifecycle._pick_claude_seed(
+            [tmp / "a.json", tmp / "b.json"]) is None
+
+
+# ── _mark_project_trusted (folder-trust dialog) ──────────────────
+
+
+def test_mark_project_trusted_adds_entry_and_preserves_account():
+    """Fresh agent claude.json seeded from the host account has the
+    operator's projects but not /data; marking must add the trust flag
+    without dropping oauthAccount or the other projects."""
+    import json
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        cj = Path(d) / ".claude.json"
+        cj.write_text(json.dumps({
+            "oauthAccount": {"emailAddress": "a@b"},
+            "projects": {"/home/me/proj": {"hasTrustDialogAccepted": True}},
+        }))
+        lifecycle._mark_project_trusted(cj, Path("/data"))
+        out = json.loads(cj.read_text())
+        assert out["projects"]["/data"]["hasTrustDialogAccepted"] is True
+        assert out["oauthAccount"] == {"emailAddress": "a@b"}      # preserved
+        assert "/home/me/proj" in out["projects"]                  # preserved
+
+
+def test_mark_project_trusted_idempotent_no_clobber():
+    """Second call must not wipe other fields claude wrote into the
+    project entry (lastSessionId etc.)."""
+    import json
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        cj = Path(d) / ".claude.json"
+        cj.write_text(json.dumps({
+            "projects": {"/data": {"hasTrustDialogAccepted": True,
+                                   "lastSessionId": "s1"}}}))
+        lifecycle._mark_project_trusted(cj, Path("/data"))
+        out = json.loads(cj.read_text())
+        assert out["projects"]["/data"]["lastSessionId"] == "s1"
+
+
+def test_mark_project_trusted_swallows_malformed_json():
+    """A corrupt claude.json must never abort `claudeteam start`."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        cj = Path(d) / ".claude.json"
+        cj.write_text("{not valid json")
+        lifecycle._mark_project_trusted(cj, Path("/data"))  # must not raise
+
+
 # ── _ensure_claude_agent_home (R172.b) ───────────────────────────
 
 

@@ -58,3 +58,18 @@ class CliAdapter(ABC):
         default; per-CLI adapters override with provider-specific text.
         """
         return []
+
+    def native_memory_path(self, agent: str) -> str | None:
+        """Absolute path to this CLI's own always-loaded memory file
+        (e.g. claude-code's ~/.claude/CLAUDE.md), or None if the CLI has
+        no such file. When set, `agents.identity.write` renders the
+        agent's identity + standing remember policy + memory digest there
+        so it's loaded natively on every session and survives the CLI's
+        /compact (unlike the one-shot init prompt).
+
+        Default None — only claude-code overrides today. Other CLIs lack
+        a per-agent HOME, so writing AGENTS.md / GEMINI.md into the shared
+        working dir would collide across panes; they keep relying on the
+        init-prompt memory injection instead.
+        """
+        return None
