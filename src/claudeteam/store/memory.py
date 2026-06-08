@@ -1,8 +1,10 @@
 """Per-agent durable memory.
 
-Each agent gets a `memory.jsonl` under their state dir
-(`facts/<agent>/memory.jsonl`) — append-only structured notes that
-survive across tmux pane restarts and `/clear` cycles.
+Each agent gets a `memory.jsonl` under their per-agent business dir
+(`agents/<agent>/memory.jsonl`, alongside identity.md) — append-only
+structured notes that survive across tmux pane restarts and `/clear`
+cycles. (Pre-consolidation this lived at `facts/<agent>/memory.jsonl`;
+`_migrate_legacy` moves it on first access.)
 
 Why not reuse `local_facts.append_log`? Logs are an audit trail
 (every action). Memory is a curated subset — what an agent should
@@ -96,7 +98,7 @@ def warn_unknown_kind(kind: str) -> None:
 
 
 def _agent_dir(agent: str):
-    return paths.facts_dir() / agent
+    return paths.agent_dir(agent)
 
 
 def _memory_file(agent: str):
@@ -105,6 +107,36 @@ def _memory_file(agent: str):
 
 def _locked(agent: str):
     return flock(_agent_dir(agent) / ".memory.lock")
+
+
+def _legacy_memory_file(agent: str):
+    """Pre-consolidation home: `facts/<agent>/memory.jsonl`. Kept only so
+    a one-time lazy migration can move existing memory into the new
+    `agents/<agent>/` business dir on first access (R-consolidate)."""
+    return paths.facts_dir() / agent / "memory.jsonl"
+
+
+def _migrate_legacy(agent: str) -> None:
+    """Move memory.jsonl from the old `facts/<agent>/` location into the
+    consolidated `agents/<agent>/` dir. No-op once migrated, or if there's
+    nothing to move. Best-effort: a failure here must not block the
+    caller — at worst the agent starts a fresh file in the new location
+    and the legacy copy is ignored."""
+    new = _memory_file(agent)
+    if new.exists():
+        return
+    old = _legacy_memory_file(agent)
+    if not old.exists():
+        return
+    try:
+        new.parent.mkdir(parents=True, exist_ok=True)
+        old.replace(new)
+    except OSError:
+        # Cross-device rename / perms — fall back to copy, leave old in place.
+        try:
+            new.write_text(old.read_text(encoding="utf-8"), encoding="utf-8")
+        except OSError:
+            pass
 
 
 def append(agent: str, kind: str, content: str, *, ref: str = "") -> dict:
@@ -132,6 +164,7 @@ def append(agent: str, kind: str, content: str, *, ref: str = "") -> dict:
         "ref": str(ref or ""),
         "created_at": now_ms(),
     }
+    _migrate_legacy(agent)
     _agent_dir(agent).mkdir(parents=True, exist_ok=True)
     path = _memory_file(agent)
     with _locked(agent):
@@ -153,6 +186,7 @@ def append(agent: str, kind: str, content: str, *, ref: str = "") -> dict:
 def list_recent(agent: str, *, limit: int = 20) -> list[dict]:
     """Return up to `limit` most recent memory entries, oldest-first
     (so the agent reads them in chronological order)."""
+    _migrate_legacy(agent)
     return read_jsonl(_memory_file(agent))[-limit:]
 
 
@@ -184,6 +218,7 @@ def clear(agent: str) -> int:
     Used by `claudeteam reset` (the whole-state nuke) and operationally
     when an agent's history is poisoned and starting fresh is cheaper
     than triaging which memories are stale."""
+    _migrate_legacy(agent)
     path = _memory_file(agent)
     if not path.exists():
         return 0
@@ -203,6 +238,7 @@ def clear_kind(agent: str, kind: str) -> int:
     Reads + filters + atomic-rewrites under the same flock the append
     path uses, so concurrent writers can't see a partial state.
     """
+    _migrate_legacy(agent)
     path = _memory_file(agent)
     if not path.exists():
         return 0
@@ -245,10 +281,18 @@ def render_for_prompt(agent: str, *, limit: int = 20) -> str:
 
 
 def all_agents_with_memory() -> Iterable[str]:
-    """Yield agent names that have a memory file. For health / audit."""
-    facts = paths.facts_dir()
-    if not facts.exists():
-        return
-    for child in sorted(facts.iterdir()):
-        if child.is_dir() and (child / "memory.jsonl").exists():
-            yield child.name
+    """Yield agent names that have a memory file, sorted + de-duped.
+
+    Scans both the consolidated location (`agents/<name>/memory.jsonl`)
+    and the legacy one (`facts/<name>/memory.jsonl`) so an agent whose
+    memory hasn't been touched (hence not yet lazily migrated) since the
+    consolidation still shows up in health / audit during the transition.
+    """
+    seen: set[str] = set()
+    for base in (paths.state_dir() / "agents", paths.facts_dir()):
+        if not base.exists():
+            continue
+        for child in base.iterdir():
+            if child.is_dir() and (child / "memory.jsonl").exists():
+                seen.add(child.name)
+    yield from sorted(seen)

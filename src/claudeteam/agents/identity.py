@@ -48,6 +48,32 @@ different `runtime_config.json` (or none) and fails with
 `chat_id not set`."""
 
 
+# Standing "maintain your own memory" policy. Appended to the CLI-native
+# always-loaded memory file (claude's ~/.claude/CLAUDE.md) so the
+# instruction is in context on every turn and survives /compact — unlike
+# the one-shot init prompt, which the CLI's own context compaction can
+# summarise away. We tell the agent WHEN to call `claudeteam remember`
+# rather than auto-extracting from logs: the agent is the best judge of
+# what's worth keeping, and the trigger list is deliberately bounded so a
+# hot agent doesn't flood its 200-entry window with low-value notes.
+_MEMORY_POLICY = """\
+## 记忆维护（必守 · 别等人提醒）
+
+`claudeteam remember <你的名字> <kind> "<一句话>"` 写进 durable memory，会在你
+下次重开 / /clear / /compact 后自动回到上下文。**只记“下次回来不想重新发现的东西”。**
+
+什么时候必须记（逐项触发，一事一条）：
+- **decision**：做了影响后续的非显然选择（架构 / 方案 / 取舍）。
+- **learning**：发现关于本仓库 / 环境、会复发的事实（如“测试用 python3 tests/run.py”）。
+- **blocker**：碰到当下解决不了、需要下次或他人接手的阻塞。
+- **task_completed**：完成一项被派的任务。
+- **task_assigned**：（manager）派出一项任务时。
+
+绝不要记（这些是 `claudeteam log` 的活，不是 remember）：
+- 每一步微操作、临时状态（“正在改 X 文件”）、长日志、密钥 / token。
+- 已经记过的同一件事（先想想是否重复）。"""
+
+
 _MANAGER_BODY = """\
 # {name} — {role}
 
@@ -246,7 +272,7 @@ claudeteam send <agent> manager "<原指令精简转述>" 高
 
 ## Memory 用法（重要）
 
-`claudeteam remember` 写到 `facts/<agent>/memory.jsonl`，会在该 agent 下次
+`claudeteam remember` 写到 `agents/<agent>/memory.jsonl`，会在该 agent 下次
 spawn / `/clear` 后自动注入到 init prompt。**不是审计 log**（那是 `claudeteam log`），
 是策划过的"我下次回来需要再读一遍"的关键事项。典型场景：
 - 派给员工任务时同步给员工 + 自己各写一条 `remember`，避免 /clear 后丢上下文
@@ -470,7 +496,30 @@ def init_prompt(agent: str) -> str:
 
 def identity_path(agent: str) -> Path:
     """Where the rendered identity for `agent` lives on disk."""
-    return paths.state_dir() / "agents" / agent / "identity.md"
+    return paths.agent_dir(agent) / "identity.md"
+
+
+def native_memory_text(agent: str, *, role: str | None = None,
+                       cli: str | None = None, model: str | None = None,
+                       specialty: list[str] | None = None,
+                       tone: str | None = None,
+                       notes: str | None = None) -> str:
+    """Full text for a CLI-native always-loaded memory file (claude's
+    ~/.claude/CLAUDE.md): identity body + standing remember policy +
+    current durable-memory digest.
+
+    A *projection* — source of truth is the team config (identity body)
+    and `memory.jsonl` (digest). `write()` regenerates it on every
+    (re)provision so the native file tracks the digest, and because
+    claude loads it natively it survives /compact (which can bury the
+    one-shot init prompt)."""
+    body = render(agent, role=role, cli=cli, model=model,
+                  specialty=specialty, tone=tone, notes=notes)
+    parts = [body, _MEMORY_POLICY]
+    recall = memory.render_for_prompt(agent)
+    if recall:
+        parts.append(recall)
+    return "\n\n".join(parts)
 
 
 def write(agent: str, *, role: str | None = None,
@@ -478,8 +527,44 @@ def write(agent: str, *, role: str | None = None,
           specialty: list[str] | None = None,
           tone: str | None = None,
           notes: str | None = None) -> Path:
-    """Render and persist the identity file; return its path."""
+    """Render and persist the identity file; return its path.
+
+    Also writes the CLI-native memory file (claude's ~/.claude/CLAUDE.md)
+    when the agent's adapter declares one — so identity + remember policy
+    + memory digest are loaded natively every session and survive
+    /compact. No-op for CLIs without a native memory file."""
     target = identity_path(agent)
     atomic_write_text(target, render(agent, role=role, cli=cli, model=model,
                                       specialty=specialty, tone=tone, notes=notes))
+    _write_native_memory(agent, role=role, cli=cli, model=model,
+                         specialty=specialty, tone=tone, notes=notes)
     return target
+
+
+def _write_native_memory(agent: str, *, role: str | None = None,
+                         cli: str | None = None, model: str | None = None,
+                         specialty: list[str] | None = None,
+                         tone: str | None = None,
+                         notes: str | None = None) -> None:
+    """Best-effort write of the agent's CLI-native memory file. Resolves
+    the agent's adapter; does nothing if it has no `native_memory_path`.
+
+    Swallows OSError: an unwritable agent HOME must not fail the whole
+    provision — identity.md is already persisted and the init prompt still
+    injects the memory digest. Lazy import of the adapter registry avoids
+    any import cycle with `agents/__init__`."""
+    resolved_cli = cli if cli is not None else (
+        config.agent_config(agent).get("cli") or "claude-code")
+    try:
+        from claudeteam.agents import get_adapter
+        path = get_adapter(resolved_cli).native_memory_path(agent)
+    except KeyError:
+        return
+    if not path:
+        return
+    try:
+        atomic_write_text(Path(path), native_memory_text(
+            agent, role=role, cli=cli, model=model,
+            specialty=specialty, tone=tone, notes=notes))
+    except OSError:
+        pass

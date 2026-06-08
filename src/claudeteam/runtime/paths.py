@@ -7,7 +7,8 @@ not set, falls back to `~/.claudeteam`.
 Layout:
     $CLAUDETEAM_STATE_DIR/
         facts/             ← inbox.json, status.json, logs.jsonl, heartbeats.json
-        agents/<name>/     ← per-agent identity.md
+        agents/<name>/     ← per-agent business state: identity.md + memory.jsonl
+        agent-home/<name>/ ← claude-code's per-agent HOME (adapter detail)
         router.pid         ← daemon pid files
         watchdog.pid
         router.cursor      ← catchup replay state
@@ -27,6 +28,18 @@ def state_dir() -> Path:
 def facts_dir() -> Path:
     """Where local_facts stores inbox / status / log / heartbeats."""
     return state_dir() / "facts"
+
+
+def agent_dir(agent: str) -> Path:
+    """Per-agent business-state dir: identity.md + memory.jsonl.
+
+    CLI-agnostic — the same location for every agent regardless of which
+    CLI it runs under. Deliberately distinct from claude-code's per-agent
+    HOME (`agent-home/<name>`, an adapter runtime detail where claude
+    looks for ~/.claude): this is where ClaudeTeam's own durable per-agent
+    state lives, and the native CLAUDE.md under agent-home is a projection
+    of it."""
+    return state_dir() / "agents" / agent
 
 
 def state_file(name: str) -> Path:

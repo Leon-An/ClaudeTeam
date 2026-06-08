@@ -115,3 +115,12 @@ class ClaudeCodeAdapter(CliAdapter):
             "Try again at",
             "rate limit",
         ]
+
+    def native_memory_path(self, agent: str) -> str | None:
+        # ~/.claude/CLAUDE.md inside the agent's isolated HOME. claude
+        # loads this as user-level memory on every session start and
+        # re-reads it after /compact, so the agent's identity + remember
+        # policy + memory digest survive context compaction. The per-agent
+        # HOME means each agent gets its own file — zero cross-agent
+        # collision and no project-repo pollution.
+        return f"{agent_home(agent)}/.claude/CLAUDE.md"

@@ -31,6 +31,14 @@ def test_facts_dir_is_state_subdir():
             assert paths.facts_dir() == Path(tmp) / "facts"
 
 
+def test_agent_dir_is_state_agents_subdir():
+    """Per-agent business state (identity.md + memory.jsonl) lives under
+    agents/<name>/ — distinct from claude's agent-home/<name> HOME."""
+    with tempfile.TemporaryDirectory() as tmp:
+        with _state_env(tmp):
+            assert paths.agent_dir("worker_cc") == Path(tmp) / "agents" / "worker_cc"
+
+
 def test_state_file_returns_path_without_mkdir():
     with tempfile.TemporaryDirectory() as tmp:
         with _state_env(tmp):

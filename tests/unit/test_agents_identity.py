@@ -1,8 +1,12 @@
 """Tests for agents/identity.py — per-agent identity markdown rendering."""
 from __future__ import annotations
 
-from helpers import isolated_env
+from pathlib import Path
+
+from helpers import attr_patch, isolated_env
 from claudeteam.agents import identity
+from claudeteam.agents import base, claude_code
+from claudeteam.agents.codex_cli import CodexCliAdapter
 from claudeteam.store import memory
 
 
@@ -369,3 +373,78 @@ def test_init_prompt_appends_memory_when_present():
         assert "[learning] auth uses bcrypt" in prompt
         # Tail nudge tells agent what to do with the recall
         assert "继续之前未完成的工作" in prompt
+
+
+# ── Phase C: CLI-native memory file (claude's ~/.claude/CLAUDE.md) ──
+
+
+def test_adapter_native_memory_path_default_is_none():
+    """Base contract: a CLI declares no native memory file by default, so
+    non-claude adapters opt out unless they override."""
+    assert base.CliAdapter.native_memory_path.__doc__  # documented contract
+    assert CodexCliAdapter().native_memory_path("worker_codex") is None
+
+
+def test_claude_adapter_native_memory_path_is_in_agent_home():
+    """claude points at ~/.claude/CLAUDE.md inside the agent's isolated
+    HOME — so each agent gets its own native file with no collision."""
+    path = claude_code.ClaudeCodeAdapter().native_memory_path("worker_cc")
+    assert path is not None
+    assert path.endswith("/worker_cc/.claude/CLAUDE.md")
+    # Same HOME root the spawn_cmd uses → claude actually reads it.
+    assert path.startswith(claude_code.agent_home("worker_cc"))
+
+
+def test_native_memory_text_combines_identity_policy_and_digest():
+    """The native file body = identity + standing remember policy +
+    current memory digest, so all three load natively each session."""
+    team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
+                                      "role": "员工"}}}
+    with isolated_env(team=team):
+        memory.append("worker_cc", "decision", "use redis for sessions")
+        text = identity.native_memory_text("worker_cc")
+    assert "team worker" in text                  # identity body
+    assert "记忆维护" in text                       # policy heading
+    assert "claudeteam remember" in text          # policy teaches the command
+    assert "[decision] use redis for sessions" in text  # memory digest
+
+
+def test_native_memory_text_omits_digest_when_no_memory():
+    """Brand-new agent: policy is present but no `## 既往记忆` block
+    (avoid injecting an empty section)."""
+    team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
+                                      "role": "员工"}}}
+    with isolated_env(team=team):
+        text = identity.native_memory_text("worker_cc")
+    assert "记忆维护" in text
+    assert "## 既往记忆" not in text
+
+
+def test_write_also_writes_claude_native_memory_file():
+    """write() for a claude-code agent drops a ~/.claude/CLAUDE.md in its
+    per-agent HOME containing identity + policy + digest. Force the host
+    HOME fallback so the file lands inside the test's tmp state dir."""
+    team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
+                                      "role": "员工"}}}
+    with isolated_env(team=team), attr_patch(claude_code, _DATA_WRITABLE=False):
+        memory.append("worker_cc", "learning", "auth uses bcrypt")
+        identity.write("worker_cc")
+        native = Path(claude_code.agent_home("worker_cc")) / ".claude" / "CLAUDE.md"
+        assert native.exists()
+        text = native.read_text(encoding="utf-8")
+        assert "team worker" in text          # identity body
+        assert "记忆维护" in text               # remember policy
+        assert "auth uses bcrypt" in text     # memory digest
+
+
+def test_write_skips_native_memory_for_non_claude_cli():
+    """codex/gemini/qwen/kimi have no per-agent native memory file (no
+    isolated HOME) → write() must not create a CLAUDE.md for them, but
+    must still persist identity.md."""
+    team = {"agents": {"worker_codex": {"cli": "codex-cli", "model": "gpt-5.5",
+                                        "role": "数据"}}}
+    with isolated_env(team=team) as tmp:
+        identity.write("worker_codex")
+        assert (tmp / "state" / "agents" / "worker_codex" / "identity.md").exists()
+        # No native memory file written anywhere under state.
+        assert list((tmp / "state").rglob("CLAUDE.md")) == []
