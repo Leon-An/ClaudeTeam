@@ -40,15 +40,6 @@ def is_ready(target: tmux.Target, adapter: CliAdapter, *,
     return _has_marker(target, adapter.ready_markers(), capture)
 
 
-def is_rate_limited(target: tmux.Target, adapter: CliAdapter, *,
-                    capture: Callable | None = None) -> bool:
-    """True if the pane shows any rate-limit marker for this adapter.
-
-    Empty marker list (default for codex/kimi historically) → always False.
-    """
-    return _has_marker(target, adapter.rate_limit_markers(), capture)
-
-
 # Onboarding dialogs claude pops on fresh ~/.claude.json (ephemeral
 # per-container since the host bind-mount was dropped). Each dialog
 # blocks the `bypass permissions on` ready marker, so we auto-press

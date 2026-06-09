@@ -25,6 +25,3 @@ class KimiCodeAdapter(CliAdapter):
 
     def submit_keys(self) -> list[str]:
         return list(MULTILINE_SUBMIT_KEYS)
-
-    def rate_limit_markers(self) -> list[str]:
-        return ["rate limit", "429", "quota exceeded"]

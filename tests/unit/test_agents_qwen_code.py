@@ -43,15 +43,6 @@ def test_busy_markers_cover_thinking_and_spinner():
     assert "⣾" in busy  # braille spinner from SPINNER_CHARS
 
 
-def test_rate_limit_markers_cover_chinese_and_english():
-    """qwen-code is bilingual — rate-limit messages may be EN or zh-CN.
-    Both must trigger the rate-limit gate so deliver.apply skips inject."""
-    markers = QwenCodeAdapter().rate_limit_markers()
-    assert any("rate limit" in m for m in markers)
-    assert any("请求过于频繁" in m for m in markers)
-    assert "429" in markers
-
-
 def test_process_name_is_qwen():
     """For /proc walkers and `pkill -f qwen` to work, process_name must
     match the binary's exec name."""

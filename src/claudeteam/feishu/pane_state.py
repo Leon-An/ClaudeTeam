@@ -3,7 +3,7 @@
 `/team` and friends use this to surface what each agent is *actually*
 doing right now (not just whatever they upserted into status.json).
 The classifier is content-aware: looks at trailing prompts, working
-spinners, quota warnings, compacting markers, etc.
+spinners, compacting markers, etc.
 
 Lifted from the old branch's `commands/slash/team.py:parse_state_fallback`
 — same emoji/brief vocabulary so operators see consistent state across
@@ -31,7 +31,6 @@ def parse(buf: str) -> tuple[str, str]:
     Returns the same vocabulary as the old branch:
       ⬜ no window / empty buffer
       🛑 CLI not running (back to bash)
-      ⛔ quota exceeded
       ⚠️ awaiting permission prompt
       🗜️ compacting context
       🔄 working / thinking (with elapsed time when available)
@@ -46,8 +45,6 @@ def parse(buf: str) -> tuple[str, str]:
 
     if _BASH_PROMPT_RE.search(tail):
         return ("🛑", "CLI not running (bash)")
-    if "hit your limit" in low:
-        return ("⛔", "quota exceeded")
     if "do you want to proceed" in low or _PERM_PROMPT_RE.search(buf):
         return ("⚠️", "awaiting permission")
     if "compacting conversation" in low or "compacting…" in low:

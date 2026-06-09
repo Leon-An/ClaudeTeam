@@ -46,11 +46,3 @@ class GeminiCliAdapter(CliAdapter):
     def submit_keys(self) -> list[str]:
         # Ink-based UI, same submit pattern as Codex / Kimi
         return list(MULTILINE_SUBMIT_KEYS)
-
-    def rate_limit_markers(self) -> list[str]:
-        return [
-            "rate limit",
-            "quota exceeded",
-            "RESOURCE_EXHAUSTED",
-            "429",
-        ]

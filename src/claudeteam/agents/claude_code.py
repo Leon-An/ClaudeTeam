@@ -108,14 +108,6 @@ class ClaudeCodeAdapter(CliAdapter):
     def process_name(self) -> str:
         return "claude"
 
-    def rate_limit_markers(self) -> list[str]:
-        return [
-            "Approaching usage limit",
-            "5-hour limit reached",
-            "Try again at",
-            "rate limit",
-        ]
-
     def native_memory_path(self, agent: str) -> str | None:
         # ~/.claude/CLAUDE.md inside the agent's isolated HOME. claude
         # loads this as user-level memory on every session start and

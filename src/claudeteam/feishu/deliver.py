@@ -13,12 +13,13 @@ touches the store and tmux.
              touched, no LLM runs.
   BROADCAST  same as ROUTE but targets are all non-sender agents
   ROUTE      per-target: `_write_inbox` (always; flock-serialised) +
-             `_inject_to_pane` (best-effort; skipped when `wake.is_rate_limited`
-             returns True so the inbox row stays the canonical record).
+             `_inject_to_pane` (best-effort — inject is always attempted
+             regardless of pane state; the inbox row stays the canonical
+             record either way).
 
 Returns a `DeliveryReport` so callers can log / surface partial-success
 without inspecting hand-rolled tuples. Lists in the report:
-  written / injected / failed_inject / rate_limited (per agent),
+  written / injected / failed_inject (per agent),
   skipped (DROP), slash_reply (SLASH text-form replies only).
 """
 from __future__ import annotations
@@ -41,7 +42,6 @@ class DeliveryReport:
     written: list[str] = field(default_factory=list)        # inbox row landed
     injected: list[str] = field(default_factory=list)       # pane received text
     failed_inject: list[str] = field(default_factory=list)
-    rate_limited: list[str] = field(default_factory=list)   # inbox kept, inject skipped
     skipped: bool = False                                    # True iff decision was DROP
     slash_reply: str = ""                                    # set when action=SLASH
 
@@ -166,15 +166,11 @@ def _inject_to_pane(agent: str, decision: Decision,
     say` instead of answering in pane). `local_id` is appended to the
     hint so the agent knows which inbox row to mark read.
 
-    Returns a DeliveryReport field name: 'injected' / 'failed_inject' /
-    'rate_limited'.
+    Returns a DeliveryReport field name: 'injected' / 'failed_inject'.
     """
     target = tmux.Target(deps.session, agent)
     try:
         adapter = deps.adapter_for_agent(agent)
-        if wake.is_rate_limited(target, adapter):
-            print(f"  ⏸  {agent} rate-limited; inbox row kept, inject skipped")
-            return "rate_limited"
         if wake_fn is not None and not wake.is_ready(target, adapter):
             if not wake_fn(target, adapter, **_build_wake_args(agent, adapter)):
                 print(f"  ⚠️ {agent} pane not ready; injecting anyway")

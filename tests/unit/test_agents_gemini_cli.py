@@ -49,14 +49,6 @@ def test_busy_markers_include_spinner_and_thinking():
     assert "⣾" in busy
 
 
-def test_rate_limit_markers_cover_quota_strings():
-    adapter = GeminiCliAdapter()
-    markers = adapter.rate_limit_markers()
-    assert any("rate limit" in m for m in markers)
-    assert any("quota" in m for m in markers)
-    assert "429" in markers
-
-
 def test_process_name_is_gemini():
     """For /proc walkers and `pkill -f gemini` to work, process_name
     must match the binary's exec name."""
