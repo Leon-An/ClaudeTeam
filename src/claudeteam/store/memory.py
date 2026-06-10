@@ -11,8 +11,8 @@ Why not reuse `local_facts.append_log`? Logs are an audit trail
 *re-read* on wake to keep continuity. Keeping them separate lets us:
   - inject memory (NOT logs) into the identity init prompt without
     flooding the worker with audit minutiae.
-  - rate-limit memory growth (`_MAX_PER_AGENT = 200`) without
-    forcing log truncation.
+  - rate-limit memory growth (default 200; tunable
+    `memory.max_per_agent`) without forcing log truncation.
 
 Each entry is a tiny dict:
   {kind, content, ref?, created_at}
@@ -43,7 +43,20 @@ from claudeteam.runtime import paths
 from claudeteam.util import flock, now_ms, read_jsonl
 
 
-_MAX_PER_AGENT = 200  # cap retained entries; oldest get dropped on overflow
+_MAX_PER_AGENT = 200  # default cap; override via tunable memory.max_per_agent
+
+
+def _max_per_agent() -> int:
+    """Retention cap (entries per agent). Tunable `memory.max_per_agent`
+    so a deployment with chatty agents can raise it without a code
+    change; floor of 1 keeps the truncate-from-front slice sane if
+    someone configures 0 or junk."""
+    try:
+        from claudeteam.runtime import tunables
+        return max(1, int(tunables.tunable("memory.max_per_agent",
+                                           _MAX_PER_AGENT)))
+    except Exception:
+        return _MAX_PER_AGENT
 
 # Convention vocabulary for memory entry `kind`. Not enforced — `append`
 # accepts any string so future kinds can land without a code change —
@@ -174,8 +187,23 @@ def append(agent: str, kind: str, content: str, *, ref: str = "") -> dict:
         # truncate-from-front step to keep memory size bounded.
         rows = read_jsonl(path)
         rows.append(entry)
-        if len(rows) > _MAX_PER_AGENT:
-            rows = rows[-_MAX_PER_AGENT:]
+        cap = _max_per_agent()
+        if len(rows) > cap:
+            dropped = rows[:-cap]
+            rows = rows[-cap:]
+            # The drop is by-design bounded retention, but it must not be
+            # invisible: an agent whose early decisions/blockers silently
+            # age out can't know to re-record them. One line per overflow
+            # write, naming the oldest casualty so it's recoverable from
+            # logs while the window is still fresh.
+            import sys
+            oldest = dropped[0]
+            print(f"  ⚠️ memory.append: {agent} over cap ({cap}) — dropped "
+                  f"{len(dropped)} oldest entr{'y' if len(dropped) == 1 else 'ies'}, "
+                  f"first casualty: [{oldest.get('kind', '?')}] "
+                  f"{str(oldest.get('content', ''))[:60]!r} "
+                  f"(raise tunable memory.max_per_agent to keep more)",
+                  file=sys.stderr)
         path.write_text(
             "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n",
             encoding="utf-8",
@@ -207,7 +235,7 @@ def list_recent_filtered(agent: str, *,
     window.
     """
     if kind:
-        all_rows = list_recent(agent, limit=_MAX_PER_AGENT)
+        all_rows = list_recent(agent, limit=_max_per_agent())
         return [r for r in all_rows if r.get("kind") == kind][-limit:]
     return list_recent(agent, limit=limit)
 

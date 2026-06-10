@@ -117,13 +117,47 @@ def test_append_caps_at_max_per_agent():
     """Memory growth is bounded — the oldest entries get dropped past
     the cap to keep the file small enough to inject into a prompt."""
     with isolated_env():
-        for i in range(memory._MAX_PER_AGENT + 50):
-            memory.append("worker", "note", f"i={i}")
+        with captured_stderr():   # overflow warnings tested separately
+            for i in range(memory._MAX_PER_AGENT + 50):
+                memory.append("worker", "note", f"i={i}")
         rows = memory.list_recent("worker", limit=memory._MAX_PER_AGENT * 2)
         assert len(rows) == memory._MAX_PER_AGENT
         # Oldest dropped → first surviving is i=50
         assert rows[0]["content"] == "i=50"
         assert rows[-1]["content"] == f"i={memory._MAX_PER_AGENT + 49}"
+
+
+def test_append_cap_is_tunable_and_overflow_warns():
+    """The retention cap reads tunable memory.max_per_agent, and dropping
+    entries on overflow is LOUD: one stderr line naming the count and the
+    oldest casualty, so an agent's early decisions can't age out with
+    zero traces."""
+    from claudeteam.runtime import tunables
+    with isolated_env() as tmp:
+        (tmp / "claudeteam.toml").write_text(
+            "[memory]\nmax_per_agent = 5\n", encoding="utf-8")
+        tunables.reset_cache()
+        try:
+            with captured_stderr() as err:
+                for i in range(7):
+                    memory.append("worker", "note", f"i={i}")
+            rows = memory.list_recent("worker", limit=99)
+            assert len(rows) == 5
+            assert rows[0]["content"] == "i=2"     # i=0, i=1 dropped
+            msg = err.getvalue()
+            assert "over cap (5)" in msg
+            assert "i=0" in msg                     # oldest casualty named
+            assert "memory.max_per_agent" in msg    # remedy named
+        finally:
+            tunables.reset_cache()
+
+
+def test_append_under_cap_stays_quiet():
+    """No overflow → no warning noise."""
+    with isolated_env():
+        with captured_stderr() as err:
+            memory.append("worker", "note", "fits fine")
+        assert "over cap" not in err.getvalue()
 
 
 def test_append_tolerates_corrupt_pre_existing_lines():
