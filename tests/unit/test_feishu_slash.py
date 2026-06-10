@@ -45,6 +45,21 @@ def _ctx(*, agents=("manager", "worker_cc", "worker_codex"),
     )
 
 
+def _team_env():
+    """isolated_env preloaded with the same 3-agent team `_ctx()` defaults
+    to. Handlers resolve agents live from config via `_live_agents()` (not
+    ctx.team_agents), so any test that dispatches against worker_cc /
+    worker_codex must pin a real team file — without this, the suite
+    accidentally reads whatever claudeteam.toml sits at the repo root and
+    the handler replies 未知 agent instead of touching the pane."""
+    from helpers import isolated_env
+    return isolated_env(team={"session": "ClaudeTeam", "agents": {
+        "manager": {"cli": "claude-code"},
+        "worker_cc": {"cli": "claude-code"},
+        "worker_codex": {"cli": "codex-cli"},
+    }})
+
+
 # ── /help ────────────────────────────────────────────────────────
 
 
@@ -80,7 +95,7 @@ def test_team_classifies_each_pane_state_with_emoji():
     def fake_capture(target, lines=80):
         return pane_buffers.get(target.window, "")
 
-    with tmux_patch(capture_pane=fake_capture):
+    with _team_env(), tmux_patch(capture_pane=fake_capture):
         reply = slash.dispatch("/team",
                                _ctx(agents=("manager", "worker_cc", "worker_codex")))
 
@@ -642,7 +657,7 @@ def test_tmux_captures_specified_pane():
         captured["calls"].append((str(target), lines))
         return "line1\nline2\nline3"
 
-    with tmux_patch(capture_pane=fake_capture):
+    with _team_env(), tmux_patch(capture_pane=fake_capture):
         reply = slash.dispatch("/tmux worker_cc 30", _ctx())
     assert ("ClaudeTeam:worker_cc", 30) in captured["calls"]
     assert isinstance(reply, dict)
@@ -696,7 +711,7 @@ def test_send_inject_into_pane():
         captured["text"] = text
         return True
 
-    with tmux_patch(inject=fake_inject):
+    with _team_env(), tmux_patch(inject=fake_inject):
         reply = slash.dispatch("/send worker_cc hello world", _ctx())
     assert captured["target"] == "ClaudeTeam:worker_cc"
     assert captured["text"] == "hello world"
@@ -728,7 +743,7 @@ def test_compact_injects_literal_compact_into_pane():
         captured.append((str(target), text))
         return True
 
-    with tmux_patch(inject=fake_inject):
+    with _team_env(), tmux_patch(inject=fake_inject):
         reply = slash.dispatch("/compact worker_cc", _ctx())
     assert ("ClaudeTeam:worker_cc", "/compact") in captured
     # Default ctx has background=no-op so no second inject for reidentify
@@ -750,7 +765,7 @@ def test_compact_schedules_background_reidentify_on_success():
     def capture_bg(fn):
         scheduled.append(fn)
 
-    with tmux_patch(inject=fake_inject):
+    with _team_env(), tmux_patch(inject=fake_inject):
         slash.dispatch("/compact worker_cc", _ctx(background=capture_bg))
 
         # First inject is /compact; reidentify is queued on background
@@ -776,7 +791,7 @@ def test_compact_skips_reidentify_when_inject_fails():
     def capture_bg(fn):
         scheduled.append(fn)
 
-    with tmux_patch(inject=fake_inject):
+    with _team_env(), tmux_patch(inject=fake_inject):
         reply = slash.dispatch("/compact worker_cc", _ctx(background=capture_bg))
     assert scheduled == []
     assert "45s 后自动重注 identity" not in reply
@@ -801,7 +816,7 @@ def test_compact_detects_llm_rejection_marker_and_skips_reidentify():
     def capture_bg(fn):
         scheduled.append(fn)
 
-    with tmux_patch(inject=fake_inject, capture_pane=fake_capture):
+    with _team_env(), tmux_patch(inject=fake_inject, capture_pane=fake_capture):
         reply = slash.dispatch("/compact worker_cc", _ctx(background=capture_bg))
     assert scheduled == [], "no reidentify should be scheduled when LLM rejected /compact"
     assert "⚠️" in reply
@@ -821,7 +836,7 @@ def test_stop_sends_ctrl_c():
         captured["keys"] = keys
         return True
 
-    with tmux_patch(send_keys=fake_send_keys):
+    with _team_env(), tmux_patch(send_keys=fake_send_keys):
         reply = slash.dispatch("/stop worker_cc", _ctx())
     assert captured["target"] == "ClaudeTeam:worker_cc"
     assert "C-c" in captured["keys"]
@@ -843,7 +858,7 @@ def test_clear_injects_clear_then_init_prompt():
         sequence.append((str(target), text))
         return True
 
-    with tmux_patch(inject=fake_inject):
+    with _team_env(), tmux_patch(inject=fake_inject):
         reply = slash.dispatch("/clear worker_cc", _ctx())
     # First inject: literal /clear
     assert sequence[0] == ("ClaudeTeam:worker_cc", "/clear")
