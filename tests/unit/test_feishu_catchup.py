@@ -26,6 +26,65 @@ def test_write_then_read_roundtrip():
         assert cur["create_time"] == "1719000000000"
 
 
+def test_write_cursor_persists_tz_free_epoch_ms():
+    """write_cursor must stamp `create_time_ms` — the epoch reading taken
+    while writer and renderer still share TZ. lark-cli renders the
+    minute string in process-local time (verified: same message lists
+    as 03:55 under TZ=Asia/Shanghai and 19:55 under TZ=UTC), so the
+    string alone is ambiguous across a TZ change."""
+    with isolated_env():
+        catchup.write_cursor("om_42", "1778047712000")
+        cur = catchup.read_cursor()
+        assert cur["create_time_ms"] == 1778047712000
+        # minute-string form: ms field equals the local-time parse made now
+        catchup.write_cursor("om_43", "2026-05-06 14:08")
+        cur = catchup.read_cursor()
+        assert cur["create_time_ms"] == catchup._to_epoch_ms("2026-05-06 14:08")
+        assert cur["create_time"] == "2026-05-06 14:08"  # raw kept for debug
+
+
+def test_pending_lines_prefers_epoch_ms_when_string_tz_shifted():
+    """THE container-UTC vs host-+8 restart scenario: the cursor's minute
+    string was rendered under a TZ 8h away from the current process's,
+    so re-parsing it now puts the cutoff 8h in the future and the whole
+    gap silently drops. With `create_time_ms` persisted at event time,
+    the cutoff stays correct no matter what TZ catchup runs under."""
+    minute_07 = "1778047620000"   # 14:07
+    minute_09 = "1778047740000"   # 14:09
+    history = [_msg("om_m7", minute_07), _msg("om_m9", minute_09)]
+    with isolated_env():
+        # Hand-write the cursor as a TZ-shifted renderer would have left
+        # it: string says 22:08 (rendered under +8h), ms says 14:08:32.
+        paths.router_cursor_file().parent.mkdir(parents=True, exist_ok=True)
+        paths.router_cursor_file().write_text(json.dumps({
+            "message_id": "om_b2",
+            "create_time": "2026-05-06 22:08",
+            "create_time_ms": 1778047712000,
+        }), encoding="utf-8")
+        lines = catchup.pending_lines("oc_x", list_fn=lambda: history)
+    ids = sorted(json.loads(l)["event"]["message"]["message_id"] for l in lines)
+    # ms cutoff (14:08 floor − 120s = 14:06) keeps both; the bogus string
+    # cutoff (22:06) would have dropped everything.
+    assert ids == ["om_m7", "om_m9"]
+
+
+def test_pending_lines_legacy_cursor_without_ms_still_filters():
+    """Cursors written before create_time_ms existed keep working via the
+    string-parse fallback (same-TZ assumption, the historical behavior)."""
+    minute_05 = "1778047500000"   # 14:05 — beyond lookback → drop
+    minute_09 = "1778047740000"   # 14:09 — keep
+    history = [_msg("om_old", minute_05), _msg("om_new", minute_09)]
+    with isolated_env():
+        paths.router_cursor_file().parent.mkdir(parents=True, exist_ok=True)
+        paths.router_cursor_file().write_text(json.dumps({
+            "message_id": "om_b2",
+            "create_time": "1778047712000",   # legacy: no create_time_ms
+        }), encoding="utf-8")
+        lines = catchup.pending_lines("oc_x", list_fn=lambda: history)
+    ids = [json.loads(l)["event"]["message"]["message_id"] for l in lines]
+    assert ids == ["om_new"]
+
+
 def test_write_cursor_skips_when_either_field_blank():
     with isolated_env():
         catchup.write_cursor("", "1234")
