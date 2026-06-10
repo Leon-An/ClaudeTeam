@@ -647,6 +647,58 @@ def test_refresh_native_memory_noop_for_non_claude_cli():
         assert list((tmp / "state").rglob("CLAUDE.md")) == []
 
 
+def test_write_native_memory_failure_warns_not_silent():
+    """An OSError on the native-memory write must not fail the provision,
+    but it must WARN — a silent swallow means the anti-drift anchor stops
+    tracking with zero traces (disk full / unwritable HOME)."""
+    from helpers import captured_stderr
+    team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
+                                      "role": "员工"}}}
+
+    def boom(path, text):
+        raise OSError(28, "No space left on device")
+
+    with isolated_env(team=team), attr_patch(claude_code, _DATA_WRITABLE=False):
+        with attr_patch(identity, atomic_write_text=boom):
+            with captured_stderr() as err:
+                identity._write_native_memory("worker_cc")   # must not raise
+    msg = err.getvalue()
+    assert "worker_cc" in msg and "native memory write failed" in msg
+    assert "No space left" in msg
+
+
+def test_refresh_native_memory_failure_warns_and_returns_false():
+    """An unexpected exception inside refresh must keep the no-raise
+    contract (the task command that triggered it goes on) but warn that
+    the agent's anchor may now be stale."""
+    from helpers import captured_stderr
+    team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
+                                      "role": "员工"}}}
+
+    def boom(path, text):
+        raise OSError(13, "Permission denied")
+
+    with isolated_env(team=team), attr_patch(claude_code, _DATA_WRITABLE=False):
+        iid = tasks.create_intent("会刷不进盘的原话")
+        _suspend_free_in_progress("worker_cc", "活", iid)
+        with attr_patch(identity, atomic_write_text=boom):
+            with captured_stderr() as err:
+                assert identity.refresh_native_memory("worker_cc") is False
+    msg = err.getvalue()
+    assert "worker_cc" in msg and "anchor refresh failed" in msg
+    assert "Permission denied" in msg
+
+
+def test_refresh_native_memory_unknown_agent_stays_quiet():
+    """Config gaps (agent not in team.json) are a no-op False, not a
+    warning — only real write/render failures should be loud."""
+    from helpers import captured_stderr
+    with isolated_env(team={"agents": {}}):
+        with captured_stderr() as err:
+            assert identity.refresh_native_memory("ghost") is False
+    assert err.getvalue() == ""
+
+
 def test_task_cli_transition_refreshes_on_disk_anchor():
     """END-TO-END (the gap qa found): driving the real `claudeteam task`
     CLI must refresh the assignee's on-disk CLAUDE.md, so an already-online

@@ -626,10 +626,13 @@ def _write_native_memory(agent: str, *, role: str | None = None,
     """Best-effort write of the agent's CLI-native memory file. Resolves
     the agent's adapter; does nothing if it has no `native_memory_path`.
 
-    Swallows OSError: an unwritable agent HOME must not fail the whole
-    provision — identity.md is already persisted and the init prompt still
-    injects the memory digest. Lazy import of the adapter registry avoids
-    any import cycle with `agents/__init__`."""
+    Tolerates OSError — an unwritable agent HOME must not fail the whole
+    provision (identity.md is already persisted and the init prompt still
+    injects the memory digest) — but WARNS instead of swallowing: a failed
+    write here means the anti-drift anchor silently stops tracking, which
+    is exactly the failure the boss should hear about (disk full, perms).
+    Lazy import of the adapter registry avoids any import cycle with
+    `agents/__init__`."""
     resolved_cli = cli if cli is not None else (
         config.agent_config(agent).get("cli") or "claude-code")
     try:
@@ -643,8 +646,10 @@ def _write_native_memory(agent: str, *, role: str | None = None,
         atomic_write_text(Path(path), native_memory_text(
             agent, role=role, cli=cli, model=model,
             specialty=specialty, tone=tone, notes=notes))
-    except OSError:
-        pass
+    except OSError as e:
+        from claudeteam.util import warn
+        warn(f"⚠️ {agent}: native memory write failed ({path}): {e} — "
+             f"防漂移锚点未落盘, identity.md 仍有效")
 
 
 def refresh_native_memory(agent: str) -> bool:
@@ -663,6 +668,12 @@ def refresh_native_memory(agent: str) -> bool:
     command that triggered it. Returns True iff the file was rewritten;
     False when there's no native file or it was already current.
 
+    A swallowed failure here means a /compact-ed worker keeps acting on a
+    stale anchor with zero traces — so unexpected exceptions WARN to stderr
+    (the task command's caller sees it inline) instead of dying silent.
+    The expected no-op cases (no native file for this CLI, unknown agent /
+    adapter) stay quiet: they're configuration, not failure.
+
     Defaults (role / cli / model / …) come from team config, identical to
     how `write()` is invoked at provision, so the refreshed projection
     matches the provisioned one apart from the live anchor + digest.
@@ -671,8 +682,11 @@ def refresh_native_memory(agent: str) -> bool:
         resolved_cli = config.agent_config(agent).get("cli") or "claude-code"
         from claudeteam.agents import get_adapter
         path = get_adapter(resolved_cli).native_memory_path(agent)
-        if not path:
-            return False
+    except KeyError:
+        return False    # unknown agent / unregistered adapter — config, not failure
+    if not path:
+        return False
+    try:
         new_text = native_memory_text(agent)
         target = Path(path)
         if target.exists() and \
@@ -680,5 +694,8 @@ def refresh_native_memory(agent: str) -> bool:
             return False
         atomic_write_text(target, new_text)
         return True
-    except Exception:
+    except Exception as e:
+        from claudeteam.util import warn
+        warn(f"⚠️ {agent}: anchor refresh failed ({path}): {e} — "
+             f"该 agent 的防漂移锚点可能已过期")
         return False
