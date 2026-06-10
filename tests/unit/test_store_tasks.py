@@ -147,3 +147,339 @@ def test_list_sorted_by_id():
             tasks.create(f"w{i}", f"task {i}")
         rows = tasks.list_tasks()
         assert [t["id"] for t in rows] == ["T-1", "T-2", "T-3", "T-4", "T-5"]
+
+
+# ── intent records (immutable verbatim asks) ──────────────────────
+
+
+def test_create_intent_returns_id_and_persists_verbatim():
+    with isolated_env():
+        iid = tasks.create_intent("把首页做成深色模式", source_msg="msg_1")
+        assert iid == "I-1"
+        intent = tasks.get_intent(iid)
+        assert intent["raw_text"] == "把首页做成深色模式"
+        assert intent["source_msg"] == "msg_1"
+        assert intent["creator"] == "user"
+
+
+def test_intent_ids_increment_independently_of_tasks():
+    with isolated_env():
+        tasks.create("w", "a task")          # T-1, must not bump intent id
+        i1 = tasks.create_intent("意图一")
+        i2 = tasks.create_intent("意图二")
+        assert (i1, i2) == ("I-1", "I-2")
+
+
+def test_create_intent_empty_rejects():
+    with isolated_env():
+        try:
+            tasks.create_intent("   ")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("expected ValueError on empty raw_text")
+
+
+def test_get_intent_unknown_returns_none():
+    with isolated_env():
+        assert tasks.get_intent("I-404") is None
+
+
+def test_task_intent_id_backlink_persists():
+    with isolated_env():
+        iid = tasks.create_intent("原话")
+        tid = tasks.create("w", "子任务", intent_id=iid)
+        assert tasks.get(tid)["intent_id"] == iid
+
+
+def test_intent_raw_text_immutable_across_task_churn():
+    with isolated_env():
+        iid = tasks.create_intent("逐字原话不可变")
+        tid = tasks.create("w", "t", intent_id=iid)
+        tasks.update(tid, status="进行中")
+        tasks.update(tid, title="改名", description="改描述")
+        # no API mutates raw_text; it must remain byte-identical
+        assert tasks.get_intent(iid)["raw_text"] == "逐字原话不可变"
+
+
+# ── approval-suspend state machine ────────────────────────────────
+
+
+def test_pause_suspends_only_in_progress():
+    with isolated_env():
+        tid = tasks.create("w", "t")
+        # 待处理 cannot be paused
+        assert tasks.pause(tid) is False
+        tasks.update(tid, status="进行中")
+        assert tasks.pause(tid, approval_note="要老板拍板", paused_by="w") is True
+        t = tasks.get(tid)
+        assert t["status"] == "需审批"
+        assert t["awaiting"] == "user"
+        assert t["approval_note"] == "要老板拍板"
+        assert t["paused_by"] == "w"
+        assert t["paused_at"] is not None
+
+
+def test_pause_missing_task_returns_false():
+    with isolated_env():
+        assert tasks.pause("T-99") is False
+
+
+def test_approve_continue_returns_to_in_progress():
+    with isolated_env():
+        tid = tasks.create("w", "t")
+        tasks.update(tid, status="进行中")
+        tasks.pause(tid)
+        assert tasks.approve(tid) is True
+        t = tasks.get(tid)
+        assert t["status"] == "进行中"
+        assert t["awaiting"] == ""
+
+
+def test_approve_done_marks_complete():
+    with isolated_env():
+        tid = tasks.create("w", "t")
+        tasks.update(tid, status="进行中")
+        tasks.pause(tid)
+        assert tasks.approve(tid, done=True) is True
+        t = tasks.get(tid)
+        assert t["status"] == "已完成"
+        assert t["completed_at"] is not None
+
+
+def test_reject_rework_keeps_feedback():
+    with isolated_env():
+        tid = tasks.create("w", "t")
+        tasks.update(tid, status="进行中")
+        tasks.pause(tid)
+        assert tasks.reject(tid, feedback="方向错了") is True
+        t = tasks.get(tid)
+        assert t["status"] == "进行中"
+        assert t["approval_note"] == "方向错了"
+
+
+def test_reject_cancel_terminates():
+    with isolated_env():
+        tid = tasks.create("w", "t")
+        tasks.update(tid, status="进行中")
+        tasks.pause(tid)
+        assert tasks.reject(tid, cancel=True) is True
+        t = tasks.get(tid)
+        assert t["status"] == "已取消"
+        assert t["completed_at"] is not None
+
+
+def test_approve_reject_reject_non_suspended():
+    with isolated_env():
+        tid = tasks.create("w", "t")          # 待处理
+        assert tasks.approve(tid) is False
+        assert tasks.reject(tid) is False
+        tasks.update(tid, status="进行中")
+        assert tasks.approve(tid) is False     # not 需审批 → no-op
+
+
+def test_update_cannot_advance_suspended_task():
+    """The gate: a suspended task may not be moved by generic update()."""
+    with isolated_env():
+        tid = tasks.create("w", "t")
+        tasks.update(tid, status="进行中")
+        tasks.pause(tid)
+        for bad in ("进行中", "已完成", "已取消"):
+            try:
+                tasks.update(tid, status=bad)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"update should refuse 需审批→{bad}")
+        assert tasks.get(tid)["status"] == "需审批"   # untouched
+
+
+def test_update_cannot_force_into_suspend():
+    with isolated_env():
+        tid = tasks.create("w", "t")
+        tasks.update(tid, status="进行中")
+        try:
+            tasks.update(tid, status="需审批")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("update should refuse moving INTO 需审批")
+
+
+def test_update_nonstatus_fields_allowed_while_suspended():
+    """Editing title/assignee on a suspended task is harmless and allowed;
+    only status transitions are gated."""
+    with isolated_env():
+        tid = tasks.create("w", "t")
+        tasks.update(tid, status="进行中")
+        tasks.pause(tid)
+        assert tasks.update(tid, assignee="w2", title="renamed") is True
+        t = tasks.get(tid)
+        assert t["status"] == "需审批" and t["assignee"] == "w2"
+
+
+def test_reject_from_non_suspended_returns_false():
+    """reject() only leaves 需审批; from any other state it's a no-op so a
+    stray reject can't mutate a task that was never up for approval."""
+    with isolated_env():
+        tid = tasks.create("w", "t")               # 待处理
+        assert tasks.reject(tid, feedback="x") is False
+        tasks.update(tid, status="进行中")
+        assert tasks.reject(tid, feedback="x") is False
+        assert tasks.get(tid)["status"] == "进行中"  # untouched
+        tasks.update(tid, status="已完成")
+        assert tasks.reject(tid, cancel=True) is False
+        assert tasks.get(tid)["status"] == "已完成"
+
+
+def test_double_pause_returns_false():
+    """A task already 需审批 cannot be paused again (pause only from 进行中),
+    so a second pause can't reset paused_at / clobber the pending note."""
+    with isolated_env():
+        tid = tasks.create("w", "t")
+        tasks.update(tid, status="进行中")
+        assert tasks.pause(tid, approval_note="first") is True
+        first_paused_at = tasks.get(tid)["paused_at"]
+        assert tasks.pause(tid, approval_note="second") is False
+        t = tasks.get(tid)
+        assert t["approval_note"] == "first"
+        assert t["paused_at"] == first_paused_at
+
+
+def test_create_sets_suspend_field_defaults():
+    """A fresh task carries the new approval-flow fields as safe defaults so
+    every reader can rely on them without KeyError."""
+    with isolated_env():
+        tid = tasks.create("w", "t")
+        t = tasks.get(tid)
+        assert t["intent_id"] == ""
+        assert t["awaiting"] == ""
+        assert t["approval_note"] == ""
+        assert t["paused_by"] == ""
+        assert t["paused_at"] is None
+
+
+# ── multi-intent / multi-task isolation ───────────────────────────
+
+
+def test_multi_intent_multi_task_isolation():
+    """Several intents + tasks coexist without cross-contamination: each
+    task keeps its own intent back-link, and list filters isolate cleanly."""
+    with isolated_env():
+        i1 = tasks.create_intent("意图一：改结账")
+        i2 = tasks.create_intent("意图二：改登录")
+        t1 = tasks.create("alice", "结账子任务", intent_id=i1)
+        t2 = tasks.create("bob", "登录子任务", intent_id=i2)
+        t3 = tasks.create("alice", "结账子任务二", intent_id=i1)
+        # back-links stay distinct
+        assert tasks.get(t1)["intent_id"] == i1
+        assert tasks.get(t2)["intent_id"] == i2
+        assert tasks.get(t3)["intent_id"] == i1
+        # intents read back verbatim and independently
+        assert tasks.get_intent(i1)["raw_text"] == "意图一：改结账"
+        assert tasks.get_intent(i2)["raw_text"] == "意图二：改登录"
+        # assignee filter isolates without leaking the other owner's tasks
+        alice = {t["id"] for t in tasks.list_tasks(assignee="alice")}
+        assert alice == {t1, t3}
+        assert t2 not in alice
+        # suspending one task never touches a sibling sharing its intent
+        tasks.update(t1, status="进行中")
+        tasks.pause(t1)
+        assert tasks.get(t1)["status"] == "需审批"
+        assert tasks.get(t3)["status"] == "待处理"
+
+
+# ── persistence: suspend state survives a store reload ────────────
+
+
+def test_suspend_state_persists_to_disk_across_reload():
+    """The store keeps no in-memory cache: after pause(), the suspend state
+    + bookkeeping must be on disk so a fresh process reads 需审批 back."""
+    import json
+    from claudeteam.runtime import paths
+    with isolated_env():
+        tid = tasks.create("w", "t")
+        tasks.update(tid, status="进行中")
+        tasks.pause(tid, approval_note="等老板", paused_by="w")
+        # read the raw JSON straight off disk — no API in between
+        raw = json.loads((paths.state_dir() / "tasks.json").read_text("utf-8"))
+        persisted = next(t for t in raw["tasks"] if t["id"] == tid)
+        assert persisted["status"] == "需审批"
+        assert persisted["approval_note"] == "等老板"
+        assert persisted["paused_by"] == "w"
+        assert persisted["paused_at"] is not None
+        # and a plain get() (which re-reads the file) agrees
+        assert tasks.get(tid)["status"] == "需审批"
+
+
+# ── boundary / hostile input ──────────────────────────────────────
+
+
+def test_intent_raw_text_preserves_special_chars_and_length():
+    """raw_text is stored verbatim: newlines, quotes, emoji, CJK and a very
+    long body must all round-trip byte-identical (no trimming/escaping)."""
+    with isolated_env():
+        nasty = (
+            "第一行\n第二行\t制表\n"
+            "引号\"双\" '单' `反引号` $(whoami) ${HOME}\n"
+            "emoji 🚀✅ — 破折号\n"
+        ) + ("长" * 5000)
+        iid = tasks.create_intent(nasty, source_msg="msg_x")
+        assert tasks.get_intent(iid)["raw_text"] == nasty
+
+
+def test_create_intent_persists_key_points():
+    with isolated_env():
+        iid = tasks.create_intent("原话", key_points="要点A; 要点B")
+        assert tasks.get_intent(iid)["key_points"] == "要点A; 要点B"
+
+
+def test_title_with_special_chars_roundtrips():
+    """Only surrounding whitespace is stripped; interior special characters
+    survive untouched."""
+    with isolated_env():
+        tid = tasks.create("w", "  改 \"支付\" 页 $(x) 🚀  ")
+        assert tasks.get(tid)["title"] == "改 \"支付\" 页 $(x) 🚀"
+
+
+def test_whitespace_only_intent_rejected_at_various_forms():
+    """Empty / pure-whitespace (spaces, tabs, newlines) raw_text all reject —
+    the guard uses .strip() so every blank form is caught."""
+    with isolated_env():
+        for blank in ("", "   ", "\t\t", "\n \n"):
+            try:
+                tasks.create_intent(blank)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"expected ValueError for {blank!r}")
+
+
+# ── backward compatibility (old tasks.json without new fields) ─────
+
+
+def test_reads_legacy_task_without_new_fields():
+    """A tasks.json written before this feature lacks intent_id / suspend
+    fields. Reads must not raise and must surface safe defaults."""
+    import json
+    from claudeteam.runtime import paths
+    with isolated_env():
+        legacy = {
+            "tasks": [{
+                "id": "T-1", "title": "old", "description": "",
+                "assignee": "w", "creator": "", "status": "进行中",
+                "created_at": 1, "updated_at": 1, "completed_at": None,
+            }],
+            "_meta": {"last_id": 1},
+        }
+        f = paths.state_dir() / "tasks.json"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps(legacy, ensure_ascii=False), encoding="utf-8")
+        t = tasks.get("T-1")
+        assert t.get("intent_id", "") == ""
+        assert t.get("awaiting", "") == ""
+        # legacy file has no intents array / last_intent_id — still creatable
+        iid = tasks.create_intent("新原话")
+        assert iid == "I-1"
+        # and the legacy task is still updatable normally
+        assert tasks.update("T-1", status="已完成") is True

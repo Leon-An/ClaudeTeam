@@ -32,6 +32,7 @@
 | [slash_matrix.md](slash_matrix.md) | 9 条斜杠 + 路由分类的详细 pass/fail 标准、color 期望、错误诊断 | host_smoke 某条出错时翻这一篇 |
 | [round_c_real_task.md](round_c_real_task.md) | 老板 → manager → workers → 汇总，30-60 分钟真任务派活 | 重大改动后或想压测协作时 |
 | [reidentify.md](reidentify.md) | `claudeteam reidentify` 重新注入身份的几种触发情境 | post-compact 或 worker 记忆乱了 |
+| [compaction_survival.md](compaction_survival.md) | tasks 原话意图 `/compact` 后逐字幸存：真 agent + 真 /compact，三路 byte-exact 判据 + 反向对照 | 改 tasks 锚点/刷新接线后，或要对外展示抗压缩可验证性 |
 
 ## 归档：`_archive/`
 

@@ -124,8 +124,25 @@ def _to_epoch_ms(create_time: object) -> int:
     return 0
 
 
-def _newer_than(messages: Iterable[dict], cursor_create_time: str) -> list[dict]:
-    """Filter `messages` to those at-or-after the cursor minute.
+# Reorder margin stepped back from the cursor minute before filtering.
+# The cursor is a MONOTONIC high-water mark (max create_time of any
+# classified message), but lark's WebSocket can deliver out of order and,
+# on macOS hosts, silently drops for ~120s at a time. So a message can be
+# *missed* live while a LATER message gets classified and pushes the cursor
+# past it; on the next catchup that earlier message is older than the
+# high-water cursor and a bare minute-floor cutoff filters it out forever
+# — it never reaches `seen` (so dedup can't help) and the minute floor is
+# too coarse to save a cross-minute miss. Stepping the cutoff back by at
+# least the disconnect window keeps those earlier-but-unprocessed messages
+# in the replay set; the persisted `router.seen` dedup (seeded into
+# process_lines across restarts) drops any we already applied, so a wider
+# window costs a few dedup-drops, never a re-fire.
+_DEFAULT_CATCHUP_LOOKBACK_MS = 120_000  # ~ the observed macOS WS silent-drop window
+
+
+def _newer_than(messages: Iterable[dict], cursor_create_time: str, *,
+                lookback_ms: int = _DEFAULT_CATCHUP_LOOKBACK_MS) -> list[dict]:
+    """Filter `messages` to those at-or-after `cursor minute − lookback`.
 
     Two precision realms collide here. Cursor is set from the LIVE event
     `create_time` (lark-cli WebSocket → millisecond precision string).
@@ -135,18 +152,24 @@ def _newer_than(messages: Iterable[dict], cursor_create_time: str) -> list[dict]
     cursor is in: cursor 14:08:32.107 vs REST 14:08:00 → REST < cursor
     → every message that shares the cursor's minute is dropped.
 
-    Floor the cutoff to the minute boundary so REST messages in the
-    same minute as the cursor are kept. Same-minute messages already
-    handled by the live stream get re-applied; in-process `seen_msg_ids`
-    dedups within one router run. Across restarts, the cursor message
-    itself is re-applied — acceptable, lark WebSocket misses are far
-    more common in observed host_smoke runs (2026-05-06).
+    Floor the cutoff to the minute boundary (so same-minute REST messages
+    survive) AND step it back by `lookback_ms` (so an out-of-order message
+    a few minutes older than the high-water cursor — the cross-minute
+    silent-drop miss — survives too). Re-applied messages are harmless:
+    `router.seen` (persisted across restarts) and the in-process
+    `seen_msg_ids` dedup them; the worst case is replaying ~a window of
+    already-seen rows that immediately dedup-drop.
+
+    The lookback is deliberately bounded (not the whole window) so a fresh
+    deploy into an active chat doesn't reach back over pre-birth history
+    the empty-cursor guard already excludes on first up.
 
     Bad/missing create_time (parses to 0) gets dropped — never include
     rows we can't timestamp, even when there's no cursor.
     """
     raw_cutoff = _to_epoch_ms(cursor_create_time)
-    cutoff = (raw_cutoff // 60_000) * 60_000  # floor to minute
+    minute_floor = (raw_cutoff // 60_000) * 60_000  # floor to minute
+    cutoff = minute_floor - max(0, lookback_ms)     # step back the reorder margin
     def keep(m: dict) -> bool:
         ts = _to_epoch_ms(m.get("create_time"))
         return ts > 0 and ts >= cutoff
@@ -194,5 +217,17 @@ def pending_lines(chat_id: str, *,
             return _chat.list_recent(chat_id, profile=profile,
                                      page_size=page_size, as_user=as_user)
     msgs = list_fn() or []
-    fresh = _newer_than(msgs, cursor_ct)
+    fresh = _newer_than(msgs, cursor_ct, lookback_ms=_catchup_lookback_ms())
     return [_msg_to_event_line(m) for m in fresh]
+
+
+def _catchup_lookback_ms() -> int:
+    """Reorder margin (ms) the catchup cutoff steps back from the cursor
+    minute. Tunable so ops can widen it if a worse out-of-order skew is
+    ever observed; defaults to the macOS WS silent-drop window."""
+    try:
+        from claudeteam.runtime import tunables
+        return int(tunables.tunable("router.catchup_lookback_ms",
+                                    _DEFAULT_CATCHUP_LOOKBACK_MS))
+    except Exception:
+        return _DEFAULT_CATCHUP_LOOKBACK_MS

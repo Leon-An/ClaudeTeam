@@ -57,7 +57,7 @@ def test_help_returns_card_listing_all_commands():
     assert reply["header"]["title"]["content"] == "🆘 ClaudeTeam 自定义斜杠命令"
     body = reply["body"]["elements"][0]["content"]
     for c in ("/help", "/team", "/health", "/usage", "/tmux",
-              "/send", "/compact", "/stop", "/clear"):
+              "/send", "/compact", "/stop", "/clear", "/task"):
         assert c in body
     # Dropped commands stay dropped
     assert "/recall" not in body
@@ -880,3 +880,83 @@ def test_handler_exception_is_caught():
     with tmux_patch(capture_pane=boom_capture):
         reply = slash.dispatch("/tmux manager", _ctx())
     assert "slash handler error" in reply or "kaboom" in reply
+
+
+# ── /task ─────────────────────────────────────────────────────────
+
+
+def _seed_kanban():
+    """Seed a small task store covering several statuses + an intent
+    back-link, for the /task render tests. Returns nothing; callers
+    dispatch /task and assert on the card body."""
+    from claudeteam.store import tasks
+    iid = tasks.create_intent("把支付页改成两步结账 [I-SEED]")
+    tasks.create("worker_cc", "重构结账", intent_id=iid)        # T-1 待处理
+    tasks.create("worker_cc", "改首页")                          # T-2 待处理
+    tasks.update("T-2", status="进行中")
+    tasks.create("worker_codex", "写测试")                       # T-3
+    tasks.update("T-3", status="进行中")
+    tasks.pause("T-3")                                           # T-3 需审批
+    tasks.create("worker_cc", "老活")                            # T-4
+    tasks.update("T-4", status="已完成")
+
+
+def test_task_kanban_groups_by_status_with_intent_backlink():
+    """/task renders every status column, lists id+title+assignee, and
+    carries the verbatim intent back-link (↳ I-n) when a task has one."""
+    from helpers import isolated_env
+    team = {"agents": {"worker_cc": {"cli": "claude-code"},
+                       "worker_codex": {"cli": "codex"}}}
+    with isolated_env(team=team):
+        _seed_kanban()
+        reply = slash.dispatch("/task", _ctx())
+    assert isinstance(reply, dict)
+    title = reply["header"]["title"]["content"]
+    assert "/task" in title and "任务看板" in title
+    body = reply["body"]["elements"][0]["content"]
+    # every column header present, in vocabulary
+    for col in ("待处理", "进行中", "需审批", "已完成", "已取消"):
+        assert col in body
+    # ids + titles + assignees surfaced
+    assert "T-1" in body and "重构结账" in body and "worker_cc" in body
+    assert "T-3" in body and "worker_codex" in body
+    # intent back-link rendered for the linked task only
+    assert "↳ I-1" in body
+    assert "I-SEED" in body                       # verbatim snippet carried
+
+
+def test_task_kanban_empty_columns_marked_none():
+    """With no tasks the card still renders all columns, each marked 无,
+    and stays green (nothing awaiting approval)."""
+    from helpers import isolated_env
+    with isolated_env(team={"agents": {"worker_cc": {"cli": "claude-code"}}}):
+        reply = slash.dispatch("/task", _ctx())
+    assert isinstance(reply, dict)
+    body = reply["body"]["elements"][0]["content"]
+    assert "暂无任何 task" in body
+    assert reply["header"]["template"] == "green"
+
+
+def test_task_card_turns_yellow_when_pending_approval():
+    """A task sitting in 需审批 paints the card yellow so the boss notices
+    something awaits their decision."""
+    from helpers import isolated_env
+    from claudeteam.store import tasks
+    with isolated_env(team={"agents": {"worker_cc": {"cli": "claude-code"}}}):
+        tasks.create("worker_cc", "需要拍板的活")
+        tasks.update("T-1", status="进行中")
+        tasks.pause("T-1")
+        reply = slash.dispatch("/task", _ctx())
+    assert reply["header"]["template"] == "yellow"
+
+
+def test_task_handler_never_writes_to_store():
+    """/task is read-only: dispatching it must not mutate tasks.json."""
+    from helpers import isolated_env
+    from claudeteam.store import tasks
+    with isolated_env(team={"agents": {"worker_cc": {"cli": "claude-code"}}}):
+        tasks.create("worker_cc", "原样不动")
+        before = tasks.list_tasks()
+        slash.dispatch("/task", _ctx())
+        after = tasks.list_tasks()
+    assert before == after

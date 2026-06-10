@@ -3,11 +3,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from helpers import attr_patch, isolated_env
+from helpers import attr_patch, isolated_env, run_cli
 from claudeteam.agents import identity
 from claudeteam.agents import base, claude_code
 from claudeteam.agents.codex_cli import CodexCliAdapter
-from claudeteam.store import memory
+from claudeteam.store import memory, tasks
 
 
 # ── render() — template selection ─────────────────────────────────
@@ -90,6 +90,32 @@ def test_render_warns_against_cd_in_both_templates():
         assert "Working directory rule" in text
         assert "do NOT" in text and "cd" in text
         assert "runtime_config.json" in text
+
+
+def test_team_principles_baked_into_both_templates():
+    """Every agent is born carrying the 4 team working principles:
+    intent→task→--intent backlink, formal approval state machine (not a
+    verbal ok), verbatim boss-intent that survives /compact, and logging
+    boss corrections to durable memory. Boss-mandated so a fresh worker
+    follows the tasks-feature discipline without being told."""
+    for agent in ("manager", "w"):
+        text = identity.render(agent, role="r", cli="c", model="m")
+        assert "## 团队原则" in text
+        assert "--intent" in text                 # ① intent backlink
+        assert "task pause" in text               # ② approval state machine
+        assert "口头确认不是状态机" in text
+        assert "task intent get I-n" in text      # ③ verbatim re-read
+        assert "/compact" in text
+        assert "remember <你> learning" in text   # ④ corrections → memory
+
+
+def test_team_principles_survive_in_native_memory_projection():
+    """The principles must live in the always-loaded native file too, not
+    just identity.md — that's the channel that survives /compact for
+    claude-code workers."""
+    nt = identity.native_memory_text("worker_cc", role="员工",
+                                     cli="claude-code", model="m")
+    assert "## 团队原则" in nt and "--intent" in nt
 
 
 # ── render() — defaults from team.json ────────────────────────────
@@ -420,6 +446,135 @@ def test_native_memory_text_omits_digest_when_no_memory():
     assert "## 既往记忆" not in text
 
 
+# ── intent anchor (anti-drift double-insurance) ───────────────────
+
+
+def _suspend_free_in_progress(assignee, title, intent_id):
+    """Helper: create a task already 进行中 and intent-linked."""
+    tid = tasks.create(assignee, title, intent_id=intent_id)
+    tasks.update(tid, status="进行中")
+    return tid
+
+
+def test_native_memory_text_anchors_active_intent_verbatim():
+    """A worker with an active intent-linked task gets the boss's verbatim
+    raw_text anchored into its always-loaded CLAUDE.md projection."""
+    team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
+                                      "role": "员工"}}}
+    with isolated_env(team=team):
+        iid = tasks.create_intent("把支付页改成两步结账，别加第三步")
+        _suspend_free_in_progress("worker_cc", "重构结账", iid)
+        text = identity.native_memory_text("worker_cc")
+    assert "老板原话锚点" in text
+    assert "把支付页改成两步结账，别加第三步" in text  # verbatim, not paraphrased
+    assert iid in text
+
+
+def test_native_memory_text_omits_anchor_when_no_active_intent_task():
+    team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
+                                      "role": "员工"}}}
+    with isolated_env(team=team):
+        text = identity.native_memory_text("worker_cc")
+    assert "老板原话锚点" not in text
+
+
+def test_anchor_excludes_terminal_tasks():
+    """A completed task's intent should not keep cluttering the anchor —
+    only non-terminal (进行中 / 需审批) tasks anchor."""
+    team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
+                                      "role": "员工"}}}
+    with isolated_env(team=team):
+        iid = tasks.create_intent("做完就该消失的原话")
+        tid = _suspend_free_in_progress("worker_cc", "t", iid)
+        tasks.update(tid, status="已完成")
+        text = identity.native_memory_text("worker_cc")
+    assert "老板原话锚点" not in text
+
+
+def test_anchor_includes_suspended_task_intent():
+    """需审批 is non-terminal — its intent must stay anchored so the agent
+    doesn't drift while waiting on the boss."""
+    team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
+                                      "role": "员工"}}}
+    with isolated_env(team=team):
+        iid = tasks.create_intent("挂起期间也要记得的原话")
+        tid = _suspend_free_in_progress("worker_cc", "t", iid)
+        tasks.pause(tid)
+        text = identity.native_memory_text("worker_cc")
+    assert "挂起期间也要记得的原话" in text
+
+
+def test_init_prompt_anchors_active_intent():
+    """Double-insurance: the anchor also rides the on-wake init prompt, not
+    only the native CLAUDE.md."""
+    team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
+                                      "role": "员工"}}}
+    with isolated_env(team=team):
+        iid = tasks.create_intent("init prompt 也要带的原话")
+        _suspend_free_in_progress("worker_cc", "t", iid)
+        prompt = identity.init_prompt("worker_cc")
+    assert "老板原话锚点" in prompt
+    assert "init prompt 也要带的原话" in prompt
+    assert "继续之前未完成的工作" in prompt
+
+
+def test_anchor_only_for_the_assigned_agent():
+    """worker_a's intent must not leak into worker_b's anchor."""
+    team = {"agents": {"worker_a": {"cli": "claude-code", "role": "x"},
+                       "worker_b": {"cli": "claude-code", "role": "y"}}}
+    with isolated_env(team=team):
+        iid = tasks.create_intent("只属于 a 的原话")
+        _suspend_free_in_progress("worker_a", "t", iid)
+        text_b = identity.native_memory_text("worker_b")
+    assert "只属于 a 的原话" not in text_b
+
+
+def test_anchor_lists_multiple_distinct_intents():
+    """An agent juggling two intent-linked tasks gets both verbatim asks
+    anchored — neither should crowd the other out."""
+    team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
+                                      "role": "员工"}}}
+    with isolated_env(team=team):
+        i1 = tasks.create_intent("原话甲：两步结账")
+        i2 = tasks.create_intent("原话乙：深色首页")
+        _suspend_free_in_progress("worker_cc", "结账", i1)
+        _suspend_free_in_progress("worker_cc", "首页", i2)
+        text = identity.native_memory_text("worker_cc")
+    assert "原话甲：两步结账" in text
+    assert "原话乙：深色首页" in text
+    assert i1 in text and i2 in text
+
+
+def test_anchor_groups_tasks_sharing_one_intent():
+    """Two tasks back-linking the SAME intent collapse to one anchor line
+    that lists both task ids — the verbatim ask appears once, not twice."""
+    team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
+                                      "role": "员工"}}}
+    with isolated_env(team=team):
+        iid = tasks.create_intent("一句原话拆成两个子任务")
+        t1 = _suspend_free_in_progress("worker_cc", "子任务一", iid)
+        t2 = _suspend_free_in_progress("worker_cc", "子任务二", iid)
+        text = identity.native_memory_text("worker_cc")
+    # appears exactly once, both task ids grouped on the same line
+    assert text.count("一句原话拆成两个子任务") == 1
+    assert f"{t1}/{t2}" in text
+
+
+def test_anchor_never_raises_on_store_error_returns_empty():
+    """The anchor feeds the spawn / native-memory path, so a store hiccup
+    must degrade to no-section rather than throwing and breaking wake."""
+    team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
+                                      "role": "员工"}}}
+
+    def _boom(*a, **k):
+        raise RuntimeError("store unavailable")
+
+    with isolated_env(team=team), attr_patch(tasks, list_tasks=_boom):
+        # must not raise, and simply omits the anchor section
+        text = identity.native_memory_text("worker_cc")
+    assert "老板原话锚点" not in text
+
+
 def test_write_also_writes_claude_native_memory_file():
     """write() for a claude-code agent drops a ~/.claude/CLAUDE.md in its
     per-agent HOME containing identity + policy + digest. Force the host
@@ -435,6 +590,101 @@ def test_write_also_writes_claude_native_memory_file():
         assert "team worker" in text          # identity body
         assert "记忆维护" in text               # remember policy
         assert "auth uses bcrypt" in text     # memory digest
+
+
+# ── on-disk anchor refresh (anti-/compact staleness) ──────────────
+
+
+def _native_path(agent: str) -> Path:
+    return Path(claude_code.agent_home(agent)) / ".claude" / "CLAUDE.md"
+
+
+def test_refresh_native_memory_rewrites_anchor_to_current():
+    """The on-disk CLAUDE.md is otherwise only written at provision; this
+    refresh re-projects it so the always-loaded anchor tracks the agent's
+    *current* active tasks — appearing when a task goes active, and
+    disappearing when it completes (the stale-anchor case)."""
+    team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
+                                      "role": "员工"}}}
+    with isolated_env(team=team), attr_patch(claude_code, _DATA_WRITABLE=False):
+        # provisioned while idle: native file exists, no anchor
+        identity.write("worker_cc")
+        assert "老板原话锚点" not in _native_path("worker_cc").read_text("utf-8")
+        # a task goes active → refresh injects the verbatim anchor on disk
+        iid = tasks.create_intent("原话：两步结账别加第三步")
+        tid = _suspend_free_in_progress("worker_cc", "结账", iid)
+        assert identity.refresh_native_memory("worker_cc") is True
+        on_disk = _native_path("worker_cc").read_text("utf-8")
+        assert "原话：两步结账别加第三步" in on_disk and iid in on_disk
+        # task completes → refresh drops the now-stale anchor from disk
+        tasks.update(tid, status="已完成")
+        assert identity.refresh_native_memory("worker_cc") is True
+        assert "原话：两步结账别加第三步" not in \
+            _native_path("worker_cc").read_text("utf-8")
+
+
+def test_refresh_native_memory_noop_when_unchanged():
+    """No needless disk churn: a second refresh with nothing changed reports
+    no write."""
+    team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
+                                      "role": "员工"}}}
+    with isolated_env(team=team), attr_patch(claude_code, _DATA_WRITABLE=False):
+        iid = tasks.create_intent("稳定的原话")
+        _suspend_free_in_progress("worker_cc", "t", iid)
+        assert identity.refresh_native_memory("worker_cc") is True
+        assert identity.refresh_native_memory("worker_cc") is False
+
+
+def test_refresh_native_memory_noop_for_non_claude_cli():
+    """Non-claude CLIs have no native memory file → refresh is a no-op and
+    writes nothing."""
+    team = {"agents": {"worker_codex": {"cli": "codex-cli", "model": "gpt-5.5",
+                                        "role": "数据"}}}
+    with isolated_env(team=team) as tmp:
+        iid = tasks.create_intent("原话")
+        _suspend_free_in_progress("worker_codex", "t", iid)
+        assert identity.refresh_native_memory("worker_codex") is False
+        assert list((tmp / "state").rglob("CLAUDE.md")) == []
+
+
+def test_task_cli_transition_refreshes_on_disk_anchor():
+    """END-TO-END (the gap qa found): driving the real `claudeteam task`
+    CLI must refresh the assignee's on-disk CLAUDE.md, so an already-online
+    /compact-ed worker never keeps a stale anchor. Dispatch adds the anchor;
+    completion removes it — both via the CLI, no manual reidentify."""
+    team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
+                                      "role": "员工"}}}
+    with isolated_env(team=team), attr_patch(claude_code, _DATA_WRITABLE=False):
+        identity.write("worker_cc")               # online worker, idle
+        run_cli(["task", "intent", "create", "原话：CLI 触发刷新"])
+        run_cli(["task", "create", "worker_cc", "干活", "--intent", "I-1"])
+        # going 进行中 through the CLI refreshes the on-disk anchor
+        run_cli(["task", "update", "T-1", "--status", "进行中"])
+        assert "原话：CLI 触发刷新" in \
+            _native_path("worker_cc").read_text("utf-8")
+        # completing through the CLI drops the now-stale anchor on disk
+        run_cli(["task", "update", "T-1", "--status", "已完成"])
+        assert "原话：CLI 触发刷新" not in \
+            _native_path("worker_cc").read_text("utf-8")
+
+
+def test_task_cli_reassign_moves_on_disk_anchor_between_agents():
+    """Reassigning an active task refreshes BOTH the old and new owner's
+    on-disk anchor — the verbatim ask follows the task to its new owner and
+    leaves the previous owner's file."""
+    team = {"agents": {
+        "worker_a": {"cli": "claude-code", "model": "sonnet", "role": "x"},
+        "worker_b": {"cli": "claude-code", "model": "sonnet", "role": "y"}}}
+    with isolated_env(team=team), attr_patch(claude_code, _DATA_WRITABLE=False):
+        identity.write("worker_a")
+        identity.write("worker_b")
+        run_cli(["task", "intent", "create", "跟着任务走的原话"])
+        run_cli(["task", "create", "worker_a", "活", "--intent", "I-1"])
+        run_cli(["task", "update", "T-1", "--status", "进行中"])
+        assert "跟着任务走的原话" in _native_path("worker_a").read_text("utf-8")
+        run_cli(["task", "update", "T-1", "--assignee", "worker_b"])
+        assert "跟着任务走的原话" not in _native_path("worker_a").read_text("utf-8")
+        assert "跟着任务走的原话" in _native_path("worker_b").read_text("utf-8")
 
 
 def test_write_skips_native_memory_for_non_claude_cli():
