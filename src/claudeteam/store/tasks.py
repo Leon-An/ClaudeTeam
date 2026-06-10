@@ -31,6 +31,21 @@ DEFAULT_STATUS = "待处理"
 SUSPEND_STATUS = "需审批"
 TERMINAL_STATUSES = {"已完成", "已取消"}
 
+# Legal moves for the generic update() path. Terminals are frozen: a
+# 已完成/已取消 task can never be resurrected by a stray `task update`
+# — reopening is an explicit new task, not a silent status flip (a
+# revived task would also re-anchor a stale intent into the assignee's
+# CLAUDE.md). 待处理 → 已完成 stays legal so the everyday
+# `task done <T-n>` shortcut works without a ceremonial 进行中 hop.
+# 需审批 is absent on purpose: both directions are gated by
+# pause()/approve()/reject() before this map is consulted.
+LEGAL_TRANSITIONS: dict[str, set[str]] = {
+    "待处理": {"进行中", "已完成", "已取消"},
+    "进行中": {"待处理", "已完成", "已取消"},
+    "已完成": set(),
+    "已取消": set(),
+}
+
 
 def _file() -> Path:
     return paths.state_dir() / "tasks.json"
@@ -110,7 +125,10 @@ def update(task_id: str, *, status: str | None = None,
     The generic path refuses to move a task INTO or OUT OF `需审批`: the
     approval-suspend state may only be entered via pause() and left via
     approve()/reject(), so a stray `task update --status` can never bypass
-    the gate or mis-advance a suspended task.
+    the gate or mis-advance a suspended task. All other status moves must
+    appear in LEGAL_TRANSITIONS — in particular terminals are frozen, so
+    a finished/cancelled task can't be silently resurrected. Re-asserting
+    the current status is a tolerated no-op (idempotent retries).
     """
     if status is not None and status not in VALID_STATUSES:
         raise ValueError(f"invalid status: {status} (valid: {sorted(VALID_STATUSES)})")
@@ -122,7 +140,16 @@ def update(task_id: str, *, status: str | None = None,
         if status is not None and SUSPEND_STATUS in (status, task.get("status")):
             raise ValueError(
                 "需审批 transitions must use task pause/approve/reject, not update")
-        if status is not None:
+        current = task.get("status", DEFAULT_STATUS)
+        if status is not None and status != current:
+            allowed = LEGAL_TRANSITIONS.get(current, set())
+            if status not in allowed:
+                raise ValueError(
+                    f"illegal transition: {current} → {status}"
+                    + (f" (from {current} only: {' / '.join(sorted(allowed))})"
+                       if allowed else f" ({current} is terminal — "
+                                       f"reopen by creating a new task)"))
+        if status is not None and status != current:
             _set_status(task, status)
         if assignee is not None:
             task["assignee"] = assignee

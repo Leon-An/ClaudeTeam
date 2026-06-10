@@ -80,12 +80,45 @@ def test_update_terminal_status_sets_completed_at():
         assert t["completed_at"] is not None
 
 
-def test_update_back_from_terminal_clears_completed_at():
+def test_update_terminal_is_frozen_no_resurrection():
+    """A finished/cancelled task can't be silently revived via update —
+    reopening means creating a new task. (Previously legal; a revived
+    task would re-anchor a stale intent into the assignee's CLAUDE.md.)"""
+    with isolated_env():
+        for terminal in ("已完成", "已取消"):
+            tid = tasks.create("w", "x")
+            tasks.update(tid, status=terminal)
+            for target in ("待处理", "进行中"):
+                try:
+                    tasks.update(tid, status=target)
+                except ValueError as e:
+                    assert "illegal transition" in str(e)
+                    assert "terminal" in str(e)
+                else:
+                    raise AssertionError(f"{terminal} → {target} should raise")
+            assert tasks.get(tid)["status"] == terminal
+
+
+def test_update_same_status_is_idempotent_noop():
+    """Re-asserting the current status is tolerated (idempotent retries)
+    and doesn't refresh completed_at."""
     with isolated_env():
         tid = tasks.create("w", "x")
         tasks.update(tid, status="已完成")
-        tasks.update(tid, status="进行中")
-        assert tasks.get(tid)["completed_at"] is None
+        stamp = tasks.get(tid)["completed_at"]
+        assert tasks.update(tid, status="已完成") is True
+        assert tasks.get(tid)["completed_at"] == stamp
+
+
+def test_update_nonstatus_fields_still_editable_on_terminal():
+    """Freezing terminals only constrains STATUS — bookkeeping edits
+    (title / description / assignee) stay allowed on finished tasks."""
+    with isolated_env():
+        tid = tasks.create("w", "x")
+        tasks.update(tid, status="已完成")
+        assert tasks.update(tid, title="x (归档备注)") is True
+        assert tasks.get(tid)["title"] == "x (归档备注)"
+        assert tasks.get(tid)["status"] == "已完成"
 
 
 def test_update_only_changes_specified_fields():
