@@ -238,6 +238,24 @@ def test_task_approve_done():
         assert tasks.get("T-1")["status"] == "已完成"
 
 
+def test_task_approve_note_reaches_receipt_and_audit():
+    """A1: the verdict must ride the gated channel — assignee receipt and
+    audit row both carry `--note`, and the task's approval_note holds it
+    for the anchor to surface."""
+    with isolated_env():
+        _make_in_progress()
+        run_cli(["task", "pause", "T-1", "--note", "第三行写什么？"])
+        rc, _, _ = run_cli(["task", "approve", "T-1",
+                            "--note", "写鱼香肉丝"])
+        assert rc == 0
+        assert tasks.get("T-1")["approval_note"] == "写鱼香肉丝"
+        receipts = [m for m in local_facts.list_messages("w")
+                    if m["task_id"] == "T-1"]
+        assert any("写鱼香肉丝" in m["content"] for m in receipts)
+        logs = local_facts.list_logs("w")
+        assert any("写鱼香肉丝" in r["content"] for r in logs)
+
+
 def test_task_approve_non_suspended_returns_one():
     with isolated_env():
         _make_in_progress()

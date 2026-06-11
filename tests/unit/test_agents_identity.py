@@ -123,6 +123,10 @@ def test_team_principles_baked_into_both_templates():
         assert "--note" in text                   # ② pause must carry context
         assert "approve --done" in text           # ② don't revive finished work
         assert "自关任务必须同步回报" in text       # ⑤ self-close → report manager
+        # regression smoke A1/A2 (2026-06-11): verdict rides the state
+        # machine, and the resumed worker verifies it before acting
+        assert "裁决了什么必须随 --note 走状态机" in text
+        assert "绝不允许脑补" in text
 
 
 def test_team_principles_survive_in_native_memory_projection():
@@ -685,6 +689,37 @@ def test_refresh_native_memory_writes_for_codex():
         path = Path(CodexCliAdapter().native_memory_path("worker_codex"))
         assert path.is_file()
         assert path.name == "AGENTS.md"
+
+
+def test_anchor_surfaces_pending_question_while_suspended():
+    """A suspended task's anchor line carries the pending question — the
+    approver context must reach the worker's always-loaded view too."""
+    team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
+                                      "role": "员工"}}}
+    with isolated_env(team=team):
+        iid = tasks.create_intent("做个页面")
+        tid = tasks.create("worker_cc", "活", intent_id=iid)
+        tasks.update(tid, status="进行中")
+        tasks.pause(tid, approval_note="第三行写什么？")
+        text = identity._render_intent_anchor("worker_cc")
+    assert "待决问题：第三行写什么？" in text
+
+
+def test_anchor_surfaces_verdict_after_approve_note():
+    """A1 regression: after approve --note, the resumed task's anchor must
+    carry the VERDICT — a worker re-injected mid-race must see what was
+    decided, not just its own old question."""
+    team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
+                                      "role": "员工"}}}
+    with isolated_env(team=team):
+        iid = tasks.create_intent("做个页面")
+        tid = tasks.create("worker_cc", "活", intent_id=iid)
+        tasks.update(tid, status="进行中")
+        tasks.pause(tid, approval_note="第三行写什么？")
+        tasks.approve(tid, note="写鱼香肉丝")
+        text = identity._render_intent_anchor("worker_cc")
+    assert "最近裁决：写鱼香肉丝" in text
+    assert "第三行写什么" not in text     # verdict replaced the question
 
 
 def test_write_native_memory_failure_warns_not_silent():

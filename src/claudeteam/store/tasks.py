@@ -237,9 +237,18 @@ def pause(task_id: str, *, awaiting: str = "user",
         return True
 
 
-def approve(task_id: str, *, done: bool = False) -> bool:
+def approve(task_id: str, *, done: bool = False, note: str = "") -> bool:
     """需审批 → 进行中 (continue) or 已完成 (done=True). Returns False unless
-    the task is currently 需审批 — guarding the gate from both sides."""
+    the task is currently 需审批 — guarding the gate from both sides.
+
+    `note` carries the VERDICT (what the boss actually decided), symmetric
+    with reject's `feedback`. It replaces the pending question in
+    `approval_note` so the resumed task records what was decided, not just
+    that a decision happened — regression smoke A1 (2026-06-11): boss
+    approved '鱼香肉丝' but the gate only relayed '已批准·继续'; the worker
+    resumed from an anchor holding the question alone and invented its own
+    answer. Empty note keeps the historical clear-on-approve behavior.
+    """
     with _locked():
         data = _load()
         task = _find(data, task_id)
@@ -247,7 +256,7 @@ def approve(task_id: str, *, done: bool = False) -> bool:
             return False
         _set_status(task, "已完成" if done else "进行中")
         task["awaiting"] = ""
-        task["approval_note"] = ""
+        task["approval_note"] = note
         _save(data)
         return True
 

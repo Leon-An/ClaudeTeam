@@ -93,8 +93,12 @@ _TEAM_PRINCIPLES = """\
    `claudeteam task pause <T-n> --note "<待决问题>"`（进行中 → 需审批）挂起等批，
    **`--note` 必须带**——审批请求进的是收件箱，没有 note 批的人只看到
    "T-n 需审批"，不知道要拍什么板。老板批了走 `claudeteam task approve
-   <T-n>`、打回走 `claudeteam task reject`。**审批时活已经完工就用
-   `approve --done` 直接收口**，别批回 进行中 留一条实际已完工的活任务挂着。
+   <T-n> --note "<裁决内容>"`——**裁决了什么必须随 --note 走状态机**，别靠
+   群聊/自由文本接力（会输给恢复时序）。打回走 `claudeteam task reject`。
+   **审批时活已经完工就用 `approve --done` 直接收口**，别批回 进行中 留一条
+   实际已完工的活任务挂着。**被批回继续的人：动手前先核对裁决内容**（收件箱
+   回执或 `task get <T-n>` 的最近裁决）——锚点里可能只有你挂起时的问题；
+   老板没给的决定**绝不允许脑补**，查不到裁决就再问一次。
    **别用一句“好的我等你确认”代替状态流转**——口头确认不是状态机。
 3. **老板原话逐字保真、不漂移**：意图记录里的 `raw_text` 永远逐字保留、绝不
    改写/总结/翻译；它会锚进你的 CLAUDE.md，`/compact` 后仍能逐字复原。任何
@@ -434,6 +438,13 @@ def _render_intent_anchor(agent: str) -> str:
     agent's non-terminal (进行中 / 需审批) tasks that back-link an intent.
     Empty string when there's no such task — no section, no noise.
 
+    Each task also surfaces its `approval_note` when present: the pending
+    question while suspended (需审批), the latest verdict after
+    approve --note / reject feedback (进行中). Regression smoke A1
+    (2026-06-11): a worker resumed from an anchor holding only its own
+    pending question and invented the answer the boss never gave — the
+    anchor must carry what was DECIDED, not just what was asked.
+
     Must never raise: this feeds the spawn / native-memory path, and a
     throw here would break the agent's whole wake. Any store hiccup → "".
     """
@@ -442,11 +453,17 @@ def _render_intent_anchor(agent: str) -> str:
         active = [t for t in tasks.list_tasks(assignee=agent)
                   if t.get("status") in ("进行中", "需审批") and t.get("intent_id")]
         anchors: dict[str, tuple[str, list[str]]] = {}
+        notes: list[str] = []
         for t in active:
             intent = tasks.get_intent(t["intent_id"])
             raw = (intent or {}).get("raw_text")
             if raw:
                 anchors.setdefault(intent["id"], (raw, []))[1].append(t["id"])
+            note = (t.get("approval_note") or "").strip()
+            if note:
+                label = ("待决问题" if t.get("status") == "需审批"
+                         else "最近裁决")
+                notes.append(f"　↳ {t['id']} {label}：{note}")
     except Exception:
         return ""
     if not anchors:
@@ -461,6 +478,7 @@ def _render_intent_anchor(agent: str) -> str:
     ]
     for iid, (raw, tids) in anchors.items():
         lines.append(f"- **{iid}**（{'/'.join(tids)}）：{raw}")
+    lines.extend(notes)
     return "\n".join(lines)
 
 

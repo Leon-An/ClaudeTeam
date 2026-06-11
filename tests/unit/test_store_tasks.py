@@ -280,6 +280,32 @@ def test_approve_done_marks_complete():
         assert t["completed_at"] is not None
 
 
+def test_approve_note_carries_verdict():
+    """approve(note=) must persist the VERDICT into approval_note —
+    symmetric with reject's feedback. Regression smoke A1: a worker
+    resumed from a question-only anchor and invented the answer the
+    boss never gave; the decision content must ride the state machine,
+    not a free-text relay."""
+    with isolated_env():
+        tid = tasks.create("w", "t")
+        tasks.update(tid, status="进行中")
+        tasks.pause(tid, approval_note="第三行写什么？")
+        assert tasks.approve(tid, note="写鱼香肉丝") is True
+        t = tasks.get(tid)
+        assert t["status"] == "进行中"
+        assert t["approval_note"] == "写鱼香肉丝"     # verdict replaces question
+
+
+def test_approve_without_note_keeps_clear_behavior():
+    """Empty note preserves the historical clear-on-approve semantics."""
+    with isolated_env():
+        tid = tasks.create("w", "t")
+        tasks.update(tid, status="进行中")
+        tasks.pause(tid, approval_note="要不要加第三行")
+        assert tasks.approve(tid) is True
+        assert tasks.get(tid)["approval_note"] == ""
+
+
 def test_reject_rework_keeps_feedback():
     with isolated_env():
         tid = tasks.create("w", "t")

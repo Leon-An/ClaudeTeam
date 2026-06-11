@@ -28,7 +28,7 @@ USAGE = (
     "  claudeteam task get <id>\n"
     "  claudeteam task done <id>\n"
     "  claudeteam task pause <id> [--note <why>] [--to <who>] [--by <agent>]\n"
-    "  claudeteam task approve <id> [--done]\n"
+    "  claudeteam task approve <id> [--done] [--note <裁决内容>]\n"
     "  claudeteam task reject <id> <feedback> [--cancel]\n"
     "  claudeteam task intent create <raw...> [--src <msg_id>] [--key <points>]\n"
     "  claudeteam task intent get <I-n>"
@@ -206,16 +206,22 @@ def _cmd_pause(rest: list[str]) -> int:
 
 def _cmd_approve(rest: list[str]) -> int:
     done = pop_bool_flag(rest, "--done")
+    note = pop_flag(rest, "--note") or ""
     if len(rest) < 1:
         return usage_error(USAGE)
     tid = rest[0]
-    if not tasks.approve(tid, done=done):
+    if not tasks.approve(tid, done=done, note=note):
         return error_exit(f"❌ cannot approve {tid} (not 需审批)")
     t = tasks.get(tid)
+    # Thread the verdict into the audit row and the assignee receipt so
+    # "what was decided" travels the same gated channel as "decided" —
+    # not a free-text relay that can lose the race against a worker
+    # resuming from a question-only anchor (regression smoke A1).
+    suffix = f": {note}" if note else ""
     local_facts.append_log(t["assignee"], "task_transition",
-                           f"{tid} 需审批→{t['status']} (approved)", ref=tid)
+                           f"{tid} 需审批→{t['status']} (approved){suffix}", ref=tid)
     local_facts.append_message(t["assignee"], "user",
-                               f"{tid} 已批准{'并完成' if done else '·继续'}",
+                               f"{tid} 已批准{'并完成' if done else '·继续'}{suffix}",
                                task_id=tid)
     _refresh_anchor(t["assignee"])
     print(f"✅ approved {tid} → {t['status']}")
