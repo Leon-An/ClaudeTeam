@@ -263,6 +263,8 @@ def _ensure_claude_agent_home(agent: str) -> None:
 # purpose: its adapter does NOT set HOME=<agent_home> (Plan B keeps cwd=repo
 # with no native file), so the pane already inherits the operator's
 # ~/.kimi/config.toml — there is nothing to isolate and nothing to seed.
+# (expert K3 confirmed in the prod container: worker_kimi has no agent-home
+# at all.) If kimi ever gains HOME isolation, add its seed entry here.
 _CLI_CRED_SEEDS: dict[str, tuple[str, str | None]] = {
     "codex":  (".codex/auth.json", None),
     "gemini": (".gemini/oauth_creds.json", "GEMINI_API_KEY"),
