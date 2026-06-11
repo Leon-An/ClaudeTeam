@@ -37,6 +37,12 @@ class GeminiCliAdapter(CliAdapter):
         # the team/argv model — so render the source, not a stale alias.
         return "gemini 自身配置 (env/config)"
 
+    def native_memory_reloads(self) -> bool:
+        # gemini feeds GEMINI.md into every prompt and reloads it on /memory
+        # refresh, so an on-disk anchor rewrite reaches the running agent —
+        # the only non-claude CLI of the four that doesn't need a re-inject.
+        return True
+
     def native_memory_path(self, agent: str) -> str:
         # gemini loads ~/.gemini/GEMINI.md into every prompt and re-reads it
         # on /memory refresh, so the anchor survives the CLI's compaction —

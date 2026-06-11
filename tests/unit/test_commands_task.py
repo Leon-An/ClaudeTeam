@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import io
 
-from helpers import isolated_env, run_cli
+from helpers import isolated_env, run_cli, attr_patch
+from claudeteam.commands import task as task_cmd
+from claudeteam.runtime import tmux as tmux_mod, wake as wake_mod
 from claudeteam.store import local_facts, tasks
 
 
@@ -359,3 +361,103 @@ def test_task_update_cannot_force_into_suspend_via_cli():
         assert rc == 1
         assert "需审批" in err
         assert tasks.get("T-1")["status"] == "进行中"
+
+
+# ── reidentify fallback (G) ───────────────────────────────────────
+# _refresh_anchor calls _reidentify_stale_anchor for every affected
+# assignee. For CLIs that re-read their native file mid-session
+# (claude/gemini) it's a no-op; for the rest (codex/qwen/kimi) it
+# pushes init_prompt into an *idle* pane so the live intent anchor
+# reaches an agent that won't re-read disk. Everything is best-effort:
+# no failure mode may bubble up and fail the triggering task command.
+
+
+def _capture_injects():
+    """Return (sink, fake_inject) recording every tmux.inject call."""
+    sink: list[dict] = []
+
+    def fake_inject(target, text, *, submit_keys=None):
+        sink.append({"target": target, "text": text, "submit_keys": submit_keys})
+
+    return sink, fake_inject
+
+
+def test_reidentify_stale_anchor_skips_reloading_cli():
+    """claude-code re-reads its native file after /compact, so the disk
+    rewrite already reaches it — no pane inject."""
+    with isolated_env(team={"agents": {"worker_cc": {"cli": "claude-code"}}}):
+        sink, fake_inject = _capture_injects()
+        with attr_patch(tmux_mod, inject=fake_inject,
+                        has_session=lambda s: True,
+                        has_window=lambda t: True), \
+             attr_patch(wake_mod, is_ready=lambda t, a: True,
+                        is_busy=lambda t, a: False):
+            task_cmd._reidentify_stale_anchor("worker_cc")
+        assert sink == []
+
+
+def test_reidentify_stale_anchor_injects_into_idle_non_reloading_pane():
+    """codex does NOT re-read mid-session → an idle ready pane gets the
+    init prompt re-injected (carrying the live anchor inline)."""
+    with isolated_env(team={"agents": {"worker_codex": {"cli": "codex-cli"}}}):
+        sink, fake_inject = _capture_injects()
+        with attr_patch(tmux_mod, inject=fake_inject,
+                        has_session=lambda s: True,
+                        has_window=lambda t: True), \
+             attr_patch(wake_mod, is_ready=lambda t, a: True,
+                        is_busy=lambda t, a: False):
+            task_cmd._reidentify_stale_anchor("worker_codex")
+        assert len(sink) == 1
+        assert sink[0]["target"].window == "worker_codex"
+        assert sink[0]["text"]            # non-empty init prompt
+        assert sink[0]["submit_keys"]     # codex submit keys threaded through
+
+
+def test_reidentify_stale_anchor_skips_busy_pane():
+    """A busy pane (mid-turn) must never be derailed — idle gate refuses."""
+    with isolated_env(team={"agents": {"worker_codex": {"cli": "codex-cli"}}}):
+        sink, fake_inject = _capture_injects()
+        with attr_patch(tmux_mod, inject=fake_inject,
+                        has_session=lambda s: True,
+                        has_window=lambda t: True), \
+             attr_patch(wake_mod, is_ready=lambda t, a: True,
+                        is_busy=lambda t, a: True):
+            task_cmd._reidentify_stale_anchor("worker_codex")
+        assert sink == []
+
+
+def test_reidentify_stale_anchor_skips_when_not_ready():
+    """No ready marker (dormant / dead pane) → nothing to inject into."""
+    with isolated_env(team={"agents": {"worker_codex": {"cli": "codex-cli"}}}):
+        sink, fake_inject = _capture_injects()
+        with attr_patch(tmux_mod, inject=fake_inject,
+                        has_session=lambda s: True,
+                        has_window=lambda t: True), \
+             attr_patch(wake_mod, is_ready=lambda t, a: False,
+                        is_busy=lambda t, a: False):
+            task_cmd._reidentify_stale_anchor("worker_codex")
+        assert sink == []
+
+
+def test_reidentify_stale_anchor_best_effort_when_no_session():
+    """No tmux session yet (agents not started) → silent no-op, no raise."""
+    with isolated_env(team={"agents": {"worker_codex": {"cli": "codex-cli"}}}):
+        sink, fake_inject = _capture_injects()
+        with attr_patch(tmux_mod, inject=fake_inject,
+                        has_session=lambda s: False,
+                        has_window=lambda t: True), \
+             attr_patch(wake_mod, is_ready=lambda t, a: True,
+                        is_busy=lambda t, a: False):
+            task_cmd._reidentify_stale_anchor("worker_codex")
+        assert sink == []
+
+
+def test_reidentify_stale_anchor_swallows_unknown_agent():
+    """A ghost agent (not in team.json) makes adapter_for_agent raise
+    KeyError; best-effort contract swallows it so the task command that
+    triggered the refresh still succeeds."""
+    with isolated_env(team={"agents": {"worker_codex": {"cli": "codex-cli"}}}):
+        sink, fake_inject = _capture_injects()
+        with attr_patch(tmux_mod, inject=fake_inject):
+            task_cmd._reidentify_stale_anchor("ghost")   # must not raise
+        assert sink == []

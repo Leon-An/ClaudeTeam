@@ -9,6 +9,9 @@ class _ClaudeFake:
     def ready_markers(self):
         return ["bypass permissions on", "? for shortcuts"]
 
+    def busy_markers(self):
+        return ["esc to interrupt", "⣾"]
+
 
 def _capturer(text_per_call: list[str]):
     """Return a capture_pane fake that yields one text per call."""
@@ -35,6 +38,21 @@ def test_is_ready_false_when_pane_blank():
     target = tmux.Target("S", "manager")
     capture = _capturer(["$ "])
     assert wake.is_ready(target, _ClaudeFake(), capture=capture) is False
+
+
+# ── is_busy ──────────────────────────────────────────────────────
+
+
+def test_is_busy_true_when_pane_shows_busy_marker():
+    target = tmux.Target("S", "worker")
+    capture = _capturer(["thinking…\nesc to interrupt\n"])
+    assert wake.is_busy(target, _ClaudeFake(), capture=capture) is True
+
+
+def test_is_busy_false_at_quiet_ready_prompt():
+    target = tmux.Target("S", "worker")
+    capture = _capturer(["bypass permissions on\n>"])
+    assert wake.is_busy(target, _ClaudeFake(), capture=capture) is False
 
 
 # ── wake_if_dormant ──────────────────────────────────────────────

@@ -144,6 +144,18 @@ def test_claude_display_model_is_verbatim():
     assert ClaudeCodeAdapter().display_model("") == "默认"
 
 
+def test_native_memory_reloads_only_claude_and_gemini():
+    """The mid-session disk-reload capability gates the G reidentify
+    fallback: claude (re-reads after /compact) + gemini (every-prompt +
+    /memory reload) → True; codex/qwen/kimi load once at startup → False,
+    so they need a reidentify re-inject to pick up a fresh anchor."""
+    assert ClaudeCodeAdapter().native_memory_reloads() is True
+    assert GeminiCliAdapter().native_memory_reloads() is True
+    assert CodexCliAdapter().native_memory_reloads() is False
+    assert QwenCodeAdapter().native_memory_reloads() is False
+    assert KimiCodeAdapter().native_memory_reloads() is False
+
+
 def test_kimi_has_no_native_memory_file_by_design():
     """E/Plan-B: kimi loads memory only via the git-root→cwd chain, so
     isolating a per-agent AGENTS.md would force the pane's cwd off the

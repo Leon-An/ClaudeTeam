@@ -36,10 +36,18 @@ USAGE = (
 
 
 def _refresh_anchor(*agents: str) -> None:
-    """Re-project the on-disk CLAUDE.md anchor for the affected assignee(s)
-    after a task transition, so an already-online worker doesn't keep a
-    stale (or completed-task) anchor across /compact. Best-effort + only
-    rewrites when the projection changed (see identity.refresh_native_memory).
+    """Re-project the on-disk native-memory anchor for the affected
+    assignee(s) after a task transition, so an already-online worker
+    doesn't keep a stale (or completed-task) anchor across /compact.
+    Best-effort + only rewrites when the projection changed (see
+    identity.refresh_native_memory).
+
+    The disk rewrite only reaches the *running* agent for CLIs that
+    re-read their native file mid-session (claude-code, gemini). CLIs that
+    load it once at startup (codex/qwen/kimi) won't see the new anchor, so
+    for them we additionally push a best-effort reidentify into an idle
+    pane — see `_reidentify_stale_anchor`.
+
     Lazy import mirrors the registry's cycle-avoidance discipline."""
     from claudeteam.agents import identity
     seen: set[str] = set()
@@ -47,6 +55,41 @@ def _refresh_anchor(*agents: str) -> None:
         if a and a not in seen:
             seen.add(a)
             identity.refresh_native_memory(a)
+            _reidentify_stale_anchor(a)
+
+
+def _reidentify_stale_anchor(agent: str) -> None:
+    """For a CLI whose native memory file is NOT re-read mid-session
+    (codex/qwen/kimi), the disk anchor rewrite never reaches the running
+    agent — so re-inject the identity init prompt, which carries the live
+    intent anchor inline. Only into an *idle* pane (ready and not busy) so
+    we never derail an agent mid-turn.
+
+    Entirely best-effort: any failure (no tmux session, no pane, busy
+    pane, inject error, unknown agent/adapter) is swallowed so an anchor
+    refresh can never make the triggering `task` command fail.
+
+    Note: an agent running `claudeteam task done` on *itself* leaves its
+    own pane busy (it's mid-command), so the idle gate skips it — no
+    self-injection, no special case needed. Duplicate wakes (a task change
+    that also delivered a message) are tolerated on purpose: re-waking is
+    safer than a missed anchor, and dedup would need cross-process state."""
+    try:
+        from claudeteam.agents import adapter_for_agent, identity
+        from claudeteam.runtime import config, tmux, wake
+        adapter = adapter_for_agent(agent)
+        if adapter.native_memory_reloads():
+            return  # claude/gemini re-read the disk anchor themselves
+        session = config.session_name()
+        target = tmux.Target(session, agent)
+        if not tmux.has_session(session) or not tmux.has_window(target):
+            return
+        if not wake.is_ready(target, adapter) or wake.is_busy(target, adapter):
+            return  # idle gate: only inject at a quiet ready prompt
+        tmux.inject(target, identity.init_prompt(agent),
+                    submit_keys=adapter.submit_keys())
+    except Exception:
+        pass
 
 
 def _fmt_task(t: dict) -> list[str]:

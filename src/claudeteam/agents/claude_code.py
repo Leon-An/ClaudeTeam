@@ -108,6 +108,11 @@ class ClaudeCodeAdapter(CliAdapter):
     def process_name(self) -> str:
         return "claude"
 
+    def native_memory_reloads(self) -> bool:
+        # claude re-reads ~/.claude/CLAUDE.md after /compact, so an on-disk
+        # anchor rewrite reaches the running agent without a re-inject.
+        return True
+
     def native_memory_path(self, agent: str) -> str | None:
         # ~/.claude/CLAUDE.md inside the agent's isolated HOME. claude
         # loads this as user-level memory on every session start and

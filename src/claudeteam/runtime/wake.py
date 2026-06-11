@@ -40,6 +40,15 @@ def is_ready(target: tmux.Target, adapter: CliAdapter, *,
     return _has_marker(target, adapter.ready_markers(), capture)
 
 
+def is_busy(target: tmux.Target, adapter: CliAdapter, *,
+            capture: Callable | None = None) -> bool:
+    """True if the pane shows one of the adapter's busy markers (spinner,
+    "esc to interrupt", boot phase, …). Pairs with `is_ready` to detect an
+    *idle* pane (ready and not busy) for low-priority best-effort injects
+    that must not derail an agent mid-turn."""
+    return _has_marker(target, adapter.busy_markers(), capture)
+
+
 # Onboarding dialogs claude pops on fresh ~/.claude.json (ephemeral
 # per-container since the host bind-mount was dropped). Each dialog
 # blocks the `bypass permissions on` ready marker, so we auto-press
