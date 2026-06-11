@@ -365,3 +365,42 @@ def test_ensure_claude_agent_home_overwrites_stale_creds_each_call():
         # Second call must replace the file with v2's content
         assert "v2-tok" in cred.read_text(), \
             "stale snapshot not overwritten on re-provision"
+
+
+# ── _ensure_agent_home (wave2 A: per-agent HOME for every CLI) ────
+
+
+def test_ensure_agent_home_creates_dir_for_non_claude_cli():
+    """Non-claude CLIs (gemini/qwen/kimi/codex) get their per-agent HOME
+    root created so the spawn's `HOME=<agent_home>` has a real isolated
+    dir to land config / cache / native-memory into, instead of racing
+    the shared operator HOME across panes."""
+    from claudeteam.agents import claude_code
+    team = {"agents": {"worker_gem": {"cli": "gemini-cli"}}}
+    with isolated_env(team=team), attr_patch(claude_code, _DATA_WRITABLE=False):
+        lifecycle._ensure_agent_home("worker_gem", "gemini-cli")
+        home = Path(claude_code.agent_home("worker_gem"))
+        assert home.is_dir(), "per-agent HOME not created for non-claude CLI"
+
+
+def test_ensure_agent_home_dispatches_claude_to_full_seeding():
+    """claude-code routes through `_ensure_claude_agent_home` (full
+    keychain/settings/trust seeding); every other CLI must NOT — it only
+    needs the home dir. Pin the dispatch so a future adapter doesn't
+    accidentally inherit claude's keychain provisioning path."""
+    calls = []
+    with attr_patch(lifecycle, _ensure_claude_agent_home=calls.append):
+        lifecycle._ensure_agent_home("manager", "claude-code")
+        lifecycle._ensure_agent_home("worker_gem", "gemini-cli")
+    assert calls == ["manager"], \
+        f"expected claude-only delegation to full seeding, got {calls}"
+
+
+def test_ensure_agent_home_non_claude_never_raises_on_unwritable_path():
+    """Best-effort contract: an unwritable agent_home must be swallowed,
+    not bubbled into provision_pane — the init-prompt memory injection is
+    still a working fallback even when the native HOME can't be made."""
+    from claudeteam.agents import claude_code
+    with attr_patch(claude_code, agent_home=lambda a: "/proc/cannot/mkdir/here"):
+        # Must not raise despite the unwritable target.
+        lifecycle._ensure_agent_home("worker_gem", "gemini-cli")

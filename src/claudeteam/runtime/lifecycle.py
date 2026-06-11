@@ -250,6 +250,33 @@ def _ensure_claude_agent_home(agent: str) -> None:
         _mark_project_trusted(claude_json, Path.cwd())
 
 
+def _ensure_agent_home(agent: str, cli: str) -> None:
+    """Provision the per-agent HOME for any CLI before spawn.
+
+    claude-code gets the full seeding (keychain creds, settings.json,
+    ~/.claude.json, folder trust) via `_ensure_claude_agent_home`. Every
+    other CLI just needs its per-agent HOME *directory* to exist so the
+    spawn's `HOME=<agent_home>` (and codex's `CODEX_HOME`) lands the CLI's
+    own config / cache / native-memory file in an isolated dir instead of
+    racing the operator HOME across panes. The native memory file itself
+    (AGENTS.md / GEMINI.md / QWEN.md) is written by `identity.write` via
+    `atomic_write_text`, which creates its own parent dir — so all we owe
+    here is the home root.
+
+    Best-effort: an unwritable path must not fail the whole provision (the
+    init-prompt memory injection still delivers identity + digest). Auth-
+    material seeding for the non-claude CLIs (OAuth caches under HOME) is a
+    deploy-side concern, intentionally not provisioned here."""
+    if cli == "claude-code":
+        _ensure_claude_agent_home(agent)
+        return
+    from claudeteam.agents.claude_code import agent_home as _agent_home
+    try:
+        Path(_agent_home(agent)).mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+
+
 def pane_env_prefix() -> str:
     """Build a shell env prefix that, prepended to a spawn_cmd, makes the
     spawned process inherit CLAUDETEAM_STATE_DIR and the Feishu env so
@@ -326,8 +353,7 @@ def provision_pane(agent: str, target: tmux.Target) -> str:
         return LAZY
     if cli == "codex-cli":
         ensure_workdir_trusted(Path.cwd())
-    if cli == "claude-code":
-        _ensure_claude_agent_home(agent)
+    _ensure_agent_home(agent, cli)
     try:
         adapter = get_adapter(cli)
     except KeyError as e:
