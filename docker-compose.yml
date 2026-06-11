@@ -19,6 +19,10 @@ services:
   claudeteam:
     build: .
     image: claudeteam:dev
+    # tini as PID 1 reaps orphaned <defunct> lark-cli/claudeteam zombies
+    # left by router self-respawn churn (macOS WS silent-drop loop).
+    # Without a reaper, PID 1 (`sleep infinity`) never wait()s them.
+    init: true
     volumes:
       # Bind-mount source RW so Python edits hot-reload without
       # `docker compose build`. Only rebuild for Dockerfile / deps
