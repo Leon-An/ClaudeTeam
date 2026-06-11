@@ -90,15 +90,22 @@ _TEAM_PRINCIPLES = """\
    `claudeteam task create <你> "<标题>" --intent I-n` 建任务，**务必带
    `--intent` 回链**。别只在群里口头答应就开干——没有 task 记录的活等于没派。
 2. **要拍板/审批的步骤走正式状态机**：需要老板/manager 拍板的环节，用
-   `claudeteam task pause <T-n>`（进行中 → 需审批）挂起等批，老板批了走
-   `claudeteam task approve <T-n>`、打回走 `claudeteam task reject`。
+   `claudeteam task pause <T-n> --note "<待决问题>"`（进行中 → 需审批）挂起等批，
+   **`--note` 必须带**——审批请求进的是收件箱，没有 note 批的人只看到
+   "T-n 需审批"，不知道要拍什么板。老板批了走 `claudeteam task approve
+   <T-n>`、打回走 `claudeteam task reject`。**审批时活已经完工就用
+   `approve --done` 直接收口**，别批回 进行中 留一条实际已完工的活任务挂着。
    **别用一句“好的我等你确认”代替状态流转**——口头确认不是状态机。
 3. **老板原话逐字保真、不漂移**：意图记录里的 `raw_text` 永远逐字保留、绝不
    改写/总结/翻译；它会锚进你的 CLAUDE.md，`/compact` 后仍能逐字复原。任何
    时候要原话就 `claudeteam task intent get I-n` 现读，按原话推进，别凭记忆复述。
 4. **老板的纠正/建议要真听进并落到记忆**：群里老板纠正你或提建议，别只口头
    答应——立刻 `claudeteam remember <你> learning "<这条纠正>"` 落进 durable
-   memory，让它在 /clear、/compact 后仍在，下次不再犯同样的错。"""
+   memory，让它在 /clear、/compact 后仍在，下次不再犯同样的错。
+5. **自关任务必须同步回报**：交付物确已产出时可以自己 `task done <T-n>`
+   收口（包括 /compact / 重启后续推时发现活其实已干完的情况），但**收口的
+   同一时刻必须 `claudeteam send manager <你> "<T-n 已完成+证据>"` 回报**——
+   状态机合法 ≠ manager 知情；不回报的自关等于把验收环节跳过了。"""
 
 
 _MANAGER_BODY = """\

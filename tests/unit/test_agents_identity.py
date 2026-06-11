@@ -93,11 +93,12 @@ def test_render_warns_against_cd_in_both_templates():
 
 
 def test_team_principles_baked_into_both_templates():
-    """Every agent is born carrying the 4 team working principles:
+    """Every agent is born carrying the 5 team working principles:
     intent→task→--intent backlink, formal approval state machine (not a
-    verbal ok), verbatim boss-intent that survives /compact, and logging
-    boss corrections to durable memory. Boss-mandated so a fresh worker
-    follows the tasks-feature discipline without being told."""
+    verbal ok), verbatim boss-intent that survives /compact, logging
+    boss corrections to durable memory, and report-back on self-closing
+    a finished task. Boss-mandated so a fresh worker follows the
+    tasks-feature discipline without being told."""
     for agent in ("manager", "w"):
         text = identity.render(agent, role="r", cli="c", model="m")
         assert "## 团队原则" in text
@@ -107,6 +108,10 @@ def test_team_principles_baked_into_both_templates():
         assert "task intent get I-n" in text      # ③ verbatim re-read
         assert "/compact" in text
         assert "remember <你> learning" in text   # ④ corrections → memory
+        # smoke round 2026-06-11 discipline gaps (tester findings):
+        assert "--note" in text                   # ② pause must carry context
+        assert "approve --done" in text           # ② don't revive finished work
+        assert "自关任务必须同步回报" in text       # ⑤ self-close → report manager
 
 
 def test_team_principles_survive_in_native_memory_projection():
