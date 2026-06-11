@@ -144,6 +144,16 @@ def test_claude_display_model_is_verbatim():
     assert ClaudeCodeAdapter().display_model("") == "默认"
 
 
+def test_kimi_has_no_native_memory_file_by_design():
+    """E/Plan-B: kimi loads memory only via the git-root→cwd chain, so
+    isolating a per-agent AGENTS.md would force the pane's cwd off the
+    repo. We deliberately keep cwd=repo and skip the native file — kimi
+    relies on the init-prompt anchor (+ reidentify fallback) instead.
+    Pin it so a future change can't silently flip kimi to a colliding or
+    cwd-moving native path without revisiting the rationale."""
+    assert KimiCodeAdapter().native_memory_path("worker_kimi") is None
+
+
 def test_kimi_spawn_uses_yolo_flag_and_disable_update():
     cmd = KimiCodeAdapter().spawn_cmd("worker_kimi", "")
     assert "kimi --yolo" in cmd

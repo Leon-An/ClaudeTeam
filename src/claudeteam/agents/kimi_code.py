@@ -14,6 +14,24 @@ class KimiCodeAdapter(CliAdapter):
         # own config selects, so don't label the agent with the team alias.
         return "kimi 自身配置"
 
+    def native_memory_path(self, agent: str) -> str | None:
+        # Deliberately no native memory file (stays the base None).
+        #
+        # Unlike codex/gemini/qwen, kimi has no HOME-global memory file —
+        # it only loads AGENTS.md by walking the git-root→cwd chain. Giving
+        # each pane an isolated, non-colliding AGENTS.md would mean moving
+        # the pane's cwd off the real repo into a per-agent dir (+ --add-dir
+        # the repo back), which is a real UX regression for a coding agent
+        # (relative paths / ls / git default to an empty home).
+        #
+        # So kimi keeps cwd = repo and skips the native file. The intent
+        # anchor still reaches it via the one-shot init prompt; kimi writes
+        # that startup-rendered system prompt back into context after its
+        # own /compact, so the anchor survives compaction. Mid-session
+        # task-change refresh is handled by the reidentify fallback shared
+        # with codex/qwen (none of which re-read a disk file either).
+        return None
+
     def ready_markers(self) -> list[str]:
         return [
             "Welcome to Kimi Code CLI",
