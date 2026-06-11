@@ -975,3 +975,59 @@ def test_task_handler_never_writes_to_store():
         slash.dispatch("/task", _ctx())
         after = tasks.list_tasks()
     assert before == after
+
+
+def test_task_kanban_folds_terminal_columns_by_default():
+    """Boss feedback: don't flood the kanban with finished entries. By
+    default 已完成/已取消 render header+count only (▸ 已折叠), their item
+    rows stay hidden, and a footer hint names `/task all` as the expand.
+    Active columns keep full detail."""
+    from helpers import isolated_env
+    from claudeteam.store import tasks
+    team = {"agents": {"worker_cc": {"cli": "claude-code"},
+                       "worker_codex": {"cli": "codex"}}}
+    with isolated_env(team=team):
+        _seed_kanban()
+        tasks.create("worker_cc", "废弃活")                # T-5
+        tasks.update("T-5", status="已取消")
+        reply = slash.dispatch("/task", _ctx())
+    body = reply["body"]["elements"][0]["content"]
+    # terminal columns: count survives, detail rows don't
+    assert "已完成**（1）▸ 已折叠" in body
+    assert "已取消**（1）▸ 已折叠" in body
+    assert "老活" not in body and "T-4" not in body
+    assert "废弃活" not in body and "T-5" not in body
+    # active columns keep full detail
+    assert "重构结账" in body and "写测试" in body
+    # expand affordance is named
+    assert "/task all" in body
+
+
+def test_task_all_expands_terminal_columns():
+    """`/task all` (and `/task 全部`) shows terminal item rows and drops
+    the fold hint — full historical view on demand."""
+    from helpers import isolated_env
+    team = {"agents": {"worker_cc": {"cli": "claude-code"},
+                       "worker_codex": {"cli": "codex"}}}
+    with isolated_env(team=team):
+        _seed_kanban()
+        reply = slash.dispatch("/task all", _ctx())
+        reply_cn = slash.dispatch("/task 全部", _ctx())
+    for r in (reply, reply_cn):
+        body = r["body"]["elements"][0]["content"]
+        assert "老活" in body and "T-4" in body
+        assert "已折叠" not in body
+
+
+def test_task_empty_terminal_columns_render_none_not_fold():
+    """An EMPTY terminal column has nothing to hide — it renders the
+    plain 无 marker, not a fold line (folding zero rows would imply
+    hidden content that doesn't exist)."""
+    from helpers import isolated_env
+    from claudeteam.store import tasks
+    with isolated_env(team={"agents": {"worker_cc": {"cli": "claude-code"}}}):
+        tasks.create("worker_cc", "唯一的活")               # 待处理 only
+        reply = slash.dispatch("/task", _ctx())
+    body = reply["body"]["elements"][0]["content"]
+    assert "已折叠" not in body
+    assert body.count("　无") >= 2     # 已完成 + 已取消 both plain-empty

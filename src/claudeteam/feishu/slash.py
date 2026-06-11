@@ -20,8 +20,10 @@ Supported commands (matches main's 10-command surface):
     /compact [agent]                   inject /compact then schedule reidentify
     /stop <agent>                      send Ctrl-C to agent pane
     /clear <agent>                     /clear + re-init (rehire shape)
-    /task                              read-only kanban of the task store
-                                       (grouped by status; intent back-link)
+    /task [all]                        read-only kanban of the task store
+                                       (grouped by status; intent back-link;
+                                       terminal columns fold to counts unless
+                                       `all`)
 
 Dispatch is a leading-token dict lookup (`/cmd args…` → handler(args, ctx))
 so detection and execution share one path — no per-handler regex preamble.
@@ -159,7 +161,8 @@ _HELP_TEXT = """🆘 ClaudeTeam 自定义斜杠命令（零 LLM，router/hook �
 /compact [agent]         → 群聊无参=压缩 manager；带参压缩指定 agent
 /stop <agent>            → 送 C-c 到 agent 窗口（中断当前动作）
 /clear <agent>           → 送 /clear + 重新入职 init_msg（相当于 rehire）
-/task                    → 任务看板：读 task store 按状态分组（只读）"""
+/task [all]              → 任务看板：按状态分组（只读）；已完成/已取消
+                           默认折叠为计数，加 all 展开明细"""
 
 
 def _handle_help(args: str, ctx: SlashContext) -> dict:
@@ -677,24 +680,39 @@ _TASK_COLUMNS = (
 
 
 def _handle_task(args: str, ctx: SlashContext) -> dict:
-    """/task → read-only kanban of the authoritative task store.
+    """/task [all] → read-only kanban of the authoritative task store.
 
     Reads tasks.json, groups every task by status in `_TASK_COLUMNS`
     order, and lists `id · title · 👤assignee` per row — with the verbatim
     intent back-link (`↳ I-n: …`) when the task carries one, so the boss
     can trace a task to the original ask. Empty columns are marked 无.
 
+    Terminal columns (已完成/已取消) render COLLAPSED by default — header
+    with count only, no item rows — so a long-lived store doesn't bury
+    the live work under dozens of finished entries. `/task all` (or
+    `/task 全部`) expands them. Active columns are never folded: 待处理 /
+    进行中 / 需审批 are exactly what the boss opens the kanban for.
+
     Pure render: never creates/updates/transitions a task. Card turns
-    yellow when anything sits in 需审批 (awaiting the boss), green else.
+    yellow when anything sits in 需审批 (awaiting the boss), green else
+    — folding never affects the color signal (需审批 is never folded).
     """
+    expand = args.strip().lower() in ("all", "全部")
     rows = tasks.list_tasks()
     buckets: dict[str, list[dict]] = {name: [] for name, _ in _TASK_COLUMNS}
     for t in rows:
         buckets.setdefault(t.get("status", ""), []).append(t)
 
+    folded = False
     body_lines: list[str] = []
     for name, glyph in _TASK_COLUMNS:
         group = buckets.get(name, [])
+        fold = (not expand and group
+                and name in tasks.TERMINAL_STATUSES)
+        if fold:
+            body_lines.append(f"{glyph} **{name}**（{len(group)}）▸ 已折叠")
+            folded = True
+            continue
         body_lines.append(f"{glyph} **{name}**（{len(group)}）")
         if not group:
             body_lines.append("　无")
@@ -712,6 +730,9 @@ def _handle_task(args: str, ctx: SlashContext) -> dict:
                 snippet = raw[:24] + ("…" if len(raw) > 24 else "")
                 tail = f": {snippet}" if snippet else ""
                 body_lines.append(f"　　↳ {iid}{tail}")
+    if folded:
+        body_lines.append("")
+        body_lines.append("_（终态条目已折叠为计数，`/task all` 展开明细）_")
 
     if not rows:
         body_lines = ["_(暂无任何 task)_"]
