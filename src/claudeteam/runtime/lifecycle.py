@@ -250,6 +250,69 @@ def _ensure_claude_agent_home(agent: str) -> None:
         _mark_project_trusted(claude_json, Path.cwd())
 
 
+# Per-CLI OAuth/credential file to copy from the operator HOME into the
+# agent's isolated HOME so HOME isolation (Wave 2) doesn't log the CLI out.
+# Keyed by the adapter's process_name() so the package-name aliases
+# (kimi-cli / qwen-cli) collapse onto one entry. Value:
+#   (rel  — path of the cred file under HOME, identical on both sides,
+#    skip_env — env var whose presence means the CLI authenticates by API
+#               key and needs no seeded OAuth file; None = always seed)
+#
+# claude-code is absent — its richer seeding (macOS keychain, ~/.claude.json,
+# folder trust) lives in _ensure_claude_agent_home. kimi is absent on
+# purpose: its adapter does NOT set HOME=<agent_home> (Plan B keeps cwd=repo
+# with no native file), so the pane already inherits the operator's
+# ~/.kimi/config.toml — there is nothing to isolate and nothing to seed.
+_CLI_CRED_SEEDS: dict[str, tuple[str, str | None]] = {
+    "codex":  (".codex/auth.json", None),
+    "gemini": (".gemini/oauth_creds.json", "GEMINI_API_KEY"),
+    "qwen":   (".qwen/oauth_creds.json", "OPENAI_API_KEY"),
+}
+
+
+def _seed_cli_credentials(agent: str, cli: str) -> None:
+    """Copy the operator's OAuth credential file for `cli` into the agent's
+    isolated HOME, so the per-agent `HOME=<agent_home>` (codex: `CODEX_HOME`)
+    doesn't strand the CLI at a fresh, logged-out state dir.
+
+    Best-effort throughout — any of these silently skips, never aborting the
+    provision:
+      • CLI not in `_CLI_CRED_SEEDS` (claude handled elsewhere; kimi not
+        isolated)
+      • the skip-env is set (API-key auth → OAuth file unnecessary)
+      • the operator source file is absent / unreadable (never logged in)
+      • the dest already exists (don't clobber a refreshed per-agent token)
+      • the dest HOME isn't writable
+
+    Only the credential file is touched: codex's per-agent config.toml
+    (written by `ensure_workdir_trusted`) lives beside auth.json and is
+    never overwritten here."""
+    try:
+        adapter = get_adapter(cli)
+    except KeyError:
+        return
+    spec = _CLI_CRED_SEEDS.get(adapter.process_name())
+    if spec is None:
+        return
+    rel, skip_env = spec
+    if skip_env and env_str(skip_env):
+        return
+    from claudeteam.agents.claude_code import agent_home as _agent_home
+    src = Path.home() / rel
+    dst = Path(_agent_home(agent)) / rel
+    if dst.exists() or not _path_readable(src):
+        return
+    try:
+        data = src.read_bytes()
+    except OSError:
+        return
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(data)
+    except OSError:
+        pass
+
+
 def _ensure_agent_home(agent: str, cli: str) -> None:
     """Provision the per-agent HOME for any CLI before spawn.
 
@@ -263,10 +326,13 @@ def _ensure_agent_home(agent: str, cli: str) -> None:
     `atomic_write_text`, which creates its own parent dir — so all we owe
     here is the home root.
 
+    For the HOME-isolated non-claude CLIs we additionally seed the
+    operator's OAuth credential into the isolated HOME (see
+    `_seed_cli_credentials`), otherwise the fresh state dir would leave the
+    CLI logged out.
+
     Best-effort: an unwritable path must not fail the whole provision (the
-    init-prompt memory injection still delivers identity + digest). Auth-
-    material seeding for the non-claude CLIs (OAuth caches under HOME) is a
-    deploy-side concern, intentionally not provisioned here."""
+    init-prompt memory injection still delivers identity + digest)."""
     if cli == "claude-code":
         _ensure_claude_agent_home(agent)
         return
@@ -275,6 +341,7 @@ def _ensure_agent_home(agent: str, cli: str) -> None:
         Path(_agent_home(agent)).mkdir(parents=True, exist_ok=True)
     except OSError:
         pass
+    _seed_cli_credentials(agent, cli)
 
 
 def pane_env_prefix() -> str:
