@@ -104,11 +104,12 @@ def test_render_warns_against_cd_in_both_templates():
 
 
 def test_team_principles_baked_into_both_templates():
-    """Every agent is born carrying the 5 team working principles:
-    intent→task→--intent backlink, formal approval state machine (not a
-    verbal ok), verbatim boss-intent that survives /compact, logging
-    boss corrections to durable memory, and report-back on self-closing
-    a finished task. Boss-mandated so a fresh worker follows the
+    """Every agent is born carrying the 6 team working principles plus the
+    daily-ops quick reference: intent→task→--intent backlink, formal
+    approval state machine (not a verbal ok), verbatim boss-intent that
+    survives /compact, logging boss corrections to durable memory,
+    start-status before working, and report-back on self-closing a
+    finished task. Boss-mandated so a fresh worker follows the
     tasks-feature discipline without being told."""
     for agent in ("manager", "w"):
         text = identity.render(agent, role="r", cli="c", model="m")
@@ -122,11 +123,21 @@ def test_team_principles_baked_into_both_templates():
         # smoke round 2026-06-11 discipline gaps (tester findings):
         assert "--note" in text                   # ② pause must carry context
         assert "approve --done" in text           # ② don't revive finished work
-        assert "自关任务必须同步回报" in text       # ⑤ self-close → report manager
+        assert "自关任务必须同步回报" in text       # ⑥ self-close → report manager
         # regression smoke A1/A2 (2026-06-11): verdict rides the state
         # machine, and the resumed worker verifies it before acting
         assert "裁决了什么必须随 --note 走状态机" in text
         assert "绝不允许脑补" in text
+        # boss 2026-06-12: start-status before working (⑤ — kanban truth
+        # and anchor coverage both depend on it)
+        assert "领活开工先置状态" in text
+        assert "--status 进行中" in text
+        # boss 2026-06-12: high-frequency ops cheat-sheet rides the same
+        # always-loaded projection into all four native memory files
+        assert "## 日常操作速查" in text
+        assert "--to user" in text                # how to address the boss
+        assert "收件人在前" in text                # send arg-order trap
+        assert "claudeteam read <local_id>" in text
 
 
 def test_team_principles_survive_in_native_memory_projection():

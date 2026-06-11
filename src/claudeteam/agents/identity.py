@@ -106,10 +106,27 @@ _TEAM_PRINCIPLES = """\
 4. **老板的纠正/建议要真听进并落到记忆**：群里老板纠正你或提建议，别只口头
    答应——立刻 `claudeteam remember <你> learning "<这条纠正>"` 落进 durable
    memory，让它在 /clear、/compact 后仍在，下次不再犯同样的错。
-5. **自关任务必须同步回报**：交付物确已产出时可以自己 `task done <T-n>`
+5. **领活开工先置状态**：接到带 T-n 的活，动手第一件事是
+   `claudeteam task update T-n --status 进行中`。不置的代价是双重的：
+   防漂移锚点只收 进行中/需审批 的任务——不置状态，老板原话不进你的
+   常驻记忆，你在裸奔干活；同时看板上老板看到的还是"待处理"，
+   状态对老板失真。先置状态，再动手。
+6. **自关任务必须同步回报**：交付物确已产出时可以自己 `task done <T-n>`
    收口（包括 /compact / 重启后续推时发现活其实已干完的情况），但**收口的
    同一时刻必须 `claudeteam send manager <你> "<T-n 已完成+证据>"` 回报**——
-   状态机合法 ≠ manager 知情；不回报的自关等于把验收环节跳过了。"""
+   状态机合法 ≠ manager 知情；不回报的自关等于把验收环节跳过了。
+
+## 日常操作速查（高频，新员工先看这个）
+
+- **群里向老板播报**：`claudeteam say <你> "<内容>" --to user`；内部进度改
+  `--to manager`。`--to` 别省——它决定消息给谁看。
+- **给同事/上级发消息**：`claudeteam send <收件人> <你> "<内容>"`——
+  **收件人在前、自己在后**，顺序最容易写反，发前看一眼。
+- **收件箱**：`claudeteam inbox <你>` 查未读；处理完一条就
+  `claudeteam read <local_id>` 销账，别攒。
+- **领活开工**：第一件事置状态 `task update T-n --status 进行中`（原则 5）。
+- **完工**：`task done T-n` + 同一时刻 `send manager` 带证据回报（原则 6）。
+- **要老板原话**：`task intent get I-n` 现读，别凭记忆复述（原则 3）。"""
 
 
 _MANAGER_BODY = """\
