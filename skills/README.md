@@ -5,6 +5,6 @@
 
 | skill | 一句话 | 适用角色 |
 |---|---|---|
-| [verify-identity](verify-identity/SKILL.md) | 部署后逐员工拉整段 pane 实录、LLM 通读判断身份消息是否被正确处理；一票否决，失败提示用户登录 | 部署 agent / manager |
+| [verify-status](verify-status/SKILL.md) | 确认员工在不在线、在不在岗：拉整段 pane 实录 LLM 通读判断；部署后必跑（一票否决，失败提示登录），平时怀疑掉线单点复用 | 部署 agent / manager |
 
 > 已有方案待落地（见 expert-skills-proposal.md，等老板拍板）：patrol（主管巡视）、reflect（反思）。
