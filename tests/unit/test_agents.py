@@ -105,6 +105,19 @@ def test_codex_spawn_quotes_agent_name_with_special_chars():
     assert "'worker x'" in cmd  # shlex.quote
 
 
+def test_codex_spawn_sets_per_agent_codex_home():
+    from claudeteam.agents.codex_cli import codex_home
+    cmd = CodexCliAdapter().spawn_cmd("worker_codex", "")
+    assert f"CODEX_HOME={codex_home('worker_codex')}" in cmd
+    assert codex_home("worker_codex").endswith("/worker_codex/.codex")
+
+
+def test_codex_native_memory_path_is_agents_md_under_codex_home():
+    from claudeteam.agents.codex_cli import codex_home
+    path = CodexCliAdapter().native_memory_path("worker_codex")
+    assert path == f"{codex_home('worker_codex')}/AGENTS.md"
+
+
 def test_kimi_spawn_uses_yolo_flag_and_disable_update():
     cmd = KimiCodeAdapter().spawn_cmd("worker_kimi", "")
     assert "kimi --yolo" in cmd

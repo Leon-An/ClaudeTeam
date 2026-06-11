@@ -404,3 +404,28 @@ def test_ensure_agent_home_non_claude_never_raises_on_unwritable_path():
     with attr_patch(claude_code, agent_home=lambda a: "/proc/cannot/mkdir/here"):
         # Must not raise despite the unwritable target.
         lifecycle._ensure_agent_home("worker_gem", "gemini-cli")
+
+
+# ── provision_pane: codex trust → per-agent CODEX_HOME (wave2 B) ──
+
+
+def test_provision_codex_trusts_workdir_in_per_agent_config():
+    """REGRESSION (expert hint ①): codex trust used to write the shared
+    ~/.codex/config.toml, so per-agent CODEX_HOME isolation would leave
+    the trust entry in the wrong file → first-run trust prompt blocks the
+    pane. Trust must now land in <agent_home>/.codex/config.toml."""
+    from claudeteam.agents.codex_cli import codex_home
+    team = {"agents": {"worker_codex": {"cli": "codex-cli"}}}
+    captured = []
+    with isolated_env(team=team), tmux_patch(
+            spawn_agent=lambda t, c: True,
+            inject=lambda *a, **kw: True), \
+            attr_patch(wake, wait_until_ready=lambda *a, **kw: True), \
+            attr_patch(lifecycle,
+                       ensure_workdir_trusted=lambda wd, config_path=None:
+                       captured.append(config_path)):
+        provision_pane("worker_codex", tmux.Target("S", "worker_codex"))
+        # codex_home resolves against the isolated state_dir, so compute the
+        # expected path INSIDE the env block.
+        assert captured, "codex trust was never invoked"
+        assert captured[0] == Path(codex_home("worker_codex")) / "config.toml"

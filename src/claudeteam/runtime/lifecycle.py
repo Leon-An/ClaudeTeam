@@ -351,9 +351,11 @@ def provision_pane(agent: str, target: tmux.Target) -> str:
     if cfg.get("lazy"):
         local_facts.upsert_status(agent, "待命", "lazy: CLI starts on first message")
         return LAZY
-    if cli == "codex-cli":
-        ensure_workdir_trusted(Path.cwd())
     _ensure_agent_home(agent, cli)
+    if cli == "codex-cli":
+        from claudeteam.agents.codex_cli import codex_home
+        ensure_workdir_trusted(
+            Path.cwd(), config_path=Path(codex_home(agent)) / "config.toml")
     try:
         adapter = get_adapter(cli)
     except KeyError as e:

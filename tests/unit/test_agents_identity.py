@@ -411,9 +411,16 @@ def test_init_prompt_appends_memory_when_present():
 
 def test_adapter_native_memory_path_default_is_none():
     """Base contract: a CLI declares no native memory file by default, so
-    non-claude adapters opt out unless they override."""
+    an adapter opts out unless it overrides."""
     assert base.CliAdapter.native_memory_path.__doc__  # documented contract
-    assert CodexCliAdapter().native_memory_path("worker_codex") is None
+
+    class _StubAdapter(base.CliAdapter):
+        def spawn_cmd(self, agent, model): return ""
+        def ready_markers(self): return []
+        def busy_markers(self): return []
+        def process_name(self): return "stub"
+
+    assert _StubAdapter().native_memory_path("worker_x") is None
 
 
 def test_claude_adapter_native_memory_path_is_in_agent_home():
@@ -640,16 +647,33 @@ def test_refresh_native_memory_noop_when_unchanged():
         assert identity.refresh_native_memory("worker_cc") is False
 
 
-def test_refresh_native_memory_noop_for_non_claude_cli():
-    """Non-claude CLIs have no native memory file → refresh is a no-op and
-    writes nothing."""
+def test_refresh_native_memory_noop_when_adapter_has_no_native_file():
+    """Contract: an adapter that declares no native memory file makes
+    refresh a quiet no-op that writes nothing (config, not failure).
+    Stubbed because every registered CLI now overrides native_memory_path."""
+    from claudeteam.agents import get_adapter
     team = {"agents": {"worker_codex": {"cli": "codex-cli", "model": "gpt-5.5",
                                         "role": "数据"}}}
-    with isolated_env(team=team) as tmp:
+    with isolated_env(team=team) as tmp, \
+            attr_patch(get_adapter("codex-cli"), native_memory_path=lambda a: None):
         iid = tasks.create_intent("原话")
         _suspend_free_in_progress("worker_codex", "t", iid)
         assert identity.refresh_native_memory("worker_codex") is False
-        assert list((tmp / "state").rglob("CLAUDE.md")) == []
+        assert list((tmp / "state").rglob("AGENTS.md")) == []
+
+
+def test_refresh_native_memory_writes_for_codex():
+    """Codex now has a native memory file (<CODEX_HOME>/AGENTS.md) → a
+    task transition re-projects its anchor just like claude-code."""
+    team = {"agents": {"worker_codex": {"cli": "codex-cli", "model": "gpt-5.5",
+                                        "role": "数据"}}}
+    with isolated_env(team=team), attr_patch(claude_code, _DATA_WRITABLE=False):
+        iid = tasks.create_intent("原话")
+        _suspend_free_in_progress("worker_codex", "t", iid)
+        assert identity.refresh_native_memory("worker_codex") is True
+        path = Path(CodexCliAdapter().native_memory_path("worker_codex"))
+        assert path.is_file()
+        assert path.name == "AGENTS.md"
 
 
 def test_write_native_memory_failure_warns_not_silent():

@@ -60,9 +60,10 @@ class CliAdapter(ABC):
         so it's loaded natively on every session and survives the CLI's
         /compact (unlike the one-shot init prompt).
 
-        Default None — only claude-code overrides today. Other CLIs lack
-        a per-agent HOME, so writing AGENTS.md / GEMINI.md into the shared
-        working dir would collide across panes; they keep relying on the
-        init-prompt memory injection instead.
+        Default None — an adapter opts in by overriding once it has a
+        per-agent HOME to anchor the file into (otherwise AGENTS.md /
+        GEMINI.md in the shared working dir would collide across panes).
+        Adapters that don't override keep relying on the init-prompt
+        memory injection instead.
         """
         return None
