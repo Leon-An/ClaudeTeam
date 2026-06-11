@@ -53,6 +53,14 @@ class CodexCliAdapter(CliAdapter):
         return (f"CODEX_HOME={shlex.quote(codex_home(agent))} "
                 f"CODEX_AGENT={shlex.quote(agent)} codex {quoted}")
 
+    def display_model(self, model: str) -> str:
+        # Only OpenAI-prefixed models reach codex via --model; anything
+        # else is dropped and codex runs its own configured default, so
+        # don't label the agent with a model it isn't running.
+        if model and any(model.startswith(p) for p in _OPENAI_PREFIXES):
+            return model
+        return "codex 自身配置"
+
     def native_memory_path(self, agent: str) -> str:
         # Codex reads $CODEX_HOME/AGENTS.md as global memory at session
         # start (AGENTS.override.md wins if present; we don't write it).

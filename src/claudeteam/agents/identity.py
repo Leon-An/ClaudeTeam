@@ -482,6 +482,14 @@ def render(agent: str, *, role: str | None = None,
     role = role if role is not None else (cfg.get("role") or agent)
     cli = cli if cli is not None else (cfg.get("cli") or "claude-code")
     model = model if model is not None else (cfg.get("model") or "")
+    # Let the adapter map the resolved model to its display label: CLIs
+    # that ignore the team/argv model (gemini/qwen/kimi) or only honour it
+    # conditionally (codex) must not render a model the agent isn't running.
+    try:
+        from claudeteam.agents import get_adapter
+        model = get_adapter(cli).display_model(model)
+    except KeyError:
+        model = model or "默认"
     specialty = specialty if specialty is not None else (cfg.get("specialty") or [])
     tone = tone if tone is not None else (cfg.get("tone") or "")
     notes = notes if notes is not None else (cfg.get("notes") or "")

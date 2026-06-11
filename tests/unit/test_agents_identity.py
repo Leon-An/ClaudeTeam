@@ -50,6 +50,17 @@ def test_render_substitutes_name_role_cli_model():
     assert "gpt-5.5" in text
 
 
+def test_render_uses_adapter_display_model_for_noop_model_cli():
+    """REGRESSION (F): a no-op-model CLI (kimi runs Kimi-k2.x, not the
+    team default) used to render the resolved team model 'opus' in its
+    identity, telling the worker it's something it isn't. render() must
+    route the label through the adapter's display_model."""
+    text = identity.render("worker_kimi", role="数据",
+                           cli="kimi-code", model="opus")
+    assert "opus" not in text
+    assert "kimi 自身配置" in text
+
+
 def test_manager_has_collective_dispatch_hard_constraint():
     """Boss-flagged 2026-05-06: main 分支主管 identity 里"硬约束：集合类
     指令必须 dispatch，不得代替汇总" 这段非常重要——每个 manager 都得

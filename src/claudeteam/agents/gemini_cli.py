@@ -32,6 +32,11 @@ class GeminiCliAdapter(CliAdapter):
             f"gemini --approval-mode=yolo"
         )
 
+    def display_model(self, model: str) -> str:
+        # gemini-cli selects its model via env/config (GEMINI_MODEL), not
+        # the team/argv model — so render the source, not a stale alias.
+        return "gemini 自身配置 (env/config)"
+
     def native_memory_path(self, agent: str) -> str:
         # gemini loads ~/.gemini/GEMINI.md into every prompt and re-reads it
         # on /memory refresh, so the anchor survives the CLI's compaction —

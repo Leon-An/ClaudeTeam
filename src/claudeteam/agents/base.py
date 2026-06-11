@@ -52,6 +52,18 @@ class CliAdapter(ABC):
         """
         return ["Enter", "C-m", "C-j"]
 
+    def display_model(self, model: str) -> str:
+        """Human-facing model label for the agent's identity file.
+
+        Default: the resolved team/argv `model` verbatim — correct for
+        CLIs that actually run it (claude-code). CLIs that ignore that
+        value and pick their own model from env/config (gemini / qwen /
+        kimi) or only honour it conditionally (codex) override this, so a
+        worker isn't told it's running 'opus' when it's really on its
+        CLI's own configured model.
+        """
+        return model or "默认"
+
     def native_memory_path(self, agent: str) -> str | None:
         """Absolute path to this CLI's own always-loaded memory file
         (e.g. claude-code's ~/.claude/CLAUDE.md), or None if the CLI has

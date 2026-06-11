@@ -30,6 +30,11 @@ class QwenCodeAdapter(CliAdapter):
             f"qwen --yolo"
         )
 
+    def display_model(self, model: str) -> str:
+        # qwen selects its model via env/config, not the team/argv model —
+        # render the source, not a stale alias the CLI never received.
+        return "qwen 自身配置 (env/config)"
+
     def native_memory_path(self, agent: str) -> str:
         # qwen loads ~/.qwen/QWEN.md into the system prompt at session
         # start. It does NOT re-read from disk after its own compaction,
