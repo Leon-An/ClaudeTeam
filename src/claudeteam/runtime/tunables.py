@@ -16,6 +16,7 @@ Why a new module instead of folding into `runtime/config.py`:
   - Once everything migrates, tunables can absorb config.py. Until then,
     keeping them separate avoids cross-coupling old paths into the new lookup.
 """
+
 from __future__ import annotations
 
 import os
@@ -59,6 +60,7 @@ def _load_toml() -> dict:
     a bad toml or their changes won't take effect).
     """
     import sys
+
     path = paths.config_file()
     try:
         mtime = path.stat().st_mtime
@@ -74,8 +76,7 @@ def _load_toml() -> dict:
         return {}
     except tomllib.TOMLDecodeError as e:
         if _PARSE_WARN_SHOWN.get(path) != mtime:
-            print(f"  ⚠️ {path} 解析失败 ({e}); 回退默认值",
-                  file=sys.stderr)
+            print(f"  ⚠️ {path} 解析失败 ({e}); 回退默认值", file=sys.stderr)
             _PARSE_WARN_SHOWN[path] = mtime
         return {}
     _CACHE[path] = (mtime, data)

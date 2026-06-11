@@ -9,10 +9,10 @@ Lifted from the old branch's `commands/slash/team.py:parse_state_fallback`
 — same emoji/brief vocabulary so operators see consistent state across
 old and new deployments.
 """
+
 from __future__ import annotations
 
 import re
-
 
 _BASH_PROMPT_RE = re.compile(r"root@[0-9a-f]+:[^#]*#\s*$")
 _PERM_PROMPT_RE = re.compile(r"❯\s*\d\.")

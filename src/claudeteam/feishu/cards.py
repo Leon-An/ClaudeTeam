@@ -14,17 +14,16 @@ We're on card v2 (`schema: "2.0"`) because v1's `lark_md` element
 silently dropped fenced code blocks and nested lists. v2's
 `markdown` element renders the full GFM subset.
 """
+
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
-from typing import Callable
-
 
 # Lark template colors that Feishu's web/mobile app actually renders. These
 # are the only ones tested; others (orange, turquoise, etc.) work but
 # render varies across mobile/desktop versions.
-_VALID_COLORS = ("blue", "green", "red", "yellow", "grey", "purple",
-                 "orange", "turquoise")
+_VALID_COLORS = ("blue", "green", "red", "yellow", "grey", "purple", "orange", "turquoise")
 
 
 def _normalised_color(color: str) -> str:
@@ -77,8 +76,12 @@ def col_cell(content: str, weight: int = 1) -> dict:
     Kept for backwards-compat with any external callers; production
     rebuild code path no longer uses this directly — see column_set_2
     / column_set_3 below for the inlined-markdown-row replacement."""
-    return {"tag": "column", "width": "weighted", "weight": weight,
-            "elements": [{"tag": "markdown", "content": content}]}
+    return {
+        "tag": "column",
+        "width": "weighted",
+        "weight": weight,
+        "elements": [{"tag": "markdown", "content": content}],
+    }
 
 
 def column_set_3(cells: list[str]) -> dict:
@@ -88,8 +91,7 @@ def column_set_3(cells: list[str]) -> dict:
     grid), so we collapse to paragraphs and accept the layout. Empty
     cells dropped so the body doesn't end with a dangling blank."""
     parts = [c for c in cells if c.strip()]
-    return {"tag": "markdown",
-            "content": "\n\n".join(parts) if parts else " "}
+    return {"tag": "markdown", "content": "\n\n".join(parts) if parts else " "}
 
 
 def column_set_2(left: str, right: str, **_legacy_kwargs) -> dict:
@@ -135,6 +137,5 @@ def rich_card(title: str, elements: list, *, color: str = "blue") -> dict:
             "title": {"tag": "plain_text", "content": title},
             "template": _normalised_color(color),
         },
-        "body": {"elements": elements or [
-            {"tag": "markdown", "content": "(无内容)"}]},
+        "body": {"elements": elements or [{"tag": "markdown", "content": "(无内容)"}]},
     }

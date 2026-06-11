@@ -12,11 +12,11 @@ Example:
 Convention for `kind` (not enforced):
     task_assigned / task_completed / learning / blocker / decision / note
 """
+
 from __future__ import annotations
 
 from claudeteam.store import memory
 from claudeteam.util import maybe_print_help, pop_flag, usage_error
-
 
 USAGE = (
     "usage: claudeteam remember <agent> <kind> <content> [--ref <ref>]\n"

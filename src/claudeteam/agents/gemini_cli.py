@@ -11,11 +11,12 @@ operationally — auto-approve every tool call so the agent runs unattended).
 config, not argv. Pass `GEMINI_MODEL` in the deployment environment if
 the default doesn't fit.
 """
+
 from __future__ import annotations
 
 import shlex
 
-from .base import CliAdapter, MULTILINE_SUBMIT_KEYS, SPINNER_CHARS
+from .base import MULTILINE_SUBMIT_KEYS, SPINNER_CHARS, CliAdapter
 
 
 class GeminiCliAdapter(CliAdapter):
@@ -23,10 +24,7 @@ class GeminiCliAdapter(CliAdapter):
         # gemini-cli has no --name flag; tag agent identity via env so
         # /proc and log-parsers can correlate output with which pane.
         # DISABLE_UPDATE_CHECK avoids a blocking prompt at startup.
-        return (
-            f"DISABLE_UPDATE_CHECK=1 GEMINI_AGENT={shlex.quote(agent)} "
-            f"gemini --approval-mode=yolo"
-        )
+        return f"DISABLE_UPDATE_CHECK=1 GEMINI_AGENT={shlex.quote(agent)} gemini --approval-mode=yolo"
 
     def ready_markers(self) -> list[str]:
         # TUI ready prompt; community gemini-cli wraps Ink so the trailing
@@ -37,7 +35,9 @@ class GeminiCliAdapter(CliAdapter):
     def busy_markers(self) -> list[str]:
         return [
             *SPINNER_CHARS,
-            "Thinking", "Running tool", "Calling",
+            "Thinking",
+            "Running tool",
+            "Calling",
         ]
 
     def process_name(self) -> str:

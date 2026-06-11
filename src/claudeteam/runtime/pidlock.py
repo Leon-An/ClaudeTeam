@@ -18,6 +18,7 @@ Stale locks (pid file present but the recorded pid is dead) are
 quietly overwritten by `acquire` on the assumption a previous run
 crashed.
 """
+
 from __future__ import annotations
 
 import os
@@ -56,8 +57,7 @@ def pid_alive(pid: int) -> bool:
     return True
 
 
-def acquire(pid_file: Path, *, name: str = "",
-            wait_for_release_s: float = 3.0) -> bool:
+def acquire(pid_file: Path, *, name: str = "", wait_for_release_s: float = 3.0) -> bool:
     """Claim `pid_file` for the current process.
 
     Returns True on success. Returns False if another **live** process
@@ -82,6 +82,7 @@ def acquire(pid_file: Path, *, name: str = "",
         if old is not None and pid_alive(old):
             if wait_for_release_s > 0:
                 import time
+
                 deadline = time.monotonic() + wait_for_release_s
                 while time.monotonic() < deadline:
                     if not pid_alive(old):
@@ -101,8 +102,7 @@ def release(pid_file: Path) -> None:
     """Remove `pid_file` if it currently records our pid. Best-effort —
     swallows any I/O exception since this runs in a `finally` clause."""
     try:
-        if (pid_file.exists()
-                and pid_file.read_text(encoding="utf-8").strip() == str(os.getpid())):
+        if pid_file.exists() and pid_file.read_text(encoding="utf-8").strip() == str(os.getpid()):
             pid_file.unlink()
     except Exception:
         pass

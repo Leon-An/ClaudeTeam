@@ -9,6 +9,7 @@ a copy) — pass `--no-local` to skip that.
 
 Exits non-zero if `chat_id` is unset (run setup or set runtime_config.json).
 """
+
 from __future__ import annotations
 
 import sys
@@ -19,7 +20,6 @@ from claudeteam.feishu.cards import simple_card
 from claudeteam.runtime import config
 from claudeteam.store import local_facts
 from claudeteam.util import env_str, error_exit, pop_bool_flag, pop_flag, usage_error
-
 
 USAGE = (
     "usage: claudeteam say <agent> <message> "
@@ -84,6 +84,7 @@ def _publish_allowed(sender: str, to_target: str) -> bool:
     = {worker_to_user = false} without touching the global rule.
     """
     from claudeteam.runtime import tunables
+
     sender_role = _role_of(sender)
     receiver_role = _role_of(to_target)
     key = f"{sender_role}_to_{receiver_role}"
@@ -151,10 +152,10 @@ class _Args:
     reply_to: str = ""
     as_user: bool = False
     local: bool = True
-    to: str = "user"   # receiver hint for chat.publish filter; default
-                       # "user" preserves backwards-compat for callers
-                       # that don't pass --to (manager → user is the
-                       # typical case)
+    to: str = "user"  # receiver hint for chat.publish filter; default
+    # "user" preserves backwards-compat for callers
+    # that don't pass --to (manager → user is the
+    # typical case)
 
 
 def _parse(argv: list[str]) -> _Args | None:
@@ -185,6 +186,7 @@ def _parse(argv: list[str]) -> _Args | None:
             as_value = legacy
         else:
             from claudeteam.runtime import tunables
+
             as_value = str(tunables.tunable("feishu.send_as", "bot"))
     if not rest:
         return None
@@ -218,8 +220,7 @@ def main(argv: list[str]) -> int:
         try:
             local_facts.append_log(args.agent, "say", args.message)
         except OSError as e:
-            print(f"  ⚠️ audit log write failed for {args.agent}: {e}",
-                  file=sys.stderr)
+            print(f"  ⚠️ audit log write failed for {args.agent}: {e}", file=sys.stderr)
 
     # Resolve agent's role + emoji + color from claudeteam.toml. Used
     # for the card title (`{emoji} {agent} · {role}`) and for color
@@ -233,14 +234,12 @@ def main(argv: list[str]) -> int:
     # Every `claudeteam say` sends a v2 card. `reply_to` is silently
     # ignored because Feishu interactive cards don't thread.
     if args.reply_to:
-        print(f"  ⚠️ --reply ignored (Feishu cards don't thread)",
-              file=sys.stderr)
+        print("  ⚠️ --reply ignored (Feishu cards don't thread)", file=sys.stderr)
     title = _agent_card_title(args.agent, agent_cfg)
     # `card_color` is the new field name (more specific than just "color");
     # fall back to legacy "color" so old team.json keeps working.
     cfg_color = agent_cfg.get("card_color") or agent_cfg.get("color")
-    card = simple_card(title, args.message,
-                        color=_color_for(args.agent, cfg_color))
+    card = simple_card(title, args.message, color=_color_for(args.agent, cfg_color))
 
     # Step 3: chat.publish filter — operator can silence specific
     # sender→receiver channels via toml (default all true = preserve
@@ -248,7 +247,6 @@ def main(argv: list[str]) -> int:
     # regardless of publish state, so silenced messages still leave a
     # trail.
     if not _publish_allowed(args.agent, args.to):
-        from claudeteam.runtime import tunables
         sender_role = _role_of(args.agent)
         receiver_role = _role_of(args.to)
         key = f"chat.publish.{sender_role}_to_{receiver_role}"
@@ -256,7 +254,8 @@ def main(argv: list[str]) -> int:
         return 0
 
     result = feishu_chat.send_card(
-        chat, card,
+        chat,
+        card,
         profile=profile,
         as_user=args.as_user,
     )

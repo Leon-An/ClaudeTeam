@@ -13,17 +13,17 @@ Either way, the next time deliver.apply() wants to inject, it should
 detect "no CLI ready" and bring it up.  This module is the detection +
 spawn step, kept pure-ish (collaborators injectable for tests).
 """
+
 from __future__ import annotations
 
 import time
-from typing import Callable
+from collections.abc import Callable
 
 from claudeteam.agents.base import CliAdapter
 from claudeteam.runtime import tmux
 
 
-def _has_marker(target: tmux.Target, markers: list[str],
-                capture: Callable | None) -> bool:
+def _has_marker(target: tmux.Target, markers: list[str], capture: Callable | None) -> bool:
     """Capture the pane (default tmux.capture_pane) and return True iff any
     string in `markers` appears. Empty marker list → always False (saves a
     capture call when the adapter declines to publish that marker class)."""
@@ -34,14 +34,12 @@ def _has_marker(target: tmux.Target, markers: list[str],
     return any(m in text for m in markers)
 
 
-def is_ready(target: tmux.Target, adapter: CliAdapter, *,
-             capture: Callable | None = None) -> bool:
+def is_ready(target: tmux.Target, adapter: CliAdapter, *, capture: Callable | None = None) -> bool:
     """True if the pane already shows one of the adapter's ready markers."""
     return _has_marker(target, adapter.ready_markers(), capture)
 
 
-def is_rate_limited(target: tmux.Target, adapter: CliAdapter, *,
-                    capture: Callable | None = None) -> bool:
+def is_rate_limited(target: tmux.Target, adapter: CliAdapter, *, capture: Callable | None = None) -> bool:
     """True if the pane shows any rate-limit marker for this adapter.
 
     Empty marker list (default for codex/kimi historically) → always False.
@@ -56,17 +54,24 @@ def is_rate_limited(target: tmux.Target, adapter: CliAdapter, *,
 # silent-launch flags suppress most onboarding paths, but a few
 # dialogs ALWAYS show on a fresh state file regardless of settings.
 _FIRST_LAUNCH_DIALOG_MARKERS = (
-    "Choose the text style",                  # syntax theme picker
-    "Claude account with subscription",       # auth method picker
-    "Yes, I accept",                          # bypass-perms confirmation
-    "Bypass Permissions mode",                # bypass-perms banner
-    "Choose an option:",                      # generic onboarding prompt
+    "Choose the text style",  # syntax theme picker
+    "Claude account with subscription",  # auth method picker
+    "Yes, I accept",  # bypass-perms confirmation
+    "Bypass Permissions mode",  # bypass-perms banner
+    "Choose an option:",  # generic onboarding prompt
 )
 
 
-def _poll_until_ready(target: tmux.Target, adapter: CliAdapter, *,
-                      timeout_s: float, poll_interval_s: float,
-                      capture: Callable, sleep: Callable, now: Callable) -> bool:
+def _poll_until_ready(
+    target: tmux.Target,
+    adapter: CliAdapter,
+    *,
+    timeout_s: float,
+    poll_interval_s: float,
+    capture: Callable,
+    sleep: Callable,
+    now: Callable,
+) -> bool:
     """Loop `is_ready` checks until a ready marker shows up or `timeout_s`
     elapses. claude pops a chain of first-launch dialogs (theme
     picker, auth-method picker, bypass-perms confirm). Each dialog
@@ -91,36 +96,46 @@ def _poll_until_ready(target: tmux.Target, adapter: CliAdapter, *,
     return False
 
 
-def wait_until_ready(target: tmux.Target, adapter: CliAdapter, *,
-                     timeout_s: float = 20.0,
-                     poll_interval_s: float = 0.5,
-                     capture: Callable | None = None,
-                     sleep: Callable | None = None,
-                     now: Callable | None = None) -> bool:
+def wait_until_ready(
+    target: tmux.Target,
+    adapter: CliAdapter,
+    *,
+    timeout_s: float = 20.0,
+    poll_interval_s: float = 0.5,
+    capture: Callable | None = None,
+    sleep: Callable | None = None,
+    now: Callable | None = None,
+) -> bool:
     """Poll the pane until a ready marker shows up. Does NOT spawn — use
     after a fresh `tmux.spawn_agent` to wait for the CLI banner before
     the next inject. Returns True if a marker appeared in time.
     """
     return _poll_until_ready(
-        target, adapter,
-        timeout_s=timeout_s, poll_interval_s=poll_interval_s,
+        target,
+        adapter,
+        timeout_s=timeout_s,
+        poll_interval_s=poll_interval_s,
         capture=capture or tmux.capture_pane,
         sleep=sleep or time.sleep,
         now=now or time.monotonic,
     )
 
 
-def wake_if_dormant(target: tmux.Target, adapter: CliAdapter, *,
-                    spawn_cmd: str,
-                    init_msg: str | None = None,
-                    on_woken: Callable[[], None] | None = None,
-                    timeout_s: float = 30.0,
-                    poll_interval_s: float = 0.5,
-                    capture: Callable | None = None,
-                    spawn: Callable | None = None,
-                    inject: Callable | None = None,
-                    sleep: Callable | None = None,
-                    now: Callable | None = None) -> bool:
+def wake_if_dormant(
+    target: tmux.Target,
+    adapter: CliAdapter,
+    *,
+    spawn_cmd: str,
+    init_msg: str | None = None,
+    on_woken: Callable[[], None] | None = None,
+    timeout_s: float = 30.0,
+    poll_interval_s: float = 0.5,
+    capture: Callable | None = None,
+    spawn: Callable | None = None,
+    inject: Callable | None = None,
+    sleep: Callable | None = None,
+    now: Callable | None = None,
+) -> bool:
     """Ensure the agent's CLI is ready to receive input.
 
     Returns True iff the pane shows a ready marker (already awake, or
@@ -148,9 +163,9 @@ def wake_if_dormant(target: tmux.Target, adapter: CliAdapter, *,
     # spawned; an immediate is_ready will always be False and burns a
     # capture-pane call.
     sleep(poll_interval_s)
-    if not _poll_until_ready(target, adapter,
-                             timeout_s=timeout_s, poll_interval_s=poll_interval_s,
-                             capture=capture, sleep=sleep, now=now):
+    if not _poll_until_ready(
+        target, adapter, timeout_s=timeout_s, poll_interval_s=poll_interval_s, capture=capture, sleep=sleep, now=now
+    ):
         return False
 
     # CLI just came up. Feed it the identity init prompt before whatever

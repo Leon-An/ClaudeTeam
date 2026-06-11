@@ -7,11 +7,12 @@ Same shape as gemini-cli: Ink-based TUI, --yolo for auto-approve,
 agent identity tagged via env. Model selection is via env / config, not
 argv — drop the `model` parameter so a stale alias doesn't reach qwen.
 """
+
 from __future__ import annotations
 
 import shlex
 
-from .base import CliAdapter, MULTILINE_SUBMIT_KEYS, SPINNER_CHARS
+from .base import MULTILINE_SUBMIT_KEYS, SPINNER_CHARS, CliAdapter
 
 
 class QwenCodeAdapter(CliAdapter):
@@ -22,10 +23,7 @@ class QwenCodeAdapter(CliAdapter):
         # auto-approves every tool call (matches claude-code's
         # `--dangerously-skip-permissions` operationally — required for
         # unattended pane operation).
-        return (
-            f"DISABLE_UPDATE_CHECK=1 QWEN_AGENT_NAME={shlex.quote(agent)} "
-            f"qwen --yolo"
-        )
+        return f"DISABLE_UPDATE_CHECK=1 QWEN_AGENT_NAME={shlex.quote(agent)} qwen --yolo"
 
     def ready_markers(self) -> list[str]:
         # TUI ready markers from qwen-code's Ink banner + prompt; "qwen>"
@@ -36,7 +34,9 @@ class QwenCodeAdapter(CliAdapter):
     def busy_markers(self) -> list[str]:
         return [
             *SPINNER_CHARS,
-            "Thinking", "Calling tool", "Running",
+            "Thinking",
+            "Calling tool",
+            "Running",
         ]
 
     def process_name(self) -> str:

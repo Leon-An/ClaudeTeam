@@ -25,6 +25,7 @@ context. Empty memory → no extra section.
 Manager 巡视 cadence uses `claudeteam peek <agent>` rather than raw
 `tmux capture-pane`.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -32,7 +33,6 @@ from pathlib import Path
 from claudeteam.runtime import config, paths
 from claudeteam.store import memory
 from claudeteam.util import atomic_write_text
-
 
 # Shared section: every role's identity needs this guardrail. Keeping it
 # in one constant means any tweak (new env vars, more failure modes) only
@@ -361,11 +361,16 @@ def _render_team_specialties_block() -> str:
     return "\n\n## 团队成员专长（派单参考）\n\n" + "\n".join(rows)
 
 
-def render(agent: str, *, role: str | None = None,
-           cli: str | None = None, model: str | None = None,
-           specialty: list[str] | None = None,
-           tone: str | None = None,
-           notes: str | None = None) -> str:
+def render(
+    agent: str,
+    *,
+    role: str | None = None,
+    cli: str | None = None,
+    model: str | None = None,
+    specialty: list[str] | None = None,
+    tone: str | None = None,
+    notes: str | None = None,
+) -> str:
     """Return the identity markdown text for `agent`.
 
     Defaults missing fields from team.json so callers can call this with
@@ -383,8 +388,7 @@ def render(agent: str, *, role: str | None = None,
     tone = tone if tone is not None else (cfg.get("tone") or "")
     notes = notes if notes is not None else (cfg.get("notes") or "")
     body = _MANAGER_BODY if agent == "manager" else _WORKER_BODY
-    rendered = body.format(name=agent, role=role, cli=cli, model=model,
-                           workdir_rule=_WORKDIR_RULE)
+    rendered = body.format(name=agent, role=role, cli=cli, model=model, workdir_rule=_WORKDIR_RULE)
     # Append optional sections at the end of the identity body. Manager
     # also gets the team specialties block so it can pick the right worker.
     rendered += _render_specialty_section(specialty)
@@ -413,8 +417,7 @@ def init_prompt(agent: str) -> str:
     and stop, ignoring queued tasks.
     """
     say_target_hint = (
-        "--to user (对老板)" if agent == "manager"
-        else "--to user (完工/对老板可见) 或 --to manager (内部进度)"
+        "--to user (对老板)" if agent == "manager" else "--to user (完工/对老板可见) 或 --to manager (内部进度)"
     )
     # Identity path threaded as absolute. The relative form `agents/<x>/identity.md`
     # only resolves from the agent pane's CWD — claude on host happens to
@@ -427,14 +430,14 @@ def init_prompt(agent: str) -> str:
     base = (
         f"You are {agent}. Read {id_path}, then run:\n"
         f"  claudeteam inbox {agent}\n"
-        f"  claudeteam status {agent} 进行中 \"ready\"\n"
+        f'  claudeteam status {agent} 进行中 "ready"\n'
         f"\n"
         f"For EACH unread inbox message:\n"
         f"  1. Do what it asks (group reports go in chat; peer questions\n"
         f"     get answered via `claudeteam send <from> {agent} ...`).\n"
         f"  2. If it's a status / 报道 / 完工 / progress update, post your\n"
         f"     response to the group with\n"
-        f"     `claudeteam say {agent} \"<msg>\" --to user`\n"
+        f'     `claudeteam say {agent} "<msg>" --to user`\n'
         f"     (or --to manager for internal progress reports).\n"
         f"     ⚠️ every `say` MUST include `--to`: {say_target_hint}.\n"
         f"     Skipping --to silently falls back to user but defeats\n"
@@ -455,10 +458,10 @@ def init_prompt(agent: str) -> str:
             "\n\n"
             "⚠️ Manager 红线 (处理 inbox 时严格遵守):\n"
             "  • 任何 >1 min 的执行 (grep / 读文件 / 跑命令 / 写脚本 / 测试 / 调研)\n"
-            "    立刻 `claudeteam send <worker> manager \"...\"` 派给员工; 不亲自动手.\n"
-            "  • 派活后立即起 5 min cadence: 每 5 分钟 `claudeteam say manager \"📊 进展: ...\" --to user`\n"
+            '    立刻 `claudeteam send <worker> manager "..."` 派给员工; 不亲自动手.\n'
+            '  • 派活后立即起 5 min cadence: 每 5 分钟 `claudeteam say manager "📊 进展: ..." --to user`\n'
             "    一句简报 (含 peek 各员工现场), 直到任务验收 / 老板介入. 无新进展也发.\n"
-            "  • 集合指令 (\"全员/all hands/@team\") 必须对每个非-manager agent send 一次,\n"
+            '  • 集合指令 ("全员/all hands/@team") 必须对每个非-manager agent send 一次,\n'
             "    绝不代员工发汇总.\n"
             "  • 派活只给目标 + 验收 + 边界, 不预设 How.\n"
         )
@@ -473,13 +476,19 @@ def identity_path(agent: str) -> Path:
     return paths.state_dir() / "agents" / agent / "identity.md"
 
 
-def write(agent: str, *, role: str | None = None,
-          cli: str | None = None, model: str | None = None,
-          specialty: list[str] | None = None,
-          tone: str | None = None,
-          notes: str | None = None) -> Path:
+def write(
+    agent: str,
+    *,
+    role: str | None = None,
+    cli: str | None = None,
+    model: str | None = None,
+    specialty: list[str] | None = None,
+    tone: str | None = None,
+    notes: str | None = None,
+) -> Path:
     """Render and persist the identity file; return its path."""
     target = identity_path(agent)
-    atomic_write_text(target, render(agent, role=role, cli=cli, model=model,
-                                      specialty=specialty, tone=tone, notes=notes))
+    atomic_write_text(
+        target, render(agent, role=role, cli=cli, model=model, specialty=specialty, tone=tone, notes=notes)
+    )
     return target

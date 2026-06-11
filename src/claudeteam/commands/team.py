@@ -8,6 +8,7 @@ With `--json`, dump a list of status records (each with name, status,
 task, blocker, updated_at_ms, heartbeat_ms) so CI / smoke conductors
 / peer agents can parse machine-readable state.
 """
+
 from __future__ import annotations
 
 from claudeteam.store import local_facts
@@ -20,10 +21,7 @@ def _emit_text(rows: list[dict], heartbeats: dict[str, int]) -> None:
         return
     name_w = max(len(r["agent"]) for r in rows)
     for r in rows:
-        line = (
-            f"{r['agent'].ljust(name_w)}  "
-            f"{r['status']}  {r['task']}"
-        )
+        line = f"{r['agent'].ljust(name_w)}  {r['status']}  {r['task']}"
         if r.get("blocker"):
             line += f"  ⛔ {r['blocker']}"
         line += f"  ({ago_ms(r.get('updated_at', 0))})"

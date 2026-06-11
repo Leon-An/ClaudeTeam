@@ -6,10 +6,11 @@ needs the app to have im:message scope.
 
 All functions take an optional `lark_run=` callable for tests.
 """
+
 from __future__ import annotations
 
 import json
-from typing import Callable
+from collections.abc import Callable
 
 from claudeteam.feishu.lark import call as _real_run
 
@@ -20,8 +21,15 @@ def _as(as_user: bool) -> list[str]:
     return ["--as", "user" if as_user else "bot"]
 
 
-def send_text(chat_id: str, text: str, *, profile: str = "", as_user: bool = False,
-              reply_to: str = "", lark_run: Callable = _real_run) -> dict | None:
+def send_text(
+    chat_id: str,
+    text: str,
+    *,
+    profile: str = "",
+    as_user: bool = False,
+    reply_to: str = "",
+    lark_run: Callable = _real_run,
+) -> dict | None:
     """Send a plain-text message to a Feishu chat.
 
     When `reply_to` is set we route through `im +messages-reply` (which
@@ -36,38 +44,50 @@ def send_text(chat_id: str, text: str, *, profile: str = "", as_user: bool = Fal
         return None
     if reply_to:
         args = [
-            "im", "+messages-reply",
-            "--message-id", reply_to,
-            "--text", text,
+            "im",
+            "+messages-reply",
+            "--message-id",
+            reply_to,
+            "--text",
+            text,
             *_as(as_user),
         ]
     else:
         args = [
-            "im", "+messages-send",
-            "--chat-id", chat_id,
-            "--text", text,
+            "im",
+            "+messages-send",
+            "--chat-id",
+            chat_id,
+            "--text",
+            text,
             *_as(as_user),
         ]
     return lark_run(args, profile=profile)
 
 
-def send_card(chat_id: str, card: dict, *, profile: str = "", as_user: bool = False,
-              lark_run: Callable = _real_run) -> dict | None:
+def send_card(
+    chat_id: str, card: dict, *, profile: str = "", as_user: bool = False, lark_run: Callable = _real_run
+) -> dict | None:
     """Send an interactive card.  `card` is the Feishu card schema (dict)."""
     if not chat_id:
         return None
     args = [
-        "im", "+messages-send",
-        "--chat-id", chat_id,
-        "--msg-type", "interactive",
-        "--content", json.dumps(card, ensure_ascii=False),
+        "im",
+        "+messages-send",
+        "--chat-id",
+        chat_id,
+        "--msg-type",
+        "interactive",
+        "--content",
+        json.dumps(card, ensure_ascii=False),
         *_as(as_user),
     ]
     return lark_run(args, profile=profile)
 
 
-def list_recent(chat_id: str, *, page_size: int = 20, profile: str = "",
-                as_user: bool = True, lark_run: Callable = _real_run) -> list[dict]:
+def list_recent(
+    chat_id: str, *, page_size: int = 20, profile: str = "", as_user: bool = True, lark_run: Callable = _real_run
+) -> list[dict]:
     """List recent messages in a chat (newest-first per Feishu API).
 
     Returns the `messages` array; defaults to user identity since the
@@ -76,11 +96,15 @@ def list_recent(chat_id: str, *, page_size: int = 20, profile: str = "",
     if not chat_id:
         return []
     args = [
-        "im", "+chat-messages-list",
-        "--chat-id", chat_id,
-        "--page-size", str(page_size),
+        "im",
+        "+chat-messages-list",
+        "--chat-id",
+        chat_id,
+        "--page-size",
+        str(page_size),
         *_as(as_user),
-        "--format", "json",
+        "--format",
+        "json",
     ]
     data = lark_run(args, profile=profile)
     if not data:

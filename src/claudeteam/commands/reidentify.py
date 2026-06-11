@@ -14,18 +14,17 @@ Round-91: `--all` flag added. Skips agents that don't have a live
 pane (lazy / fired) and prints one line per agent for visibility.
 Returns rc=0 only if every targeted agent re-injected successfully.
 """
+
 from __future__ import annotations
 
-from claudeteam.agents import adapter_for_agent, identity
+from claudeteam.agents import DEFAULT_CLI, adapter_for_agent, identity
 from claudeteam.runtime import config, tmux
 from claudeteam.util import error_exit, pop_bool_flag, usage_error
-
 
 USAGE = "usage: claudeteam reidentify <agent>  |  claudeteam reidentify --all"
 
 
-def _reidentify_one(agent: str, session: str, *,
-                    cli: str = "") -> bool:
+def _reidentify_one(agent: str, session: str, *, cli: str = "") -> bool:
     """Inject init prompt into one pane. Returns True on success.
 
     Per-agent failures (no pane, inject failed, unknown adapter) print
@@ -44,6 +43,7 @@ def _reidentify_one(agent: str, session: str, *,
     try:
         if cli:
             from claudeteam.agents import get_adapter
+
             adapter = get_adapter(cli)
         else:
             adapter = adapter_for_agent(agent)
@@ -60,8 +60,7 @@ def _reidentify_one(agent: str, session: str, *,
     except Exception as e:
         print(f"  ⚠️ {agent}: identity write failed: {e}")
         return False
-    if not tmux.inject(target, identity.init_prompt(agent),
-                       submit_keys=adapter.submit_keys()):
+    if not tmux.inject(target, identity.init_prompt(agent), submit_keys=adapter.submit_keys()):
         print(f"  ❌ {agent}: tmux inject failed")
         return False
     print(f"  ✅ {agent} (pane: {target})")
@@ -97,15 +96,11 @@ def main(argv: list[str]) -> int:
 
     session = config.session_name()
     if not tmux.has_session(session):
-        return error_exit(
-            f"❌ tmux session {session} not running; run `claudeteam up` first")
+        return error_exit(f"❌ tmux session {session} not running; run `claudeteam up` first")
 
     if do_all:
         print(f"🔁 reidentify all ({len(agents)} agents in {session}):")
-        ok = sum(1 for a in agents
-                 if _reidentify_one(
-                     a, session,
-                     cli=agents_dict.get(a, {}).get("cli", "claude-code")))
+        ok = sum(1 for a in agents if _reidentify_one(a, session, cli=agents_dict.get(a, {}).get("cli", DEFAULT_CLI)))
         print(f"reidentified {ok}/{len(agents)} agents")
         return 0 if ok == len(agents) else 1
 
@@ -114,9 +109,7 @@ def main(argv: list[str]) -> int:
     agent = agents[0]
     target = tmux.Target(session, agent)
     if not tmux.has_window(target):
-        return error_exit(
-            f"❌ {agent} has no pane in session {session} "
-            f"(was it fired? try `claudeteam hire {agent}`)")
+        return error_exit(f"❌ {agent} has no pane in session {session} (was it fired? try `claudeteam hire {agent}`)")
     adapter = adapter_for_agent(agent)
     # Same as the --all path: re-render disk before inject so LLM
     # picks up new claudeteam.toml fields, not the snapshot at spawn.
@@ -124,8 +117,7 @@ def main(argv: list[str]) -> int:
         identity.write(agent)
     except Exception as e:
         return error_exit(f"❌ identity write failed for {agent}: {e}")
-    if not tmux.inject(target, identity.init_prompt(agent),
-                       submit_keys=adapter.submit_keys()):
+    if not tmux.inject(target, identity.init_prompt(agent), submit_keys=adapter.submit_keys()):
         return error_exit(f"❌ failed to inject identity init into {agent}")
     print(f"✅ re-injected identity init into {agent} (pane: {target})")
     return 0

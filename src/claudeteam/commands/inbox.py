@@ -2,11 +2,11 @@
 
 List unread messages for an agent. Read messages don't appear by default.
 """
+
 from __future__ import annotations
 
 from claudeteam.store import local_facts
 from claudeteam.util import fmt_time_ms, usage_error
-
 
 USAGE = "usage: claudeteam inbox <agent>"
 
