@@ -6,6 +6,8 @@ from claudeteam.agents.base import CliAdapter
 from claudeteam.agents.claude_code import ClaudeCodeAdapter
 from claudeteam.agents.codex_cli import CodexCliAdapter
 from claudeteam.agents.kimi_code import KimiCodeAdapter
+from claudeteam.agents.gemini_cli import GeminiCliAdapter
+from claudeteam.agents.qwen_code import QwenCodeAdapter
 
 
 # ── registry ──────────────────────────────────────────────────────
@@ -103,6 +105,65 @@ def test_codex_spawn_drops_non_openai_model():
 def test_codex_spawn_quotes_agent_name_with_special_chars():
     cmd = CodexCliAdapter().spawn_cmd("worker x", "")
     assert "'worker x'" in cmd  # shlex.quote
+
+
+def test_codex_spawn_sets_per_agent_codex_home():
+    from claudeteam.agents.codex_cli import codex_home
+    cmd = CodexCliAdapter().spawn_cmd("worker_codex", "")
+    assert f"CODEX_HOME={codex_home('worker_codex')}" in cmd
+    assert codex_home("worker_codex").endswith("/worker_codex/.codex")
+
+
+def test_codex_native_memory_path_is_agents_md_under_codex_home():
+    from claudeteam.agents.codex_cli import codex_home
+    path = CodexCliAdapter().native_memory_path("worker_codex")
+    assert path == f"{codex_home('worker_codex')}/AGENTS.md"
+
+
+def test_codex_display_model_passes_openai_through_but_labels_dropped():
+    a = CodexCliAdapter()
+    assert a.display_model("gpt-5.5") == "gpt-5.5"
+    assert a.display_model("o3") == "o3"
+    # Dropped (non-OpenAI) → label the real source, not the stale alias.
+    assert a.display_model("opus") == "codex 自身配置"
+    assert a.display_model("") == "codex 自身配置"
+
+
+def test_noop_model_adapters_label_their_own_config():
+    """gemini/qwen/kimi ignore the team/argv model → never echo it back."""
+    for adapter in (GeminiCliAdapter(), QwenCodeAdapter(), KimiCodeAdapter()):
+        label = adapter.display_model("opus")
+        assert "opus" not in label
+        assert "自身配置" in label
+
+
+def test_claude_display_model_is_verbatim():
+    """claude-code actually runs the resolved model, so its label is the
+    model itself (base default), empty → 默认."""
+    assert ClaudeCodeAdapter().display_model("sonnet") == "sonnet"
+    assert ClaudeCodeAdapter().display_model("") == "默认"
+
+
+def test_native_memory_reloads_only_claude_and_gemini():
+    """The mid-session disk-reload capability gates the G reidentify
+    fallback: claude (re-reads after /compact) + gemini (every-prompt +
+    /memory reload) → True; codex/qwen/kimi load once at startup → False,
+    so they need a reidentify re-inject to pick up a fresh anchor."""
+    assert ClaudeCodeAdapter().native_memory_reloads() is True
+    assert GeminiCliAdapter().native_memory_reloads() is True
+    assert CodexCliAdapter().native_memory_reloads() is False
+    assert QwenCodeAdapter().native_memory_reloads() is False
+    assert KimiCodeAdapter().native_memory_reloads() is False
+
+
+def test_kimi_has_no_native_memory_file_by_design():
+    """E/Plan-B: kimi loads memory only via the git-root→cwd chain, so
+    isolating a per-agent AGENTS.md would force the pane's cwd off the
+    repo. We deliberately keep cwd=repo and skip the native file — kimi
+    relies on the init-prompt anchor (+ reidentify fallback) instead.
+    Pin it so a future change can't silently flip kimi to a colliding or
+    cwd-moving native path without revisiting the rationale."""
+    assert KimiCodeAdapter().native_memory_path("worker_kimi") is None
 
 
 def test_kimi_spawn_uses_yolo_flag_and_disable_update():

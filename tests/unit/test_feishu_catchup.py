@@ -26,6 +26,65 @@ def test_write_then_read_roundtrip():
         assert cur["create_time"] == "1719000000000"
 
 
+def test_write_cursor_persists_tz_free_epoch_ms():
+    """write_cursor must stamp `create_time_ms` — the epoch reading taken
+    while writer and renderer still share TZ. lark-cli renders the
+    minute string in process-local time (verified: same message lists
+    as 03:55 under TZ=Asia/Shanghai and 19:55 under TZ=UTC), so the
+    string alone is ambiguous across a TZ change."""
+    with isolated_env():
+        catchup.write_cursor("om_42", "1778047712000")
+        cur = catchup.read_cursor()
+        assert cur["create_time_ms"] == 1778047712000
+        # minute-string form: ms field equals the local-time parse made now
+        catchup.write_cursor("om_43", "2026-05-06 14:08")
+        cur = catchup.read_cursor()
+        assert cur["create_time_ms"] == catchup._to_epoch_ms("2026-05-06 14:08")
+        assert cur["create_time"] == "2026-05-06 14:08"  # raw kept for debug
+
+
+def test_pending_lines_prefers_epoch_ms_when_string_tz_shifted():
+    """THE container-UTC vs host-+8 restart scenario: the cursor's minute
+    string was rendered under a TZ 8h away from the current process's,
+    so re-parsing it now puts the cutoff 8h in the future and the whole
+    gap silently drops. With `create_time_ms` persisted at event time,
+    the cutoff stays correct no matter what TZ catchup runs under."""
+    minute_07 = "1778047620000"   # 14:07
+    minute_09 = "1778047740000"   # 14:09
+    history = [_msg("om_m7", minute_07), _msg("om_m9", minute_09)]
+    with isolated_env():
+        # Hand-write the cursor as a TZ-shifted renderer would have left
+        # it: string says 22:08 (rendered under +8h), ms says 14:08:32.
+        paths.router_cursor_file().parent.mkdir(parents=True, exist_ok=True)
+        paths.router_cursor_file().write_text(json.dumps({
+            "message_id": "om_b2",
+            "create_time": "2026-05-06 22:08",
+            "create_time_ms": 1778047712000,
+        }), encoding="utf-8")
+        lines = catchup.pending_lines("oc_x", list_fn=lambda: history)
+    ids = sorted(json.loads(l)["event"]["message"]["message_id"] for l in lines)
+    # ms cutoff (14:08 floor − 120s = 14:06) keeps both; the bogus string
+    # cutoff (22:06) would have dropped everything.
+    assert ids == ["om_m7", "om_m9"]
+
+
+def test_pending_lines_legacy_cursor_without_ms_still_filters():
+    """Cursors written before create_time_ms existed keep working via the
+    string-parse fallback (same-TZ assumption, the historical behavior)."""
+    minute_05 = "1778047500000"   # 14:05 — beyond lookback → drop
+    minute_09 = "1778047740000"   # 14:09 — keep
+    history = [_msg("om_old", minute_05), _msg("om_new", minute_09)]
+    with isolated_env():
+        paths.router_cursor_file().parent.mkdir(parents=True, exist_ok=True)
+        paths.router_cursor_file().write_text(json.dumps({
+            "message_id": "om_b2",
+            "create_time": "1778047712000",   # legacy: no create_time_ms
+        }), encoding="utf-8")
+        lines = catchup.pending_lines("oc_x", list_fn=lambda: history)
+    ids = [json.loads(l)["event"]["message"]["message_id"] for l in lines]
+    assert ids == ["om_new"]
+
+
 def test_write_cursor_skips_when_either_field_blank():
     with isolated_env():
         catchup.write_cursor("", "1234")
@@ -79,27 +138,33 @@ def _msg(msg_id, create_time, *, text="hi", chat_id="oc_x", sender="ou_user"):
     }
 
 
-def test_pending_lines_returns_only_messages_at_or_after_cursor_minute():
-    """`>=` minute-floor semantics. Cutoff is floored to the minute so
-    REST minute-precision messages aligned with the cursor's minute are
-    included. Documented in feishu/catchup._newer_than."""
-    # Use real minute-aligned epoch ms so the floor doesn't collapse to 0
-    minute_a = "1778047620000"   # 2026-05-06 14:07:00
-    minute_b = "1778047680000"   # 2026-05-06 14:08:00
-    minute_c = "1778047740000"   # 2026-05-06 14:09:00
+def test_pending_lines_keeps_recent_earlier_minutes_within_lookback():
+    """Minute-floor + reorder-lookback semantics. Cutoff is floored to the
+    cursor minute then stepped back by the lookback margin (default 120s),
+    so a message a minute or two BEFORE the cursor — a cross-minute
+    out-of-order miss — survives instead of being filtered to oblivion.
+    Only messages older than the lookback window drop. Documented in
+    feishu/catchup._newer_than."""
+    # Real minute-aligned epoch ms so the floor doesn't collapse to 0.
+    minute_05 = "1778047500000"  # 2026-05-06 14:05:00 — before lookback → drop
+    minute_07 = "1778047620000"  # 2026-05-06 14:07:00 — within 120s lookback → keep
+    minute_08 = "1778047680000"  # 2026-05-06 14:08:00 — cursor minute → keep
+    minute_09 = "1778047740000"  # 2026-05-06 14:09:00 — after cursor → keep
     history = [
-        _msg("om_a1", minute_a),                 # before cursor minute → drop
-        _msg("om_b1", minute_b),                 # at cursor minute → keep
+        _msg("om_old", minute_05),               # > lookback older → still drops
+        _msg("om_reorder", minute_07),           # earlier-but-missed → now kept
+        _msg("om_b1", minute_08),                # cursor minute → keep
         _msg("om_b2", "1778047712000"),          # cursor itself, sub-minute → keep
-        _msg("om_c1", minute_c),                 # after cursor → keep
+        _msg("om_c1", minute_09),                # after cursor → keep
     ]
     with isolated_env():
-        catchup.write_cursor("om_b2", "1778047712000")  # 14:08:32
+        catchup.write_cursor("om_b2", "1778047712000")  # 14:08:32 → floor 14:08, −120s = 14:06
         lines = catchup.pending_lines("oc_x", list_fn=lambda: history)
     import json
     ids = sorted(json.loads(l)["event"]["message"]["message_id"] for l in lines)
-    # om_a1 (14:07) drops; om_b1, om_b2 (both 14:08), om_c1 (14:09) keep
-    assert ids == ["om_b1", "om_b2", "om_c1"]
+    # 14:06 cutoff: om_old (14:05) drops; om_reorder (14:07) now survives.
+    assert ids == ["om_b1", "om_b2", "om_c1", "om_reorder"]
+    assert "om_old" not in ids
 
 
 def test_pending_lines_recovers_messages_when_cursor_has_subminute_precision():
@@ -413,3 +478,77 @@ def test_pending_lines_round_trip_with_live_shape_through_process_lines():
     assert stats.handled == 1, (
         f"live-shape replay should produce 1 handled, got {dict(stats.drops_by_reason)}")
     assert applies[0].text == "catch this live"
+
+
+# ── REGRESSION: cross-minute out-of-order silent-drop (永久丢消息) ──
+#
+# Bug (devops 2026-06-10): the cursor is a MONOTONIC high-water mark. When
+# lark's WebSocket silently drops (~120s on macOS), an earlier message can
+# be missed live while a LATER message gets classified and pushes the
+# cursor past it. On the next catchup that earlier message is older than
+# the high-water cursor, and the bare minute-floor cutoff filtered it out
+# forever — it never reached `seen`, so dedup couldn't help, and the
+# minute floor was too coarse for a cross-minute skew. The lookback margin
+# in _newer_than is the fix.
+
+
+def test_cross_minute_out_of_order_message_survives_catchup():
+    """The reported永久丢消息 path: M_early (14:08:50) is missed live; M_late
+    (14:09:05) is classified and advances the cursor past it. On catchup
+    chat-messages-list returns both — M_early MUST come back, not vanish."""
+    m_early = "1778047730000"   # 2026-05-06 14:08:50 — missed live (WS drop)
+    m_late = "1778047745000"    # 2026-05-06 14:09:05 — classified, set the cursor
+    history = [
+        _msg("om_late", m_late, text="later, arrived first"),
+        _msg("om_early", m_early, text="earlier, silently dropped"),
+    ]
+    with isolated_env():
+        # cursor sits at the LATER message (high-water mark past the miss)
+        catchup.write_cursor("om_late", m_late)
+        lines = catchup.pending_lines("oc_x", list_fn=lambda: history)
+    ids = sorted(json.loads(l)["event"]["message"]["message_id"] for l in lines)
+    assert "om_early" in ids, "cross-minute out-of-order miss was lost again"
+    assert "om_late" in ids   # re-applied; seen dedup makes that harmless
+
+
+def test_lookback_zero_reproduces_the_old_loss():
+    """Discriminating control: with the lookback disabled (the old
+    monotonic-max-minute-floor behaviour), the earlier message IS filtered
+    out — proving the regression test above passes *because of* the fix,
+    not because the row was surviving anyway."""
+    m_early = "1778047730000"   # 14:08:50
+    m_late = "1778047745000"    # 14:09:05
+    history = [_msg("om_late", m_late), _msg("om_early", m_early)]
+    # lookback_ms=0 → cutoff == floor(14:09:05) == 14:09:00 → 14:08:50 drops
+    fresh = catchup._newer_than(history, m_late, lookback_ms=0)
+    ids = [m["message_id"] for m in fresh]
+    assert "om_early" not in ids   # the bug, reproduced
+    assert ids == ["om_late"]
+
+
+def test_cross_minute_miss_delivered_once_through_process_lines():
+    """End-to-end: the recovered earlier message flows through
+    process_lines and is delivered, while the already-handled later
+    message is dedup-dropped via the persisted seen set (no re-fire)."""
+    m_early = "1778047730000"   # 14:08:50 — the miss
+    m_late = "1778047745000"    # 14:09:05 — already handled before restart
+    history = [
+        _msg("om_late", m_late, text="already handled"),
+        _msg("om_early", m_early, text="the missed one"),
+    ]
+    with isolated_env():
+        catchup.write_cursor("om_late", m_late)
+        lines = catchup.pending_lines("oc_x", list_fn=lambda: history)
+        applies = []
+        # seed seen with the already-handled later message (mirrors
+        # router._load_seen_msg_ids restoring state/router.seen on restart)
+        stats = process_lines(
+            lines,
+            team_agents=["manager"],
+            chat_id="oc_x",
+            apply_fn=lambda d: applies.append(d),
+            seen_msg_ids={"om_late"},
+        )
+    delivered = [d.msg_id for d in applies]
+    assert delivered == ["om_early"], f"expected only the miss delivered, got {delivered}"
+    assert stats.handled == 1

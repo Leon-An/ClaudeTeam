@@ -60,8 +60,6 @@ merging a refactor or new module, walk this checklist:
 - **Dead code = delete.**  An unused private function isn't
   "documentation" — it's noise that drifts.  If `grep -rn '\b_fn\b'`
   shows only the definition, remove it.
-- **Single-file ceiling: ~300 LOC.**  Past that, ask whether the file
-  is doing two jobs.  If yes, split.  If no, leave it.
 - **Match the canonical command.**  `commands/health.py` is the
   reference shape: `_check_*` helpers + `HealthReport` accumulator +
   `_emit_text` / `_emit_json` + `main(argv)`.  New commands that look

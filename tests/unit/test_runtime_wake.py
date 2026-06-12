@@ -9,6 +9,9 @@ class _ClaudeFake:
     def ready_markers(self):
         return ["bypass permissions on", "? for shortcuts"]
 
+    def busy_markers(self):
+        return ["esc to interrupt", "⣾"]
+
 
 def _capturer(text_per_call: list[str]):
     """Return a capture_pane fake that yields one text per call."""
@@ -35,6 +38,21 @@ def test_is_ready_false_when_pane_blank():
     target = tmux.Target("S", "manager")
     capture = _capturer(["$ "])
     assert wake.is_ready(target, _ClaudeFake(), capture=capture) is False
+
+
+# ── is_busy ──────────────────────────────────────────────────────
+
+
+def test_is_busy_true_when_pane_shows_busy_marker():
+    target = tmux.Target("S", "worker")
+    capture = _capturer(["thinking…\nesc to interrupt\n"])
+    assert wake.is_busy(target, _ClaudeFake(), capture=capture) is True
+
+
+def test_is_busy_false_at_quiet_ready_prompt():
+    target = tmux.Target("S", "worker")
+    capture = _capturer(["bypass permissions on\n>"])
+    assert wake.is_busy(target, _ClaudeFake(), capture=capture) is False
 
 
 # ── wake_if_dormant ──────────────────────────────────────────────
@@ -84,39 +102,6 @@ def test_wake_returns_false_when_spawn_fails():
         sleep=lambda s: None,
     )
     assert ok is False
-
-
-def test_is_rate_limited_returns_false_when_marker_list_empty():
-    target = tmux.Target("S", "agent")
-
-    class NoMarkers:
-        def rate_limit_markers(self):
-            return []
-
-    capture = lambda t, lines=80: "Approaching usage limit"
-    assert wake.is_rate_limited(target, NoMarkers(), capture=capture) is False
-
-
-def test_is_rate_limited_true_when_pane_shows_marker():
-    target = tmux.Target("S", "agent")
-
-    class WithMarkers:
-        def rate_limit_markers(self):
-            return ["Approaching usage limit"]
-
-    capture = lambda t, lines=80: "...Approaching usage limit\n"
-    assert wake.is_rate_limited(target, WithMarkers(), capture=capture) is True
-
-
-def test_is_rate_limited_false_when_pane_clean():
-    target = tmux.Target("S", "agent")
-
-    class WithMarkers:
-        def rate_limit_markers(self):
-            return ["rate limit"]
-
-    capture = lambda t, lines=80: "all good\n>"
-    assert wake.is_rate_limited(target, WithMarkers(), capture=capture) is False
 
 
 # ── wait_until_ready (no spawn — pure polling) ────────────────────

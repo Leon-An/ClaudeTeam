@@ -52,9 +52,45 @@ class CliAdapter(ABC):
         """
         return ["Enter", "C-m", "C-j"]
 
-    def rate_limit_markers(self) -> list[str]:
-        """Strings that, if present in the pane tail, mean the CLI is
-        currently rate-limited and won't process new input. Empty by
-        default; per-CLI adapters override with provider-specific text.
+    def display_model(self, model: str) -> str:
+        """Human-facing model label for the agent's identity file.
+
+        Default: the resolved team/argv `model` verbatim — correct for
+        CLIs that actually run it (claude-code). CLIs that ignore that
+        value and pick their own model from env/config (gemini / qwen /
+        kimi) or only honour it conditionally (codex) override this, so a
+        worker isn't told it's running 'opus' when it's really on its
+        CLI's own configured model.
         """
-        return []
+        return model or "默认"
+
+    def native_memory_reloads(self) -> bool:
+        """True if the CLI re-reads its native memory file from disk on its
+        own, mid-session, after a context compaction — so rewriting the
+        on-disk anchor (`identity.refresh_native_memory`) actually reaches
+        the running agent.
+
+        Default False: most CLIs only load the file once at session start
+        and never re-read it, so a mid-session anchor rewrite is invisible
+        to the live context. Such CLIs need a reidentify re-inject to push
+        a refreshed anchor (see `commands.task._refresh_anchor`). claude-code
+        (re-reads CLAUDE.md after /compact) and gemini (every-prompt +
+        /memory reload) override to True.
+        """
+        return False
+
+    def native_memory_path(self, agent: str) -> str | None:
+        """Absolute path to this CLI's own always-loaded memory file
+        (e.g. claude-code's ~/.claude/CLAUDE.md), or None if the CLI has
+        no such file. When set, `agents.identity.write` renders the
+        agent's identity + standing remember policy + memory digest there
+        so it's loaded natively on every session and survives the CLI's
+        /compact (unlike the one-shot init prompt).
+
+        Default None — an adapter opts in by overriding once it has a
+        per-agent HOME to anchor the file into (otherwise AGENTS.md /
+        GEMINI.md in the shared working dir would collide across panes).
+        Adapters that don't override keep relying on the init-prompt
+        memory injection instead.
+        """
+        return None

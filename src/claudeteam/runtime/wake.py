@@ -40,13 +40,13 @@ def is_ready(target: tmux.Target, adapter: CliAdapter, *,
     return _has_marker(target, adapter.ready_markers(), capture)
 
 
-def is_rate_limited(target: tmux.Target, adapter: CliAdapter, *,
-                    capture: Callable | None = None) -> bool:
-    """True if the pane shows any rate-limit marker for this adapter.
-
-    Empty marker list (default for codex/kimi historically) → always False.
-    """
-    return _has_marker(target, adapter.rate_limit_markers(), capture)
+def is_busy(target: tmux.Target, adapter: CliAdapter, *,
+            capture: Callable | None = None) -> bool:
+    """True if the pane shows one of the adapter's busy markers (spinner,
+    "esc to interrupt", boot phase, …). Pairs with `is_ready` to detect an
+    *idle* pane (ready and not busy) for low-priority best-effort injects
+    that must not derail an agent mid-turn."""
+    return _has_marker(target, adapter.busy_markers(), capture)
 
 
 # Onboarding dialogs claude pops on fresh ~/.claude.json (ephemeral

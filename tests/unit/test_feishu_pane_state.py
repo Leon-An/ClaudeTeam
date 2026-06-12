@@ -15,11 +15,6 @@ def test_bash_prompt_means_cli_dead():
     assert "CLI not running" in brief
 
 
-def test_quota_exceeded():
-    buf = "ahem\nyou hit your limit\nfoo"
-    assert pane_state.parse(buf) == ("⛔", "quota exceeded")
-
-
 def test_awaiting_permission():
     buf = "Do you want to proceed?\n❯ 1. yes\n❯ 2. no"
     emoji, brief = pane_state.parse(buf)

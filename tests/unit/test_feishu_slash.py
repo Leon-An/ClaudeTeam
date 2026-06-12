@@ -45,6 +45,21 @@ def _ctx(*, agents=("manager", "worker_cc", "worker_codex"),
     )
 
 
+def _team_env():
+    """isolated_env preloaded with the same 3-agent team `_ctx()` defaults
+    to. Handlers resolve agents live from config via `_live_agents()` (not
+    ctx.team_agents), so any test that dispatches against worker_cc /
+    worker_codex must pin a real team file — without this, the suite
+    accidentally reads whatever claudeteam.toml sits at the repo root and
+    the handler replies 未知 agent instead of touching the pane."""
+    from helpers import isolated_env
+    return isolated_env(team={"session": "ClaudeTeam", "agents": {
+        "manager": {"cli": "claude-code"},
+        "worker_cc": {"cli": "claude-code"},
+        "worker_codex": {"cli": "codex-cli"},
+    }})
+
+
 # ── /help ────────────────────────────────────────────────────────
 
 
@@ -57,7 +72,7 @@ def test_help_returns_card_listing_all_commands():
     assert reply["header"]["title"]["content"] == "🆘 ClaudeTeam 自定义斜杠命令"
     body = reply["body"]["elements"][0]["content"]
     for c in ("/help", "/team", "/health", "/usage", "/tmux",
-              "/send", "/compact", "/stop", "/clear"):
+              "/send", "/compact", "/stop", "/clear", "/task"):
         assert c in body
     # Dropped commands stay dropped
     assert "/recall" not in body
@@ -80,7 +95,7 @@ def test_team_classifies_each_pane_state_with_emoji():
     def fake_capture(target, lines=80):
         return pane_buffers.get(target.window, "")
 
-    with tmux_patch(capture_pane=fake_capture):
+    with _team_env(), tmux_patch(capture_pane=fake_capture):
         reply = slash.dispatch("/team",
                                _ctx(agents=("manager", "worker_cc", "worker_codex")))
 
@@ -642,7 +657,7 @@ def test_tmux_captures_specified_pane():
         captured["calls"].append((str(target), lines))
         return "line1\nline2\nline3"
 
-    with tmux_patch(capture_pane=fake_capture):
+    with _team_env(), tmux_patch(capture_pane=fake_capture):
         reply = slash.dispatch("/tmux worker_cc 30", _ctx())
     assert ("ClaudeTeam:worker_cc", 30) in captured["calls"]
     assert isinstance(reply, dict)
@@ -696,7 +711,7 @@ def test_send_inject_into_pane():
         captured["text"] = text
         return True
 
-    with tmux_patch(inject=fake_inject):
+    with _team_env(), tmux_patch(inject=fake_inject):
         reply = slash.dispatch("/send worker_cc hello world", _ctx())
     assert captured["target"] == "ClaudeTeam:worker_cc"
     assert captured["text"] == "hello world"
@@ -728,7 +743,7 @@ def test_compact_injects_literal_compact_into_pane():
         captured.append((str(target), text))
         return True
 
-    with tmux_patch(inject=fake_inject):
+    with _team_env(), tmux_patch(inject=fake_inject):
         reply = slash.dispatch("/compact worker_cc", _ctx())
     assert ("ClaudeTeam:worker_cc", "/compact") in captured
     # Default ctx has background=no-op so no second inject for reidentify
@@ -750,7 +765,7 @@ def test_compact_schedules_background_reidentify_on_success():
     def capture_bg(fn):
         scheduled.append(fn)
 
-    with tmux_patch(inject=fake_inject):
+    with _team_env(), tmux_patch(inject=fake_inject):
         slash.dispatch("/compact worker_cc", _ctx(background=capture_bg))
 
         # First inject is /compact; reidentify is queued on background
@@ -776,7 +791,7 @@ def test_compact_skips_reidentify_when_inject_fails():
     def capture_bg(fn):
         scheduled.append(fn)
 
-    with tmux_patch(inject=fake_inject):
+    with _team_env(), tmux_patch(inject=fake_inject):
         reply = slash.dispatch("/compact worker_cc", _ctx(background=capture_bg))
     assert scheduled == []
     assert "45s 后自动重注 identity" not in reply
@@ -801,7 +816,7 @@ def test_compact_detects_llm_rejection_marker_and_skips_reidentify():
     def capture_bg(fn):
         scheduled.append(fn)
 
-    with tmux_patch(inject=fake_inject, capture_pane=fake_capture):
+    with _team_env(), tmux_patch(inject=fake_inject, capture_pane=fake_capture):
         reply = slash.dispatch("/compact worker_cc", _ctx(background=capture_bg))
     assert scheduled == [], "no reidentify should be scheduled when LLM rejected /compact"
     assert "⚠️" in reply
@@ -821,7 +836,7 @@ def test_stop_sends_ctrl_c():
         captured["keys"] = keys
         return True
 
-    with tmux_patch(send_keys=fake_send_keys):
+    with _team_env(), tmux_patch(send_keys=fake_send_keys):
         reply = slash.dispatch("/stop worker_cc", _ctx())
     assert captured["target"] == "ClaudeTeam:worker_cc"
     assert "C-c" in captured["keys"]
@@ -843,7 +858,7 @@ def test_clear_injects_clear_then_init_prompt():
         sequence.append((str(target), text))
         return True
 
-    with tmux_patch(inject=fake_inject):
+    with _team_env(), tmux_patch(inject=fake_inject):
         reply = slash.dispatch("/clear worker_cc", _ctx())
     # First inject: literal /clear
     assert sequence[0] == ("ClaudeTeam:worker_cc", "/clear")
@@ -880,3 +895,139 @@ def test_handler_exception_is_caught():
     with tmux_patch(capture_pane=boom_capture):
         reply = slash.dispatch("/tmux manager", _ctx())
     assert "slash handler error" in reply or "kaboom" in reply
+
+
+# ── /task ─────────────────────────────────────────────────────────
+
+
+def _seed_kanban():
+    """Seed a small task store covering several statuses + an intent
+    back-link, for the /task render tests. Returns nothing; callers
+    dispatch /task and assert on the card body."""
+    from claudeteam.store import tasks
+    iid = tasks.create_intent("把支付页改成两步结账 [I-SEED]")
+    tasks.create("worker_cc", "重构结账", intent_id=iid)        # T-1 待处理
+    tasks.create("worker_cc", "改首页")                          # T-2 待处理
+    tasks.update("T-2", status="进行中")
+    tasks.create("worker_codex", "写测试")                       # T-3
+    tasks.update("T-3", status="进行中")
+    tasks.pause("T-3")                                           # T-3 需审批
+    tasks.create("worker_cc", "老活")                            # T-4
+    tasks.update("T-4", status="已完成")
+
+
+def test_task_kanban_groups_by_status_with_intent_backlink():
+    """/task renders every status column, lists id+title+assignee, and
+    carries the verbatim intent back-link (↳ I-n) when a task has one."""
+    from helpers import isolated_env
+    team = {"agents": {"worker_cc": {"cli": "claude-code"},
+                       "worker_codex": {"cli": "codex"}}}
+    with isolated_env(team=team):
+        _seed_kanban()
+        reply = slash.dispatch("/task", _ctx())
+    assert isinstance(reply, dict)
+    title = reply["header"]["title"]["content"]
+    assert "/task" in title and "任务看板" in title
+    body = reply["body"]["elements"][0]["content"]
+    # every column header present, in vocabulary
+    for col in ("待处理", "进行中", "需审批", "已完成", "已取消"):
+        assert col in body
+    # ids + titles + assignees surfaced
+    assert "T-1" in body and "重构结账" in body and "worker_cc" in body
+    assert "T-3" in body and "worker_codex" in body
+    # intent back-link rendered for the linked task only
+    assert "↳ I-1" in body
+    assert "I-SEED" in body                       # verbatim snippet carried
+
+
+def test_task_kanban_empty_columns_marked_none():
+    """With no tasks the card still renders all columns, each marked 无,
+    and stays green (nothing awaiting approval)."""
+    from helpers import isolated_env
+    with isolated_env(team={"agents": {"worker_cc": {"cli": "claude-code"}}}):
+        reply = slash.dispatch("/task", _ctx())
+    assert isinstance(reply, dict)
+    body = reply["body"]["elements"][0]["content"]
+    assert "暂无任何 task" in body
+    assert reply["header"]["template"] == "green"
+
+
+def test_task_card_turns_yellow_when_pending_approval():
+    """A task sitting in 需审批 paints the card yellow so the boss notices
+    something awaits their decision."""
+    from helpers import isolated_env
+    from claudeteam.store import tasks
+    with isolated_env(team={"agents": {"worker_cc": {"cli": "claude-code"}}}):
+        tasks.create("worker_cc", "需要拍板的活")
+        tasks.update("T-1", status="进行中")
+        tasks.pause("T-1")
+        reply = slash.dispatch("/task", _ctx())
+    assert reply["header"]["template"] == "yellow"
+
+
+def test_task_handler_never_writes_to_store():
+    """/task is read-only: dispatching it must not mutate tasks.json."""
+    from helpers import isolated_env
+    from claudeteam.store import tasks
+    with isolated_env(team={"agents": {"worker_cc": {"cli": "claude-code"}}}):
+        tasks.create("worker_cc", "原样不动")
+        before = tasks.list_tasks()
+        slash.dispatch("/task", _ctx())
+        after = tasks.list_tasks()
+    assert before == after
+
+
+def test_task_kanban_folds_terminal_columns_by_default():
+    """Boss feedback: don't flood the kanban with finished entries. By
+    default 已完成/已取消 render header+count only (▸ 已折叠), their item
+    rows stay hidden, and a footer hint names `/task all` as the expand.
+    Active columns keep full detail."""
+    from helpers import isolated_env
+    from claudeteam.store import tasks
+    team = {"agents": {"worker_cc": {"cli": "claude-code"},
+                       "worker_codex": {"cli": "codex"}}}
+    with isolated_env(team=team):
+        _seed_kanban()
+        tasks.create("worker_cc", "废弃活")                # T-5
+        tasks.update("T-5", status="已取消")
+        reply = slash.dispatch("/task", _ctx())
+    body = reply["body"]["elements"][0]["content"]
+    # terminal columns: count survives, detail rows don't
+    assert "已完成**（1）▸ 已折叠" in body
+    assert "已取消**（1）▸ 已折叠" in body
+    assert "老活" not in body and "T-4" not in body
+    assert "废弃活" not in body and "T-5" not in body
+    # active columns keep full detail
+    assert "重构结账" in body and "写测试" in body
+    # expand affordance is named
+    assert "/task all" in body
+
+
+def test_task_all_expands_terminal_columns():
+    """`/task all` (and `/task 全部`) shows terminal item rows and drops
+    the fold hint — full historical view on demand."""
+    from helpers import isolated_env
+    team = {"agents": {"worker_cc": {"cli": "claude-code"},
+                       "worker_codex": {"cli": "codex"}}}
+    with isolated_env(team=team):
+        _seed_kanban()
+        reply = slash.dispatch("/task all", _ctx())
+        reply_cn = slash.dispatch("/task 全部", _ctx())
+    for r in (reply, reply_cn):
+        body = r["body"]["elements"][0]["content"]
+        assert "老活" in body and "T-4" in body
+        assert "已折叠" not in body
+
+
+def test_task_empty_terminal_columns_render_none_not_fold():
+    """An EMPTY terminal column has nothing to hide — it renders the
+    plain 无 marker, not a fold line (folding zero rows would imply
+    hidden content that doesn't exist)."""
+    from helpers import isolated_env
+    from claudeteam.store import tasks
+    with isolated_env(team={"agents": {"worker_cc": {"cli": "claude-code"}}}):
+        tasks.create("worker_cc", "唯一的活")               # 待处理 only
+        reply = slash.dispatch("/task", _ctx())
+    body = reply["body"]["elements"][0]["content"]
+    assert "已折叠" not in body
+    assert body.count("　无") >= 2     # 已完成 + 已取消 both plain-empty

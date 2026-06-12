@@ -12,6 +12,7 @@ from __future__ import annotations
 import shlex
 
 from .base import CliAdapter, MULTILINE_SUBMIT_KEYS, SPINNER_CHARS
+from .claude_code import agent_home
 
 
 class QwenCodeAdapter(CliAdapter):
@@ -21,11 +22,24 @@ class QwenCodeAdapter(CliAdapter):
         # a blocking "update available" prompt at startup. --yolo
         # auto-approves every tool call (matches claude-code's
         # `--dangerously-skip-permissions` operationally — required for
-        # unattended pane operation).
+        # unattended pane operation). HOME=<agent_home> isolates each
+        # pane's ~/.qwen (auth cache + QWEN.md memory) across panes.
         return (
+            f"HOME={shlex.quote(agent_home(agent))} "
             f"DISABLE_UPDATE_CHECK=1 QWEN_AGENT_NAME={shlex.quote(agent)} "
             f"qwen --yolo"
         )
+
+    def display_model(self, model: str) -> str:
+        # qwen selects its model via env/config, not the team/argv model —
+        # render the source, not a stale alias the CLI never received.
+        return "qwen 自身配置 (env/config)"
+
+    def native_memory_path(self, agent: str) -> str:
+        # qwen loads ~/.qwen/QWEN.md into the system prompt at session
+        # start. It does NOT re-read from disk after its own compaction,
+        # so a mid-session anchor change still needs a reidentify inject.
+        return f"{agent_home(agent)}/.qwen/QWEN.md"
 
     def ready_markers(self) -> list[str]:
         # TUI ready markers from qwen-code's Ink banner + prompt; "qwen>"
@@ -45,11 +59,3 @@ class QwenCodeAdapter(CliAdapter):
     def submit_keys(self) -> list[str]:
         # Ink-based UI, same submit pattern as Codex / Kimi / Gemini
         return list(MULTILINE_SUBMIT_KEYS)
-
-    def rate_limit_markers(self) -> list[str]:
-        return [
-            "rate limit",
-            "quota exceeded",
-            "请求过于频繁",  # Chinese-localised throttle message
-            "429",
-        ]

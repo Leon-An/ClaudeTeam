@@ -6,7 +6,7 @@ emits `Decision(Action.SLASH, text=raw_text)`. `feishu/deliver.py` calls
 back to the chat — `str` via `chat.send_text`, `dict` (Feishu card
 schema) via `chat.send_card`. **No worker pane is touched, no LLM runs.**
 
-Supported commands (matches main's 9-command surface):
+Supported commands (matches main's 10-command surface):
 
     /help                              card listing every command
     /team                              card with each agent's pane state
@@ -20,6 +20,10 @@ Supported commands (matches main's 9-command surface):
     /compact [agent]                   inject /compact then schedule reidentify
     /stop <agent>                      send Ctrl-C to agent pane
     /clear <agent>                     /clear + re-init (rehire shape)
+    /task [all]                        read-only kanban of the task store
+                                       (grouped by status; intent back-link;
+                                       terminal columns fold to counts unless
+                                       `all`)
 
 Dispatch is a leading-token dict lookup (`/cmd args…` → handler(args, ctx))
 so detection and execution share one path — no per-handler regex preamble.
@@ -49,7 +53,7 @@ from claudeteam.feishu.cards import (
     remaining_color, rich_card, simple_card,
 )
 from claudeteam.runtime import tmux
-from claudeteam.store import local_facts
+from claudeteam.store import local_facts, tasks
 from claudeteam.util import fmt_bytes
 
 
@@ -156,7 +160,9 @@ _HELP_TEXT = """🆘 ClaudeTeam 自定义斜杠命令（零 LLM，router/hook �
 /send <agent> <msg>      → 直接注入消息到 agent 窗口
 /compact [agent]         → 群聊无参=压缩 manager；带参压缩指定 agent
 /stop <agent>            → 送 C-c 到 agent 窗口（中断当前动作）
-/clear <agent>           → 送 /clear + 重新入职 init_msg（相当于 rehire）"""
+/clear <agent>           → 送 /clear + 重新入职 init_msg（相当于 rehire）
+/task [all]              → 任务看板：按状态分组（只读）；已完成/已取消
+                           默认折叠为计数，加 all 展开明细"""
 
 
 def _handle_help(args: str, ctx: SlashContext) -> dict:
@@ -662,6 +668,83 @@ def _handle_clear(args: str, ctx: SlashContext) -> str:
     return f"✅ /clear → {ctx.session}:{agent} · 已 /clear + 重新入职 init_msg"
 
 
+# Kanban columns rendered in this fixed order; same status vocabulary as
+# store.tasks.VALID_STATUSES. Glyphs let the boss scan a column at a glance.
+_TASK_COLUMNS = (
+    ("待处理", "📋"),
+    ("进行中", "🔄"),
+    ("需审批", "⏳"),
+    ("已完成", "✅"),
+    ("已取消", "🚫"),
+)
+
+
+def _handle_task(args: str, ctx: SlashContext) -> dict:
+    """/task [all] → read-only kanban of the authoritative task store.
+
+    Reads tasks.json, groups every task by status in `_TASK_COLUMNS`
+    order, and lists `id · title · 👤assignee` per row — with the verbatim
+    intent back-link (`↳ I-n: …`) when the task carries one, so the boss
+    can trace a task to the original ask. Empty columns are marked 无.
+
+    Terminal columns (已完成/已取消) render COLLAPSED by default — header
+    with count only, no item rows — so a long-lived store doesn't bury
+    the live work under dozens of finished entries. `/task all` (or
+    `/task 全部`) expands them. Active columns are never folded: 待处理 /
+    进行中 / 需审批 are exactly what the boss opens the kanban for.
+
+    Pure render: never creates/updates/transitions a task. Card turns
+    yellow when anything sits in 需审批 (awaiting the boss), green else
+    — folding never affects the color signal (需审批 is never folded).
+    """
+    expand = args.strip().lower() in ("all", "全部")
+    rows = tasks.list_tasks()
+    buckets: dict[str, list[dict]] = {name: [] for name, _ in _TASK_COLUMNS}
+    for t in rows:
+        buckets.setdefault(t.get("status", ""), []).append(t)
+
+    folded = False
+    body_lines: list[str] = []
+    for name, glyph in _TASK_COLUMNS:
+        group = buckets.get(name, [])
+        fold = (not expand and group
+                and name in tasks.TERMINAL_STATUSES)
+        if fold:
+            body_lines.append(f"{glyph} **{name}**（{len(group)}）▸ 已折叠")
+            folded = True
+            continue
+        body_lines.append(f"{glyph} **{name}**（{len(group)}）")
+        if not group:
+            body_lines.append("　无")
+            continue
+        for t in group:
+            line = f"　`{t['id']}` {t.get('title') or '(无标题)'}"
+            assignee = t.get("assignee")
+            if assignee:
+                line += f" · 👤{assignee}"
+            body_lines.append(line)
+            iid = t.get("intent_id")
+            if iid:
+                intent = tasks.get_intent(iid)
+                raw = (intent or {}).get("raw_text", "").replace("\n", " ")
+                snippet = raw[:24] + ("…" if len(raw) > 24 else "")
+                tail = f": {snippet}" if snippet else ""
+                body_lines.append(f"　　↳ {iid}{tail}")
+    if folded:
+        body_lines.append("")
+        body_lines.append("_（终态条目已折叠为计数，`/task all` 展开明细）_")
+
+    if not rows:
+        body_lines = ["_(暂无任何 task)_"]
+
+    color = "yellow" if buckets.get("需审批") else "green"
+    return simple_card(
+        f"🗂️ /task — 任务看板 {beijing_stamp(ctx.now)}",
+        "\n".join(body_lines),
+        color=color,
+    )
+
+
 _HANDLERS: dict[str, Callable[[str, SlashContext], str]] = {
     "/help": _handle_help,
     "/team": _handle_team,
@@ -672,9 +755,10 @@ _HANDLERS: dict[str, Callable[[str, SlashContext], str]] = {
     "/compact": _handle_compact,
     "/stop": _handle_stop,
     "/clear": _handle_clear,
+    "/task": _handle_task,
 }
-# 9 chat slash commands: /help /team /health /usage /tmux /send
-# /compact /stop /clear. Memory commands (`claudeteam recall` /
+# 10 chat slash commands: /help /team /health /usage /tmux /send
+# /compact /stop /clear /task. Memory commands (`claudeteam recall` /
 # `forget` / `remember`) live only as agent-pane CLIs, not chat slash.
 
 

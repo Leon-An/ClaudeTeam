@@ -25,6 +25,7 @@ the Feishu env into their `claudeteam say` shell-outs.
 """
 from __future__ import annotations
 
+import json
 import shlex
 from pathlib import Path
 
@@ -71,6 +72,63 @@ def _path_readable(p: Path) -> bool:
         return p.exists()
     except OSError:
         return False
+
+
+def _pick_claude_seed(candidates: list[Path]) -> bytes | None:
+    """Choose the bytes to seed a fresh agent ~/.claude.json with.
+
+    claude needs the `oauthAccount` key here or it pops the OAuth login
+    dialog (credentials.json alone isn't enough). Walk `candidates` in
+    priority order and return the first that carries an account; if none
+    do, return the first readable one anyway so onboarding/migration
+    flags still land. None when nothing is readable.
+
+    deploy-issues 2026-06-08: the Dockerfile's `claude --version` leaves
+    a stub /root/.claude.json with no oauthAccount. Seeding from it blind
+    (it sorts before the real /root/host-claude.json mount) put every
+    agent at the login screen despite a valid CLAUDE_CODE_OAUTH_TOKEN.
+    """
+    seed = None
+    for src in candidates:
+        if not _path_readable(src):
+            continue
+        try:
+            data = src.read_bytes()
+        except OSError:
+            continue
+        if seed is None:
+            seed = data
+        if b'"oauthAccount"' in data:
+            return data
+    return seed
+
+
+def _mark_project_trusted(claude_json: Path, workdir: Path) -> None:
+    """Pre-accept claude's per-folder trust dialog for `workdir` by
+    setting projects[workdir].hasTrustDialogAccepted in the agent's
+    ~/.claude.json. The seed source (host account) only lists the
+    operator's own project paths, so a fresh container agent-home blocks
+    at the interactive "Is this a project you trust?" gate on first
+    spawn — which stalls wait_until_ready and skips the identity init
+    prompt (2026-06-08 docker smoke). Mirrors codex's
+    ensure_workdir_trusted. Idempotent + best-effort: a malformed
+    claude.json or read-only home never aborts `claudeteam start`.
+    """
+    key = str(workdir)
+    try:
+        data = json.loads(claude_json.read_text())
+    except (OSError, ValueError):
+        return
+    if not isinstance(data, dict):
+        return
+    entry = data.setdefault("projects", {}).setdefault(key, {})
+    if entry.get("hasTrustDialogAccepted") is True:
+        return  # already trusted — skip the (148 KB) rewrite
+    entry["hasTrustDialogAccepted"] = True
+    try:
+        claude_json.write_text(json.dumps(data))
+    except OSError:
+        pass
 
 
 def _ensure_claude_agent_home(agent: str) -> None:
@@ -139,13 +197,6 @@ def _ensure_claude_agent_home(agent: str) -> None:
                 cred_link.write_bytes(user_creds.read_bytes())
             except OSError:
                 pass
-    user_claude_json = Path.home() / ".claude.json"
-    claude_json = home / ".claude.json"
-    if _path_readable(user_claude_json) and not claude_json.exists():
-        try:
-            claude_json.write_bytes(user_claude_json.read_bytes())
-        except OSError:
-            pass
     settings = claude_dir / "settings.json"
     if not settings.exists():
         settings.write_text(
@@ -172,19 +223,127 @@ def _ensure_claude_agent_home(agent: str) -> None:
             projects_link.symlink_to(projects_target)
         except OSError:
             pass
-    # Seed ~/.claude.json from host's read-only mount once. Without
-    # `userID` + `oauthAccount` keys claude pops the OAuth login
-    # dialog (the credentials.json alone isn't enough — claude checks
-    # ~/.claude.json for "you've completed login" state). After the
-    # initial copy, the per-agent file is writable so claude can
-    # update its own session counters without affecting other agents.
+    # Seed ~/.claude.json once. Without the `oauthAccount` + `userID`
+    # keys claude pops the OAuth login dialog (credentials.json alone
+    # isn't enough — claude checks ~/.claude.json for "login complete"
+    # state). Two candidate sources, in priority order: the explicit
+    # Docker mount (/root/host-claude.json) and the invoking user's own
+    # ~/.claude.json (host deployment). The Dockerfile's `claude
+    # --version` leaves a stub /root/.claude.json with no oauthAccount,
+    # so prefer whichever source actually carries an account; only fall
+    # back to an account-less file if that's all we have. After the copy
+    # the per-agent file is writable so claude can update its own
+    # session counters without affecting other agents.
     claude_json = home / ".claude.json"
-    host_claude_json = Path("/root/host-claude.json")
-    if _path_readable(host_claude_json) and not claude_json.exists():
-        try:
-            claude_json.write_bytes(host_claude_json.read_bytes())
-        except OSError:
-            pass
+    if not claude_json.exists():
+        seed = _pick_claude_seed(
+            [Path("/root/host-claude.json"), Path.home() / ".claude.json"])
+        if seed is not None:
+            try:
+                claude_json.write_bytes(seed)
+            except OSError:
+                pass
+    # Pre-trust the pane's working dir so claude doesn't block on the
+    # folder-trust dialog. Path.cwd() is the spawn cwd inherited by the
+    # tmux pane (same assumption as codex's ensure_workdir_trusted).
+    if claude_json.exists():
+        _mark_project_trusted(claude_json, Path.cwd())
+
+
+# Per-CLI OAuth/credential file to copy from the operator HOME into the
+# agent's isolated HOME so HOME isolation (Wave 2) doesn't log the CLI out.
+# Keyed by the adapter's process_name() so the package-name aliases
+# (kimi-cli / qwen-cli) collapse onto one entry. Value:
+#   (rel  — path of the cred file under HOME, identical on both sides,
+#    skip_env — env var whose presence means the CLI authenticates by API
+#               key and needs no seeded OAuth file; None = always seed)
+#
+# claude-code is absent — its richer seeding (macOS keychain, ~/.claude.json,
+# folder trust) lives in _ensure_claude_agent_home. kimi is absent on
+# purpose: its adapter does NOT set HOME=<agent_home> (Plan B keeps cwd=repo
+# with no native file), so the pane already inherits the operator's
+# ~/.kimi/config.toml — there is nothing to isolate and nothing to seed.
+# (expert K3 confirmed in the prod container: worker_kimi has no agent-home
+# at all.) If kimi ever gains HOME isolation, add its seed entry here.
+_CLI_CRED_SEEDS: dict[str, tuple[str, str | None]] = {
+    "codex":  (".codex/auth.json", None),
+    "gemini": (".gemini/oauth_creds.json", "GEMINI_API_KEY"),
+    "qwen":   (".qwen/oauth_creds.json", "OPENAI_API_KEY"),
+}
+
+
+def _seed_cli_credentials(agent: str, cli: str) -> None:
+    """Copy the operator's OAuth credential file for `cli` into the agent's
+    isolated HOME, so the per-agent `HOME=<agent_home>` (codex: `CODEX_HOME`)
+    doesn't strand the CLI at a fresh, logged-out state dir.
+
+    Best-effort throughout — any of these silently skips, never aborting the
+    provision:
+      • CLI not in `_CLI_CRED_SEEDS` (claude handled elsewhere; kimi not
+        isolated)
+      • the skip-env is set (API-key auth → OAuth file unnecessary)
+      • the operator source file is absent / unreadable (never logged in)
+      • the dest already exists (don't clobber a refreshed per-agent token)
+      • the dest HOME isn't writable
+
+    Only the credential file is touched: codex's per-agent config.toml
+    (written by `ensure_workdir_trusted`) lives beside auth.json and is
+    never overwritten here."""
+    try:
+        adapter = get_adapter(cli)
+    except KeyError:
+        return
+    spec = _CLI_CRED_SEEDS.get(adapter.process_name())
+    if spec is None:
+        return
+    rel, skip_env = spec
+    if skip_env and env_str(skip_env):
+        return
+    from claudeteam.agents.claude_code import agent_home as _agent_home
+    src = Path.home() / rel
+    dst = Path(_agent_home(agent)) / rel
+    if dst.exists() or not _path_readable(src):
+        return
+    try:
+        data = src.read_bytes()
+    except OSError:
+        return
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(data)
+    except OSError:
+        pass
+
+
+def _ensure_agent_home(agent: str, cli: str) -> None:
+    """Provision the per-agent HOME for any CLI before spawn.
+
+    claude-code gets the full seeding (keychain creds, settings.json,
+    ~/.claude.json, folder trust) via `_ensure_claude_agent_home`. Every
+    other CLI just needs its per-agent HOME *directory* to exist so the
+    spawn's `HOME=<agent_home>` (and codex's `CODEX_HOME`) lands the CLI's
+    own config / cache / native-memory file in an isolated dir instead of
+    racing the operator HOME across panes. The native memory file itself
+    (AGENTS.md / GEMINI.md / QWEN.md) is written by `identity.write` via
+    `atomic_write_text`, which creates its own parent dir — so all we owe
+    here is the home root.
+
+    For the HOME-isolated non-claude CLIs we additionally seed the
+    operator's OAuth credential into the isolated HOME (see
+    `_seed_cli_credentials`), otherwise the fresh state dir would leave the
+    CLI logged out.
+
+    Best-effort: an unwritable path must not fail the whole provision (the
+    init-prompt memory injection still delivers identity + digest)."""
+    if cli == "claude-code":
+        _ensure_claude_agent_home(agent)
+        return
+    from claudeteam.agents.claude_code import agent_home as _agent_home
+    try:
+        Path(_agent_home(agent)).mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    _seed_cli_credentials(agent, cli)
 
 
 def pane_env_prefix() -> str:
@@ -261,10 +420,11 @@ def provision_pane(agent: str, target: tmux.Target) -> str:
     if cfg.get("lazy"):
         local_facts.upsert_status(agent, "待命", "lazy: CLI starts on first message")
         return LAZY
+    _ensure_agent_home(agent, cli)
     if cli == "codex-cli":
-        ensure_workdir_trusted(Path.cwd())
-    if cli == "claude-code":
-        _ensure_claude_agent_home(agent)
+        from claudeteam.agents.codex_cli import codex_home
+        ensure_workdir_trusted(
+            Path.cwd(), config_path=Path(codex_home(agent)) / "config.toml")
     try:
         adapter = get_adapter(cli)
     except KeyError as e:

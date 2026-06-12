@@ -48,6 +48,87 @@ different `runtime_config.json` (or none) and fails with
 `chat_id not set`."""
 
 
+# Standing "maintain your own memory" policy. Appended to the CLI-native
+# always-loaded memory file (claude's ~/.claude/CLAUDE.md) so the
+# instruction is in context on every turn and survives /compact — unlike
+# the one-shot init prompt, which the CLI's own context compaction can
+# summarise away. We tell the agent WHEN to call `claudeteam remember`
+# rather than auto-extracting from logs: the agent is the best judge of
+# what's worth keeping, and the trigger list is deliberately bounded so a
+# hot agent doesn't flood its 200-entry window with low-value notes.
+_MEMORY_POLICY = """\
+## 记忆维护（必守 · 别等人提醒）
+
+`claudeteam remember <你的名字> <kind> "<一句话>"` 写进 durable memory，会在你
+下次重开 / /clear / /compact 后自动回到上下文。**只记“下次回来不想重新发现的东西”。**
+
+什么时候必须记（逐项触发，一事一条）：
+- **decision**：做了影响后续的非显然选择（架构 / 方案 / 取舍）。
+- **learning**：发现关于本仓库 / 环境、会复发的事实（如“测试用 python3 tests/run.py”）。
+- **blocker**：碰到当下解决不了、需要下次或他人接手的阻塞。
+- **task_completed**：完成一项被派的任务。
+- **task_assigned**：（manager）派出一项任务时。
+
+绝不要记（这些是 `claudeteam log` 的活，不是 remember）：
+- 每一步微操作、临时状态（“正在改 X 文件”）、长日志、密钥 / token。
+- 已经记过的同一件事（先想想是否重复）。"""
+
+
+# Team working principles every agent is born with. Shared (like
+# _WORKDIR_RULE) so manager + worker stay in sync, and injected into the
+# identity body — which means it reaches every CLI via identity.md AND
+# lands in claude's always-loaded ~/.claude/CLAUDE.md (survives /compact),
+# because native_memory_text() renders from this same body. These encode
+# the intent→task→approval discipline the tasks feature exists to enforce:
+# verbal "ok" is not a state transition, and the boss's verbatim ask must
+# never be paraphrased away.
+_TEAM_PRINCIPLES = """\
+## 团队原则（必守 · 初始化即带上）
+
+1. **真实需求走正式 task CLI**：接到老板/manager 的真实需求，先
+   `claudeteam task intent create "<老板原话>"` 建意图，再
+   `claudeteam task create <你> "<标题>" --intent I-n` 建任务，**务必带
+   `--intent` 回链**。别只在群里口头答应就开干——没有 task 记录的活等于没派。
+2. **要拍板/审批的步骤走正式状态机**：需要老板/manager 拍板的环节，用
+   `claudeteam task pause <T-n> --note "<待决问题>"`（进行中 → 需审批）挂起等批，
+   **`--note` 必须带**——审批请求进的是收件箱，没有 note 批的人只看到
+   "T-n 需审批"，不知道要拍什么板。老板批了走 `claudeteam task approve
+   <T-n> --note "<裁决内容>"`——**裁决了什么必须随 --note 走状态机**，别靠
+   群聊/自由文本接力（会输给恢复时序）。打回走 `claudeteam task reject`。
+   **审批时活已经完工就用 `approve --done` 直接收口**，别批回 进行中 留一条
+   实际已完工的活任务挂着。**被批回继续的人：动手前先核对裁决内容**（收件箱
+   回执或 `task get <T-n>` 的最近裁决）——锚点里可能只有你挂起时的问题；
+   老板没给的决定**绝不允许脑补**，查不到裁决就再问一次。
+   **别用一句“好的我等你确认”代替状态流转**——口头确认不是状态机。
+3. **老板原话逐字保真、不漂移**：意图记录里的 `raw_text` 永远逐字保留、绝不
+   改写/总结/翻译；它会锚进你的 CLAUDE.md，`/compact` 后仍能逐字复原。任何
+   时候要原话就 `claudeteam task intent get I-n` 现读，按原话推进，别凭记忆复述。
+4. **老板的纠正/建议要真听进并落到记忆**：群里老板纠正你或提建议，别只口头
+   答应——立刻 `claudeteam remember <你> learning "<这条纠正>"` 落进 durable
+   memory，让它在 /clear、/compact 后仍在，下次不再犯同样的错。
+5. **领活开工先置状态**：接到带 T-n 的活，动手第一件事是
+   `claudeteam task update T-n --status 进行中`。不置的代价是双重的：
+   防漂移锚点只收 进行中/需审批 的任务——不置状态，老板原话不进你的
+   常驻记忆，你在裸奔干活；同时看板上老板看到的还是"待处理"，
+   状态对老板失真。先置状态，再动手。
+6. **自关任务必须同步回报**：交付物确已产出时可以自己 `task done <T-n>`
+   收口（包括 /compact / 重启后续推时发现活其实已干完的情况），但**收口的
+   同一时刻必须 `claudeteam send manager <你> "<T-n 已完成+证据>"` 回报**——
+   状态机合法 ≠ manager 知情；不回报的自关等于把验收环节跳过了。
+
+## 日常操作速查（高频，新员工先看这个）
+
+- **群里向老板播报**：`claudeteam say <你> "<内容>" --to user`；内部进度改
+  `--to manager`。`--to` 别省——它决定消息给谁看。
+- **给同事/上级发消息**：`claudeteam send <收件人> <你> "<内容>"`——
+  **收件人在前、自己在后**，顺序最容易写反，发前看一眼。
+- **收件箱**：`claudeteam inbox <你>` 查未读；处理完一条就
+  `claudeteam read <local_id>` 销账，别攒。
+- **领活开工**：第一件事置状态 `task update T-n --status 进行中`（原则 5）。
+- **完工**：`task done T-n` + 同一时刻 `send manager` 带证据回报（原则 6）。
+- **要老板原话**：`task intent get I-n` 现读，别凭记忆复述（原则 3）。"""
+
+
 _MANAGER_BODY = """\
 # {name} — {role}
 
@@ -130,6 +211,8 @@ claudeteam team
 消息会乱。每次 say 想清楚接收对象再写命令。
 
 {workdir_rule}
+
+{team_principles}
 
 ## 工作流
 1. 启动 → 读身份文件 → `claudeteam inbox manager`
@@ -246,7 +329,7 @@ claudeteam send <agent> manager "<原指令精简转述>" 高
 
 ## Memory 用法（重要）
 
-`claudeteam remember` 写到 `facts/<agent>/memory.jsonl`，会在该 agent 下次
+`claudeteam remember` 写到 `agents/<agent>/memory.jsonl`，会在该 agent 下次
 spawn / `/clear` 后自动注入到 init prompt。**不是审计 log**（那是 `claudeteam log`），
 是策划过的"我下次回来需要再读一遍"的关键事项。典型场景：
 - 派给员工任务时同步给员工 + 自己各写一条 `remember`，避免 /clear 后丢上下文
@@ -300,6 +383,8 @@ You are **{name}**, a team worker.  Your role is **{role}** running on
 然后**显式带上 `--to user` 或 `--to manager`**。
 
 {workdir_rule}
+
+{team_principles}
 
 ## Quick reference
 - `claudeteam inbox {name}` — unread
@@ -361,6 +446,59 @@ def _render_team_specialties_block() -> str:
     return "\n\n## 团队成员专长（派单参考）\n\n" + "\n".join(rows)
 
 
+def _render_intent_anchor(agent: str) -> str:
+    """Anchor the boss's verbatim intent for this agent's active tasks into
+    always-loaded context — the anti-drift double-insurance.
+
+    Re-read live from the store on every render, so the text is the
+    immutable `intent.raw_text` (never a drifted paraphrase). Covers the
+    agent's non-terminal (进行中 / 需审批) tasks that back-link an intent.
+    Empty string when there's no such task — no section, no noise.
+
+    Each task also surfaces its `approval_note` when present: the pending
+    question while suspended (需审批), the latest verdict after
+    approve --note / reject feedback (进行中). Regression smoke A1
+    (2026-06-11): a worker resumed from an anchor holding only its own
+    pending question and invented the answer the boss never gave — the
+    anchor must carry what was DECIDED, not just what was asked.
+
+    Must never raise: this feeds the spawn / native-memory path, and a
+    throw here would break the agent's whole wake. Any store hiccup → "".
+    """
+    try:
+        from claudeteam.store import tasks
+        active = [t for t in tasks.list_tasks(assignee=agent)
+                  if t.get("status") in ("进行中", "需审批") and t.get("intent_id")]
+        anchors: dict[str, tuple[str, list[str]]] = {}
+        notes: list[str] = []
+        for t in active:
+            intent = tasks.get_intent(t["intent_id"])
+            raw = (intent or {}).get("raw_text")
+            if raw:
+                anchors.setdefault(intent["id"], (raw, []))[1].append(t["id"])
+            note = (t.get("approval_note") or "").strip()
+            if note:
+                label = ("待决问题" if t.get("status") == "需审批"
+                         else "最近裁决")
+                notes.append(f"　↳ {t['id']} {label}：{note}")
+    except Exception:
+        return ""
+    if not anchors:
+        return ""
+    lines = [
+        "## 老板原话锚点（防漂移 · 必读）",
+        "",
+        "下面是老板**逐字原话**（不可改写 / 不要压缩）。若你的理解与它冲突，"
+        "一律以原话为准；",
+        "需要时用 `claudeteam task intent get <I-n>` 从 store 现读最新原文。",
+        "",
+    ]
+    for iid, (raw, tids) in anchors.items():
+        lines.append(f"- **{iid}**（{'/'.join(tids)}）：{raw}")
+    lines.extend(notes)
+    return "\n".join(lines)
+
+
 def render(agent: str, *, role: str | None = None,
            cli: str | None = None, model: str | None = None,
            specialty: list[str] | None = None,
@@ -379,12 +517,21 @@ def render(agent: str, *, role: str | None = None,
     role = role if role is not None else (cfg.get("role") or agent)
     cli = cli if cli is not None else (cfg.get("cli") or "claude-code")
     model = model if model is not None else (cfg.get("model") or "")
+    # Let the adapter map the resolved model to its display label: CLIs
+    # that ignore the team/argv model (gemini/qwen/kimi) or only honour it
+    # conditionally (codex) must not render a model the agent isn't running.
+    try:
+        from claudeteam.agents import get_adapter
+        model = get_adapter(cli).display_model(model)
+    except KeyError:
+        model = model or "默认"
     specialty = specialty if specialty is not None else (cfg.get("specialty") or [])
     tone = tone if tone is not None else (cfg.get("tone") or "")
     notes = notes if notes is not None else (cfg.get("notes") or "")
     body = _MANAGER_BODY if agent == "manager" else _WORKER_BODY
     rendered = body.format(name=agent, role=role, cli=cli, model=model,
-                           workdir_rule=_WORKDIR_RULE)
+                           workdir_rule=_WORKDIR_RULE,
+                           team_principles=_TEAM_PRINCIPLES)
     # Append optional sections at the end of the identity body. Manager
     # also gets the team specialties block so it can pick the right worker.
     rendered += _render_specialty_section(specialty)
@@ -462,15 +609,44 @@ def init_prompt(agent: str) -> str:
             "    绝不代员工发汇总.\n"
             "  • 派活只给目标 + 验收 + 边界, 不预设 How.\n"
         )
+    anchor = _render_intent_anchor(agent)
     recall = memory.render_for_prompt(agent)
-    if not recall:
+    tail = "\n\n".join(p for p in (anchor, recall) if p)
+    if not tail:
         return base
-    return f"{base}\n\n{recall}\n\n继续之前未完成的工作；如已完成则确认并待命。"
+    return f"{base}\n\n{tail}\n\n继续之前未完成的工作；如已完成则确认并待命。"
 
 
 def identity_path(agent: str) -> Path:
     """Where the rendered identity for `agent` lives on disk."""
-    return paths.state_dir() / "agents" / agent / "identity.md"
+    return paths.agent_dir(agent) / "identity.md"
+
+
+def native_memory_text(agent: str, *, role: str | None = None,
+                       cli: str | None = None, model: str | None = None,
+                       specialty: list[str] | None = None,
+                       tone: str | None = None,
+                       notes: str | None = None) -> str:
+    """Full text for a CLI-native always-loaded memory file (claude's
+    ~/.claude/CLAUDE.md): identity body + standing remember policy +
+    current durable-memory digest.
+
+    A *projection* — source of truth is the team config (identity body)
+    and `memory.jsonl` (digest). `write()` regenerates it on every
+    (re)provision so the native file tracks the digest, and because
+    claude loads it natively it survives /compact (which can bury the
+    one-shot init prompt)."""
+    body = render(agent, role=role, cli=cli, model=model,
+                  specialty=specialty, tone=tone, notes=notes)
+    parts = [body]
+    anchor = _render_intent_anchor(agent)
+    if anchor:
+        parts.append(anchor)
+    parts.append(_MEMORY_POLICY)
+    recall = memory.render_for_prompt(agent)
+    if recall:
+        parts.append(recall)
+    return "\n\n".join(parts)
 
 
 def write(agent: str, *, role: str | None = None,
@@ -478,8 +654,98 @@ def write(agent: str, *, role: str | None = None,
           specialty: list[str] | None = None,
           tone: str | None = None,
           notes: str | None = None) -> Path:
-    """Render and persist the identity file; return its path."""
+    """Render and persist the identity file; return its path.
+
+    Also writes the CLI-native memory file (claude's ~/.claude/CLAUDE.md)
+    when the agent's adapter declares one — so identity + remember policy
+    + memory digest are loaded natively every session and survive
+    /compact. No-op for CLIs without a native memory file."""
     target = identity_path(agent)
     atomic_write_text(target, render(agent, role=role, cli=cli, model=model,
                                       specialty=specialty, tone=tone, notes=notes))
+    _write_native_memory(agent, role=role, cli=cli, model=model,
+                         specialty=specialty, tone=tone, notes=notes)
     return target
+
+
+def _write_native_memory(agent: str, *, role: str | None = None,
+                         cli: str | None = None, model: str | None = None,
+                         specialty: list[str] | None = None,
+                         tone: str | None = None,
+                         notes: str | None = None) -> None:
+    """Best-effort write of the agent's CLI-native memory file. Resolves
+    the agent's adapter; does nothing if it has no `native_memory_path`.
+
+    Tolerates OSError — an unwritable agent HOME must not fail the whole
+    provision (identity.md is already persisted and the init prompt still
+    injects the memory digest) — but WARNS instead of swallowing: a failed
+    write here means the anti-drift anchor silently stops tracking, which
+    is exactly the failure the boss should hear about (disk full, perms).
+    Lazy import of the adapter registry avoids any import cycle with
+    `agents/__init__`."""
+    resolved_cli = cli if cli is not None else (
+        config.agent_config(agent).get("cli") or "claude-code")
+    try:
+        from claudeteam.agents import get_adapter
+        path = get_adapter(resolved_cli).native_memory_path(agent)
+    except KeyError:
+        return
+    if not path:
+        return
+    try:
+        atomic_write_text(Path(path), native_memory_text(
+            agent, role=role, cli=cli, model=model,
+            specialty=specialty, tone=tone, notes=notes))
+    except OSError as e:
+        from claudeteam.util import warn
+        warn(f"⚠️ {agent}: native memory write failed ({path}): {e} — "
+             f"防漂移锚点未落盘, identity.md 仍有效")
+
+
+def refresh_native_memory(agent: str) -> bool:
+    """Re-project the agent's CLI-native memory file (claude's
+    ~/.claude/CLAUDE.md) so its always-loaded intent anchor tracks the
+    agent's *current* active tasks.
+
+    The native file is otherwise only (re)written at provision / reidentify,
+    so an already-online, /compact-ed worker keeps a stale anchor that can
+    point at an already-finished task — exactly the drift the anchor exists
+    to prevent. Call this after any task transition that may change an
+    assignee's active-intent set.
+
+    Writes only when the projection actually changed (no needless disk
+    churn) and never raises — a refresh failure must not break the task
+    command that triggered it. Returns True iff the file was rewritten;
+    False when there's no native file or it was already current.
+
+    A swallowed failure here means a /compact-ed worker keeps acting on a
+    stale anchor with zero traces — so unexpected exceptions WARN to stderr
+    (the task command's caller sees it inline) instead of dying silent.
+    The expected no-op cases (no native file for this CLI, unknown agent /
+    adapter) stay quiet: they're configuration, not failure.
+
+    Defaults (role / cli / model / …) come from team config, identical to
+    how `write()` is invoked at provision, so the refreshed projection
+    matches the provisioned one apart from the live anchor + digest.
+    """
+    try:
+        resolved_cli = config.agent_config(agent).get("cli") or "claude-code"
+        from claudeteam.agents import get_adapter
+        path = get_adapter(resolved_cli).native_memory_path(agent)
+    except KeyError:
+        return False    # unknown agent / unregistered adapter — config, not failure
+    if not path:
+        return False
+    try:
+        new_text = native_memory_text(agent)
+        target = Path(path)
+        if target.exists() and \
+                target.read_text(encoding="utf-8") == new_text:
+            return False
+        atomic_write_text(target, new_text)
+        return True
+    except Exception as e:
+        from claudeteam.util import warn
+        warn(f"⚠️ {agent}: anchor refresh failed ({path}): {e} — "
+             f"该 agent 的防漂移锚点可能已过期")
+        return False
