@@ -4,11 +4,11 @@ Upsert an agent's latest status (no history; latest wins).  Each agent
 has at most one status row.  Reading is via `claudeteam status <agent>`
 with no further args.
 """
+
 from __future__ import annotations
 
 from claudeteam.store import local_facts
 from claudeteam.util import usage_error
-
 
 USAGE = (
     "usage:\n"

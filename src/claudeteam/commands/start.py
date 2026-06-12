@@ -3,8 +3,10 @@
 Bring up the whole team described in team.json: one tmux session, one
 window per agent, each running its configured CLI.
 """
+
 from __future__ import annotations
 
+from claudeteam.agents import DEFAULT_CLI
 from claudeteam.runtime import config, lifecycle, tmux
 from claudeteam.util import error_exit, maybe_print_help, warn
 
@@ -39,7 +41,7 @@ def main(argv: list[str]) -> int:
         # would re-read team config from disk per agent (no in-process
         # cache, by design). lifecycle.provision_pane has its own
         # internal hoist for the same reason.
-        cli = agents.get(agent, {}).get("cli", "claude-code")
+        cli = agents.get(agent, {}).get("cli", DEFAULT_CLI)
         outcome = lifecycle.provision_pane(agent, target)
         if outcome == lifecycle.LAZY:
             print(f"  → {agent} ({cli}) lazy-pane ready")
@@ -48,8 +50,7 @@ def main(argv: list[str]) -> int:
         elif outcome == lifecycle.CONFIG_ERROR:
             warn(f"⚠️  {agent} skipped: bad cli config in team.json")
         elif outcome == lifecycle.READY_NO_INIT:
-            warn(f"⚠️  {agent} CLI didn't show ready marker in 60s; "
-                 f"identity init prompt skipped")
+            warn(f"⚠️  {agent} CLI didn't show ready marker in 60s; identity init prompt skipped")
             print(f"  → {agent} ({cli}) spawned (no init)")
         else:  # READY
             print(f"  → {agent} ({cli}) spawned")

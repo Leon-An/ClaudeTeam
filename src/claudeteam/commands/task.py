@@ -1,18 +1,22 @@
 """`claudeteam task <subcommand>`
 
-  task create <assignee> <title> [--by <agent>] [--desc <text>]
-  task update <id>       [--status S] [--assignee A] [--title T] [--desc D]
-  task list              [--status S] [--assignee A]
-  task get <id>
-  task done <id>          (alias for `update <id> --status 已完成`)
+task create <assignee> <title> [--by <agent>] [--desc <text>]
+task update <id>       [--status S] [--assignee A] [--title T] [--desc D]
+task list              [--status S] [--assignee A]
+task get <id>
+task done <id>          (alias for `update <id> --status 已完成`)
 """
+
 from __future__ import annotations
 
 from claudeteam.store import tasks
 from claudeteam.util import (
-    error_exit, fmt_time_ms, maybe_print_help, pop_flag, usage_error,
+    error_exit,
+    fmt_time_ms,
+    maybe_print_help,
+    pop_flag,
+    usage_error,
 )
-
 
 USAGE = (
     "usage:\n"
@@ -60,8 +64,7 @@ def _cmd_update(rest: list[str]) -> int:
         return usage_error(USAGE)
     tid = rest[0]
     try:
-        ok = tasks.update(tid, status=status, assignee=assignee,
-                          title=title, description=desc)
+        ok = tasks.update(tid, status=status, assignee=assignee, title=title, description=desc)
     except ValueError as e:
         return error_exit(f"❌ {e}")
     if not ok:
@@ -105,9 +108,9 @@ def _cmd_get(rest: list[str]) -> int:
 SUBCOMMANDS = {
     "create": _cmd_create,
     "update": _cmd_update,
-    "done":   _cmd_done,
-    "list":   _cmd_list,
-    "get":    _cmd_get,
+    "done": _cmd_done,
+    "list": _cmd_list,
+    "get": _cmd_get,
 }
 
 

@@ -13,6 +13,7 @@ Order:
   1. Best-effort `down` — kill watchdog + router, kill tmux session
   2. rmtree state_dir
 """
+
 from __future__ import annotations
 
 import shutil
@@ -21,7 +22,6 @@ import sys
 from claudeteam.commands import down as _down
 from claudeteam.runtime import paths
 from claudeteam.util import error_exit, maybe_print_help, pop_bool_flag, reject_extra_args
-
 
 USAGE = "usage: claudeteam reset [--yes]"
 

@@ -8,6 +8,7 @@ pyproject.toml `[project] version`). Useful in shell scripts:
 and in smoke conductors that want to assert they're testing the
 checkout they think they're testing.
 """
+
 from __future__ import annotations
 
 from claudeteam.util import maybe_print_help
@@ -23,7 +24,8 @@ def _read_version() -> str:
        a fresh venv before `pip install -e`).
     """
     try:
-        from importlib.metadata import version, PackageNotFoundError
+        from importlib.metadata import PackageNotFoundError, version
+
         return version("claudeteam")
     except (PackageNotFoundError, ImportError):
         return "0.0.0+unknown"

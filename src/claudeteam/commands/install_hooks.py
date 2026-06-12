@@ -16,13 +16,13 @@ directory.
 Idempotent — overwrites existing files. Codex and Kimi panes ignore
 .claude/ so this is harmless for them.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 
 from claudeteam.runtime import config, tmux
 from claudeteam.util import atomic_write_text, maybe_print_help, usage_error, warn
-
 
 USAGE = "usage: claudeteam install-hooks [path]   (default: $PWD)"
 
@@ -64,9 +64,9 @@ _COMMANDS: dict[str, str] = {
         "`{emoji} {your-name} · {your role}` title. Group chat reads as\n"
         "structured per-role updates rather than raw text.\n"
         "\n"
-        "    claudeteam say <your-name> \"【报道】当前状态：在线 ✅，正在做 X\"\n"
-        "    claudeteam say <your-name> \"收到\"\n"
-        "    claudeteam say <your-name> \"完工：登录页 /app/login.html 已交付\"\n"
+        '    claudeteam say <your-name> "【报道】当前状态：在线 ✅，正在做 X"\n'
+        '    claudeteam say <your-name> "收到"\n'
+        '    claudeteam say <your-name> "完工：登录页 /app/login.html 已交付"\n'
         "\n"
         "Cards don't thread (`--reply <id>` is silently ignored).\n"
     ),
@@ -77,15 +77,14 @@ _COMMANDS: dict[str, str] = {
         "- `claudeteam task done <T-id>` when finished\n"
     ),
     "health": (
-        "Run `claudeteam health` and summarize: any red checks? any agent with "
-        "no heartbeat in the last 30 minutes?\n"
+        "Run `claudeteam health` and summarize: any red checks? any agent with no heartbeat in the last 30 minutes?\n"
     ),
     # Durable per-agent memory hooks. Without these `/remember` and
     # `/recall` would go through claude-code's LLM parse path instead
     # of CLI dispatch, slower and inconsistent with the other hooks.
     "remember": (
         "Take the user's argument as a memory note for yourself. "
-        "Run `claudeteam remember <your-name> <kind> \"<content>\" [--ref <ref>]` "
+        'Run `claudeteam remember <your-name> <kind> "<content>" [--ref <ref>]` '
         "where kind is one of: task_assigned / task_completed / learning / "
         "blocker / decision / note. Memory persists across /clear and "
         "auto-injects into your next init prompt.\n"
@@ -99,7 +98,7 @@ _COMMANDS: dict[str, str] = {
         "if you're manager — quicker than `tmux capture-pane -t ...` and the "
         "session name is auto-resolved from team.json so no typo risk. "
         "Output is plain text; pipe to grep / less / `claudeteam remember "
-        "<your-name> note \"$(claudeteam peek <agent> 5)\"` to record what "
+        '<your-name> note "$(claudeteam peek <agent> 5)"` to record what '
         "you saw.\n"
     ),
     "recall": (

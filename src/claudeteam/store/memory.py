@@ -32,14 +32,14 @@ API surface:
   `all_agents_with_memory()`                  → iterator for /health audit
   `kinds_summary()` / `kinds_sorted()`        → KNOWN_KINDS pretty-prints
 """
+
 from __future__ import annotations
 
 import json
-from typing import Iterable
+from collections.abc import Iterable
 
 from claudeteam.runtime import paths
 from claudeteam.util import flock, now_ms, read_jsonl
-
 
 _MAX_PER_AGENT = 200  # cap retained entries; oldest get dropped on overflow
 
@@ -91,8 +91,8 @@ def warn_unknown_kind(kind: str) -> None:
     """
     if kind and kind not in KNOWN_KINDS:
         from claudeteam.util import warn
-        warn(f"⚠️  --kind {kind!r} not in known kinds "
-             f"({sorted(KNOWN_KINDS)}); proceeding anyway")
+
+        warn(f"⚠️  --kind {kind!r} not in known kinds ({sorted(KNOWN_KINDS)}); proceeding anyway")
 
 
 def _agent_dir(agent: str):
@@ -122,10 +122,13 @@ def append(agent: str, kind: str, content: str, *, ref: str = "") -> dict:
     """
     if kind and kind not in KNOWN_KINDS:
         import sys
-        print(f"  ⚠️ memory.append: unknown kind {kind!r} for {agent} — "
-              f"convention is {sorted(KNOWN_KINDS)}; entry written "
-              f"anyway",
-              file=sys.stderr)
+
+        print(
+            f"  ⚠️ memory.append: unknown kind {kind!r} for {agent} — "
+            f"convention is {sorted(KNOWN_KINDS)}; entry written "
+            f"anyway",
+            file=sys.stderr,
+        )
     entry = {
         "kind": str(kind),
         "content": str(content or ""),
@@ -156,8 +159,7 @@ def list_recent(agent: str, *, limit: int = 20) -> list[dict]:
     return read_jsonl(_memory_file(agent))[-limit:]
 
 
-def list_recent_filtered(agent: str, *,
-                         kind: str = "", limit: int = 20) -> list[dict]:
+def list_recent_filtered(agent: str, *, kind: str = "", limit: int = 20) -> list[dict]:
     """Return up to `limit` most recent entries, oldest-first.
 
     Round-141: when `kind` is set, scans the FULL memory window for
@@ -219,8 +221,7 @@ def clear_kind(agent: str, kind: str) -> int:
             path.unlink()
         else:
             path.write_text(
-                "\n".join(json.dumps(r, ensure_ascii=False)
-                          for r in kept) + "\n",
+                "\n".join(json.dumps(r, ensure_ascii=False) for r in kept) + "\n",
                 encoding="utf-8",
             )
         return dropped
@@ -252,3 +253,65 @@ def all_agents_with_memory() -> Iterable[str]:
     for child in sorted(facts.iterdir()):
         if child.is_dir() and (child / "memory.jsonl").exists():
             yield child.name
+
+
+def cross_agent_search(
+    kind: str = "",
+    keyword: str = "",
+    *,
+    limit_per_agent: int = 10,
+) -> dict[str, list[dict]]:
+    """Search across all agents' memories for matching entries.
+
+    Returns {agent_name: [entries]} for agents with matches.
+    Filters by `kind` (exact match) and/or `keyword` (substring in content).
+    Both filters are AND-ed; empty string means "don't filter on this".
+
+    Use cases:
+      - manager 巡视: "what has the team learned about X?"
+      - cross-agent knowledge sharing: find which agent has a relevant
+        learning/blocker/decision about a topic
+      - debugging: find all blockers across the team
+
+    Example:
+        cross_agent_search(kind="blocker")  # all blockers across team
+        cross_agent_search(keyword="API")   # all entries mentioning API
+        cross_agent_search(kind="learning", keyword="auth")  # both
+    """
+    results: dict[str, list[dict]] = {}
+    for agent in all_agents_with_memory():
+        entries = list_recent(agent, limit=limit_per_agent)
+        if kind:
+            entries = [e for e in entries if e.get("kind") == kind]
+        if keyword:
+            kw = keyword.lower()
+            entries = [e for e in entries if kw in e.get("content", "").lower()]
+        if entries:
+            results[agent] = entries
+    return results
+
+
+def shared_context_for(agent: str, *, limit: int = 5) -> str:
+    """Build a markdown block summarizing OTHER agents' recent memories.
+
+    Injected into an agent's init prompt so it has cross-team awareness.
+    Only includes task_completed, learning, decision, and blocker entries
+    (not internal notes or task_assigned noise).
+
+    Returns empty string if no other agents have relevant memories.
+    """
+    shareable_kinds = {"task_completed", "learning", "decision", "blocker"}
+    lines: list[str] = []
+    for other in all_agents_with_memory():
+        if other == agent:
+            continue
+        entries = list_recent(other, limit=limit)
+        entries = [e for e in entries if e.get("kind") in shareable_kinds]
+        if entries:
+            lines.append(f"### {other}")
+            for e in entries:
+                suffix = f" (ref={e['ref']})" if e.get("ref") else ""
+                lines.append(f"- [{e.get('kind', '?')}] {e.get('content', '')}{suffix}")
+    if not lines:
+        return ""
+    return "## 团队共享知识（其他成员近期记忆）\n\n" + "\n".join(lines)

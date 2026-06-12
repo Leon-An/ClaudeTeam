@@ -20,6 +20,7 @@ Drop reasons (`Decision.reason`) are stable strings so log filters
 can grep for them: `no_msg_id` / `dedup` / `cross_team` / `bot_self`
 / `empty` / `agent_no_target`.
 """
+
 from __future__ import annotations
 
 import re
@@ -30,19 +31,19 @@ from enum import Enum
 class Action(Enum):
     DROP = "drop"
     ROUTE = "route"
-    SLASH = "slash"   # operator slash command, dispatched at router-level (zero LLM)
+    SLASH = "slash"  # operator slash command, dispatched at router-level (zero LLM)
     BROADCAST = "broadcast"  # @team / @all / 全体成员 → every non-sender agent
 
 
 @dataclass(frozen=True)
 class Decision:
     action: Action
-    targets: list[str] = field(default_factory=list)   # agents to deliver to
-    sender: str = ""                                    # parsed agent sender, if recognised
-    text: str = ""                                      # cleaned message text
+    targets: list[str] = field(default_factory=list)  # agents to deliver to
+    sender: str = ""  # parsed agent sender, if recognised
+    text: str = ""  # cleaned message text
     msg_id: str = ""
-    reason: str = ""                                    # drop reason or "" on route
-    create_time: str = ""                               # epoch ms (for catchup cursor)
+    reason: str = ""  # drop reason or "" on route
+    create_time: str = ""  # epoch ms (for catchup cursor)
 
     def is_drop(self) -> bool:
         return self.action is Action.DROP
@@ -67,8 +68,7 @@ def _parse_sender(text: str, agents: set[str]) -> tuple[str, str]:
     m = _SENDER_RE.match(text)
     if not m or m.group(1) not in agents:
         return "", text
-    return m.group(1), text[m.end():].lstrip()
-
+    return m.group(1), text[m.end() :].lstrip()
 
 
 # Card-title sender-extraction. Worker `claudeteam say` posts
@@ -78,9 +78,7 @@ def _parse_sender(text: str, agents: set[str]) -> tuple[str, str]:
 # chat message to the originating worker even though the inbound
 # `sender_id` is the bot's open_id (one app, all agents share it).
 # Manager's own messages still get dropped to avoid self-loops.
-_CARD_TITLE_AGENT_RE = re.compile(
-    r"(?:^|<card title=\")[^\">\n]*?(?<![\w])([A-Za-z][A-Za-z0-9_\-]+)\s*·"
-)
+_CARD_TITLE_AGENT_RE = re.compile(r"(?:^|<card title=\")[^\">\n]*?(?<![\w])([A-Za-z][A-Za-z0-9_\-]+)\s*·")
 
 
 def _card_sender_agent(text: str, agents: set[str]) -> str:
@@ -95,12 +93,15 @@ def _card_sender_agent(text: str, agents: set[str]) -> str:
     return ""
 
 
-def classify_event(event: dict, *,
-                   team_agents: list[str],
-                   chat_id: str = "",
-                   bot_id: str = "",
-                   seen_msg_ids: set[str] | None = None,
-                   default_target: str = "manager") -> Decision:
+def classify_event(
+    event: dict,
+    *,
+    team_agents: list[str],
+    chat_id: str = "",
+    bot_id: str = "",
+    seen_msg_ids: set[str] | None = None,
+    default_target: str = "manager",
+) -> Decision:
     """Classify one inbound Feishu message event.
 
     Single-interface routing model: ALL human chat messages route to
@@ -157,13 +158,11 @@ def classify_event(event: dict, *,
     # chat-messages-list responses (id_type=app_id). `bot_id ==
     # sender_id` kept as fallback for fixtures / legacy callers.
     sender_type = event.get("sender_type", "")
-    is_bot = (sender_type in ("app", "app_id")
-              or (bot_id and event.get("sender_id") == bot_id))
+    is_bot = sender_type in ("app", "app_id") or (bot_id and event.get("sender_id") == bot_id)
     if is_bot:
         card_agent = _card_sender_agent(raw_text, agents) if raw_text else ""
         if card_agent and card_agent != default_target:
-            return Decision(Action.ROUTE, targets=[default_target],
-                            sender=card_agent, text=raw_text, **common)
+            return Decision(Action.ROUTE, targets=[default_target], sender=card_agent, text=raw_text, **common)
         return Decision(Action.DROP, reason="bot_self", **common)
 
     if not raw_text:
@@ -185,5 +184,4 @@ def classify_event(event: dict, *,
         return Decision(Action.ROUTE, targets=[default_target], text=text, **common)
 
     # agent-tagged message with no @-target → broadcast with nobody to hear it
-    return Decision(Action.DROP, sender=sender, text=text,
-                    reason="agent_no_target", **common)
+    return Decision(Action.DROP, sender=sender, text=text, reason="agent_no_target", **common)

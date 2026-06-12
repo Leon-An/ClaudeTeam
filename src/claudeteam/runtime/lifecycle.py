@@ -23,17 +23,17 @@ Also home for `pane_env_prefix()` — the shell env-var prefix prepended
 to every spawn_cmd so worker agents inherit `CLAUDETEAM_STATE_DIR` and
 the Feishu env into their `claudeteam say` shell-outs.
 """
+
 from __future__ import annotations
 
 import shlex
 from pathlib import Path
 
-from claudeteam.agents import get_adapter, identity
+from claudeteam.agents import DEFAULT_CLI, get_adapter, identity
 from claudeteam.agents.codex_cli import ensure_workdir_trusted
 from claudeteam.runtime import config, paths, tmux, wake
 from claudeteam.store import local_facts
 from claudeteam.util import env_str
-
 
 # env vars to propagate from the operator's shell into every spawned pane
 # so worker agents' shell-out calls (via Bash tool) see the deployment's
@@ -90,6 +90,7 @@ def _ensure_claude_agent_home(agent: str) -> None:
     default `$HOME` discovery.
     """
     from claudeteam.agents.claude_code import agent_home as _agent_home
+
     home = Path(_agent_home(agent))
     claude_dir = home / ".claude"
     try:
@@ -112,14 +113,17 @@ def _ensure_claude_agent_home(agent: str) -> None:
     # of credentials replaces the symlink target with a plain file on
     # first refresh anyway, defeating the original sharing intent.
     import platform
+
     keychain_extracted = False
     if platform.system() == "Darwin":
         import subprocess
+
         try:
             out = subprocess.run(
-                ["security", "find-generic-password",
-                 "-s", "Claude Code-credentials", "-w"],
-                capture_output=True, text=True, timeout=5,
+                ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             if out.returncode == 0 and out.stdout.strip():
                 if cred_link.is_symlink() or cred_link.exists():
@@ -149,14 +153,14 @@ def _ensure_claude_agent_home(agent: str) -> None:
     settings = claude_dir / "settings.json"
     if not settings.exists():
         settings.write_text(
-            '{\n'
+            "{\n"
             '  "skipDangerousModePermissionPrompt": true,\n'
             '  "hasCompletedOnboarding": true,\n'
             '  "theme": "dark",\n'
             '  "permissions": {\n'
             '    "allow": ["Bash", "Edit", "Read", "Write"]\n'
-            '  }\n'
-            '}\n'
+            "  }\n"
+            "}\n"
         )
     cred_link = claude_dir / ".credentials.json"
     cred_target = Path("/root/.claude/.credentials.json")
@@ -244,15 +248,20 @@ def provision_pane(agent: str, target: tmux.Target) -> str:
     cfg = team.get("agents", {}).get(agent)
     if cfg is None:
         import sys
+
         print(f"  ⚠️ {agent}: agent {agent!r} not in team.json", file=sys.stderr)
         return CONFIG_ERROR
-    cli = cfg.get("cli", "claude-code")
+    cli = cfg.get("cli", DEFAULT_CLI)
+    # Auto-create workspace directory so agents can write reports/files
+    # without hitting "directory not found" on first use.
+    try:
+        (paths.state_dir() / "workspace" / agent).mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass  # best-effort; agents can mkdir themselves if this fails
     # Inline agent_model resolution: per-agent override → env var →
     # team default → "opus". Mirrors `config.agent_model` but uses the
     # already-loaded `team` dict for the default_model fallback.
-    model = (cfg.get("model")
-             or env_str("CLAUDETEAM_DEFAULT_MODEL")
-             or team.get("default_model", "opus"))
+    model = cfg.get("model") or env_str("CLAUDETEAM_DEFAULT_MODEL") or team.get("default_model", "opus")
     # Pass resolved fields to identity.write so its internal render()
     # skips a redundant config.agent_config() fallback. `role`
     # defaulting to `agent` matches render's own fallback so the
@@ -272,6 +281,7 @@ def provision_pane(agent: str, target: tmux.Target) -> str:
         # bad agent shouldn't kill `claudeteam start` for the rest of
         # the team. Caller logs + skips.
         import sys
+
         print(f"  ⚠️ {agent}: {e}", file=sys.stderr)
         return CONFIG_ERROR
     cmd = f"{pane_env_prefix()} {adapter.spawn_cmd(agent, model)}"
@@ -283,10 +293,10 @@ def provision_pane(agent: str, target: tmux.Target) -> str:
     # appears. The poll loop auto-Enters each dialog at ~1Hz, so a
     # 3-dialog chain plus boot time can run 30-40s; 60s gives headroom.
     from claudeteam.runtime import tunables
+
     ready_timeout = float(tunables.tunable("wake.ready_marker_timeout_s", 60.0))
     if wake.wait_until_ready(target, adapter, timeout_s=ready_timeout):
-        tmux.inject(target, identity.init_prompt(agent),
-                    submit_keys=adapter.submit_keys())
+        tmux.inject(target, identity.init_prompt(agent), submit_keys=adapter.submit_keys())
         outcome = READY
     else:
         outcome = READY_NO_INIT

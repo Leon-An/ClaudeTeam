@@ -30,6 +30,7 @@ Writes pid to `state_dir/router.pid` so `runtime.watchdog.is_alive`
 can supervise. Watchdog separately reaps orphan `+subscribe`
 processes left by a SIGKILL'd predecessor before respawning.
 """
+
 from __future__ import annotations
 
 import os
@@ -38,8 +39,9 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Callable
+from collections.abc import Callable
 
+from claudeteam.agents import DEFAULT_CLI
 from claudeteam.feishu import catchup, lark
 from claudeteam.feishu.deliver import apply as _deliver_apply
 from claudeteam.feishu.subscribe import process_lines
@@ -47,8 +49,7 @@ from claudeteam.runtime import config, paths, pidlock, tunables, wake
 from claudeteam.util import error_exit, maybe_print_help, warn
 
 
-def _build_subscribe_cmd(profile: str, *,
-                         resolve_prefix=lark.resolve_cli_prefix) -> list[str]:
+def _build_subscribe_cmd(profile: str, *, resolve_prefix=lark.resolve_cli_prefix) -> list[str]:
     """Build the lark-cli `event +subscribe` argv.
 
     Prefix comes from `lark.resolve_cli_prefix` (direct binary first,
@@ -69,10 +70,14 @@ def _build_subscribe_cmd(profile: str, *,
     return [
         *resolve_prefix(),
         *(["--profile", profile] if profile else []),
-        "event", "+subscribe",
-        "--event-types", "im.message.receive_v1",
-        "--compact", "--quiet",
-        "--as", "bot",
+        "event",
+        "+subscribe",
+        "--event-types",
+        "im.message.receive_v1",
+        "--compact",
+        "--quiet",
+        "--as",
+        "bot",
     ]
 
 
@@ -86,9 +91,10 @@ def _build_agent_adapters(agents_dict: dict) -> dict:
     per-agent warning instead of a build-time abort.
     """
     from claudeteam.agents import get_adapter
+
     adapters: dict = {}
     for name, cfg in agents_dict.items():
-        cli = cfg.get("cli", "claude-code")
+        cli = cfg.get("cli", DEFAULT_CLI)
         try:
             adapters[name] = get_adapter(cli)
         except KeyError:
@@ -96,9 +102,9 @@ def _build_agent_adapters(agents_dict: dict) -> dict:
     return adapters
 
 
-def _make_apply_with_wake(*, session: str, chat_id: str, profile: str,
-                          team_agents: list[str], agent_adapters: dict,
-                          lazy_agents: frozenset):
+def _make_apply_with_wake(
+    *, session: str, chat_id: str, profile: str, team_agents: list[str], agent_adapters: dict, lazy_agents: frozenset
+):
     """Build the per-event deliver wrapper with hot-path config pre-bound.
 
     chat_id / lark_profile / session are deployment-stable; binding
@@ -116,19 +122,27 @@ def _make_apply_with_wake(*, session: str, chat_id: str, profile: str,
     paths (slash handlers via `_live_agents()`, identity via
     `claudeteam reidentify`).
     """
+
     def lookup_adapter(agent: str):
         cached = agent_adapters.get(agent)
         if cached is not None:
             return cached
         from claudeteam.agents import adapter_for_agent
+
         return adapter_for_agent(agent)
 
     def _apply_with_wake(decision):
-        return _deliver_apply(decision, wake_fn=wake.wake_if_dormant,
-                              session=session, chat_id=chat_id,
-                              profile=profile, team_agents=team_agents,
-                              lazy_agents=lazy_agents,
-                              adapter_for_agent=lookup_adapter)
+        return _deliver_apply(
+            decision,
+            wake_fn=wake.wake_if_dormant,
+            session=session,
+            chat_id=chat_id,
+            profile=profile,
+            team_agents=team_agents,
+            lazy_agents=lazy_agents,
+            adapter_for_agent=lookup_adapter,
+        )
+
     return _apply_with_wake
 
 
@@ -194,6 +208,7 @@ def _make_on_progress(last_event_at: list[float]) -> Callable:
       set (host_smoke 2026-05-06: /tmux manager card forwarded into
       manager inbox every ~3.5min on every restart cycle).
     """
+
     def _on_progress(decision, stats):
         catchup.record_decision(decision)
         last_event_at[0] = time.monotonic()
@@ -206,6 +221,7 @@ def _make_on_progress(last_event_at: list[float]) -> Callable:
                     f.write(msg_id + "\n")
             except OSError:
                 pass  # best-effort; in-memory set still dedups in this run
+
     return _on_progress
 
 
@@ -230,6 +246,7 @@ def _platform_default_stale_event_threshold_s() -> float:
     calibrated middle.
     """
     import platform
+
     return 120.0 if platform.system() == "Darwin" else 600.0
 
 
@@ -251,13 +268,10 @@ def _stale_event_threshold_s() -> float:
                 return v
         except ValueError:
             pass
-    return float(tunables.tunable(
-        "router.stale_event_threshold_s",
-        _platform_default_stale_event_threshold_s()))
+    return float(tunables.tunable("router.stale_event_threshold_s", _platform_default_stale_event_threshold_s()))
 
 
-def _watch_subscribe_health(proc: subprocess.Popen, stop_event: threading.Event,
-                            last_event_at: list[float]) -> None:
+def _watch_subscribe_health(proc: subprocess.Popen, stop_event: threading.Event, last_event_at: list[float]) -> None:
     """Background thread: kill the daemon if the subscribe child dies OR
     stops delivering events.
 
@@ -291,7 +305,9 @@ def _watch_subscribe_health(proc: subprocess.Popen, stop_event: threading.Event,
             return
         idle = time.monotonic() - last_event_at[0]
         if idle > threshold:
-            print(f"  ⚠️ no events for {idle:.0f}s (threshold {threshold:.0f}s); subscribe likely silently stalled, exiting for respawn")
+            print(
+                f"  ⚠️ no events for {idle:.0f}s (threshold {threshold:.0f}s); subscribe likely silently stalled, exiting for respawn"
+            )
             os.kill(os.getpid(), signal.SIGTERM)
             return
 
@@ -342,6 +358,7 @@ def main(argv: list[str]) -> int:
     def _on_sigterm(*_):
         _terminate_subscribe_group(proc)
         sys.exit(0)
+
     signal.signal(signal.SIGTERM, _on_sigterm)
 
     # Spawn the subscribe-health watchdog thread. It exits the daemon
@@ -376,8 +393,7 @@ def main(argv: list[str]) -> int:
             profile=profile,
             team_agents=agents,
             agent_adapters=_build_agent_adapters(agents_dict),
-            lazy_agents=frozenset(name for name, cfg in agents_dict.items()
-                                  if cfg.get("lazy")),
+            lazy_agents=frozenset(name for name, cfg in agents_dict.items() if cfg.get("lazy")),
         )
 
         # Persisted dedup set — survives daemon restarts so catchup

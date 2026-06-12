@@ -3,12 +3,12 @@
 Kill an agent's tmux window and mark its status.  Refuses to fire 'manager'
 (too disruptive — kill the whole session if you want that).
 """
+
 from __future__ import annotations
 
 from claudeteam.runtime import config, tmux
 from claudeteam.store import local_facts
 from claudeteam.util import error_exit, usage_error
-
 
 USAGE = "usage: claudeteam fire <agent>"
 
@@ -19,8 +19,7 @@ def main(argv: list[str]) -> int:
     agent = argv[0]
 
     if agent == "manager":
-        return error_exit(
-            "❌ refusing to fire manager (kill the tmux session yourself if you mean it)")
+        return error_exit("❌ refusing to fire manager (kill the tmux session yourself if you mean it)")
 
     session = config.session_name()
     target = tmux.Target(session, agent)

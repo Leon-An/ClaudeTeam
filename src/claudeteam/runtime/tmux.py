@@ -7,12 +7,13 @@ Deliberately leaves out the old tmux_utils.py heavy bits (pane-diff idle
 classification, `detect_unsubmitted_input_text`, `force_anyway` queue
 escalation).  Those land when a concrete consumer needs them.
 """
+
 from __future__ import annotations
 
 import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,7 @@ class _FailedRun:
     not be made at all (FileNotFoundError, TimeoutExpired). Mirrors
     the .returncode / .stdout / .stderr trio so `_ok` and friends can
     treat it uniformly as "this tmux op didn't succeed"."""
+
     __slots__ = ("returncode", "stdout", "stderr")
 
     def __init__(self, reason: str):
@@ -78,11 +80,17 @@ def capture_pane(target: Target, *, lines: int = 80, run: Callable = _default_ru
     return r.stdout if r.returncode == 0 else ""
 
 
-def new_session(session: str, *, window: str = "manager",
-                detached: bool = True, run: Callable = _default_run) -> bool:
-    args = ["tmux", "new-session"] + (["-d"] if detached else []) + [
-        "-s", session, "-n", window,
-    ]
+def new_session(session: str, *, window: str = "manager", detached: bool = True, run: Callable = _default_run) -> bool:
+    args = (
+        ["tmux", "new-session"]
+        + (["-d"] if detached else [])
+        + [
+            "-s",
+            session,
+            "-n",
+            window,
+        ]
+    )
     return _ok(args, run)
 
 
@@ -111,9 +119,15 @@ def send_keys(target: Target, *keys: str, run: Callable = _default_run) -> bool:
     return _ok(["tmux", "send-keys", "-t", str(target), *keys], run)
 
 
-def inject(target: Target, text: str, *, submit_keys: list[str] | None = None,
-           settle_ms: int = 200, sleep: Callable = time.sleep,
-           run: Callable = _default_run) -> bool:
+def inject(
+    target: Target,
+    text: str,
+    *,
+    submit_keys: list[str] | None = None,
+    settle_ms: int = 200,
+    sleep: Callable = time.sleep,
+    run: Callable = _default_run,
+) -> bool:
     """Send `text` into the pane and submit it.
 
     Tries each key in `submit_keys` in order with a small settle pause.
@@ -131,8 +145,7 @@ def inject(target: Target, text: str, *, submit_keys: list[str] | None = None,
     return True
 
 
-def spawn_agent(target: Target, spawn_cmd: str, *,
-                run: Callable = _default_run) -> bool:
+def spawn_agent(target: Target, spawn_cmd: str, *, run: Callable = _default_run) -> bool:
     """Drop a CLI spawn command into a pane and press Enter to start it."""
     if not send_text(target, spawn_cmd, run=run):
         return False
