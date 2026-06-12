@@ -11,11 +11,11 @@ without the chat round-trip. The manager identity calls out
 Output is plain text (the raw pane buffer) so it pipes cleanly to
 grep / less / `claudeteam remember <agent> note "$(claudeteam peek X)"`.
 """
-
 from __future__ import annotations
 
 from claudeteam.runtime import config, tmux
 from claudeteam.util import error_exit, maybe_print_help, usage_error
+
 
 USAGE = "usage: claudeteam peek <agent> [N]   (default N=30, max 2000)"
 
@@ -44,7 +44,9 @@ def main(argv: list[str]) -> int:
     session = config.session_name()
     target = tmux.Target(session, agent)
     if not tmux.has_window(target):
-        return error_exit(f"❌ {agent} has no pane in session {session} (was it fired? try `claudeteam hire {agent}`)")
+        return error_exit(
+            f"❌ {agent} has no pane in session {session} "
+            f"(was it fired? try `claudeteam hire {agent}`)")
 
     buf = tmux.capture_pane(target, lines=n).rstrip()
     if not buf:

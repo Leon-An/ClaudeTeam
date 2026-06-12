@@ -5,43 +5,19 @@ handler returns an int exit code or None (treated as 0).  This module owns
 the top-level dispatch, usage text, and process exit; subcommand modules
 own their own argv parsing and side effects.
 """
-
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable
+from typing import Callable
 
 from claudeteam.commands import (
-    down,
-    fire,
-    forget,
-    health,
-    hire,
-    inbox,
-    init,
-    install_hooks,
-    log,
-    peek,
-    read,
-    recall,
-    reidentify,
-    remember,
-    reset,
-    router,
-    say,
-    send,
-    start,
-    status,
-    switch,
-    task,
-    team,
-    up,
-    usage,
-    version,
-    watchdog,
-    workspace,
+    init, send, inbox, read, status, log, team, workspace,
+    start, hire, fire, up, down, reset, reidentify, switch,
+    say, router, watchdog, task, remember, recall, forget, peek,
+    health, usage, install_hooks, version,
 )
 from claudeteam.util import error_exit
+
 
 CommandHandler = Callable[[list[str]], int | None]
 
@@ -52,80 +28,58 @@ CommandHandler = Callable[[list[str]], int | None]
 # write a module under claudeteam.commands with `main(argv)`, then
 # append the (name, fn) pair into the appropriate group below.
 _COMMAND_GROUPS: list[tuple[str, list[tuple[str, CommandHandler]]]] = [
-    (
-        "bootstrap",
-        [
-            ("init", init.main),
-        ],
-    ),
-    (
-        "local store I/O",
-        [
-            ("send", send.main),
-            ("inbox", inbox.main),
-            ("read", read.main),
-            ("status", status.main),
-            ("log", log.main),
-            ("team", team.main),
-            ("workspace", workspace.main),
-            ("peek", peek.main),
-        ],
-    ),
-    (
-        "team lifecycle",
-        [
-            ("start", start.main),
-            ("hire", hire.main),
-            ("fire", fire.main),
-            ("up", up.main),
-            ("down", down.main),
-            ("reset", reset.main),
-            ("reidentify", reidentify.main),
-            ("switch", switch.main),
-        ],
-    ),
-    (
-        "feishu transport",
-        [
-            ("say", say.main),
-            ("router", router.main),
-        ],
-    ),
-    (
-        "supervision",
-        [
-            ("watchdog", watchdog.main),
-        ],
-    ),
-    (
-        "task tracking",
-        [
-            ("task", task.main),
-        ],
-    ),
-    (
-        "durable agent memory",
-        [
-            ("remember", remember.main),
-            ("recall", recall.main),
-            ("forget", forget.main),
-        ],
-    ),
-    (
-        "operational",
-        [
-            ("health", health.main),
-            ("usage", usage.main),
-            ("install-hooks", install_hooks.main),
-            ("version", version.main),
-        ],
-    ),
+    ("bootstrap", [
+        ("init", init.main),
+    ]),
+    ("local store I/O", [
+        ("send", send.main),
+        ("inbox", inbox.main),
+        ("read", read.main),
+        ("status", status.main),
+        ("log", log.main),
+        ("team", team.main),
+        ("workspace", workspace.main),
+        ("peek", peek.main),
+    ]),
+    ("team lifecycle", [
+        ("start", start.main),
+        ("hire", hire.main),
+        ("fire", fire.main),
+        ("up", up.main),
+        ("down", down.main),
+        ("reset", reset.main),
+        ("reidentify", reidentify.main),
+        ("switch", switch.main),
+    ]),
+    ("feishu transport", [
+        ("say", say.main),
+        ("router", router.main),
+    ]),
+    ("supervision", [
+        ("watchdog", watchdog.main),
+    ]),
+    ("task tracking", [
+        ("task", task.main),
+    ]),
+    ("durable agent memory", [
+        ("remember", remember.main),
+        ("recall", recall.main),
+        ("forget", forget.main),
+    ]),
+    ("operational", [
+        ("health", health.main),
+        ("usage", usage.main),
+        ("install-hooks", install_hooks.main),
+        ("version", version.main),
+    ]),
 ]
 
 # Flat dict for fast dispatch. Built from _COMMAND_GROUPS so the two
 # views can never drift — adding a command in one place automatically
 # updates the other.
-COMMANDS: dict[str, CommandHandler] = {name: fn for _, pairs in _COMMAND_GROUPS for name, fn in pairs}
+COMMANDS: dict[str, CommandHandler] = {
+    name: fn for _, pairs in _COMMAND_GROUPS for name, fn in pairs
+}
 
 
 def _usage() -> str:
@@ -161,12 +115,11 @@ def main(argv: list[str] | None = None) -> int:
         # Without this, every unhandled handler exception dumps a 30-line
         # traceback at the operator — useless for non-Python-fluent ops.
         import os
-
         if os.environ.get("CLAUDETEAM_DEBUG") == "1":
             raise
         return error_exit(
-            f"❌ {cmd}: unhandled error: {type(e).__name__}: {e}\n   set CLAUDETEAM_DEBUG=1 to see the full traceback"
-        )
+            f"❌ {cmd}: unhandled error: {type(e).__name__}: {e}\n"
+            f"   set CLAUDETEAM_DEBUG=1 to see the full traceback")
 
 
 if __name__ == "__main__":

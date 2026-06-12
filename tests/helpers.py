@@ -89,12 +89,6 @@ def isolated_env(*, team: dict | None = None, runtime_config: dict | None = None
             tunables.reset_cache()
         except ImportError:
             pass
-        # Reset config TTL cache so team.json changes take effect immediately.
-        try:
-            from claudeteam.runtime import config as _config
-            _config.reset_cache()
-        except ImportError:
-            pass
         with env_patch(
             CLAUDETEAM_STATE_DIR=str(tmp_path / "state"),
             CLAUDETEAM_TEAM_FILE=str(team_path),

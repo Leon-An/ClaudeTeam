@@ -15,7 +15,6 @@ no team agents / port collision), `up` reports the boot failure and
 returns rc=1 instead of silently saying `✅ team up`. Operator runs
 `claudeteam <name>` directly to see the actual error message.
 """
-
 from __future__ import annotations
 
 import time
@@ -56,8 +55,7 @@ def _ensure_daemon(spec: watchdog.ProcessSpec) -> int:
     return error_exit(
         f"❌ {spec.name} launched but didn't write a pid file in 3s — "
         f"likely fast-failed at startup; check `claudeteam {spec.name}` "
-        f"directly to see the error"
-    )
+        f"directly to see the error")
 
 
 def main(argv: list[str]) -> int:
@@ -74,5 +72,6 @@ def main(argv: list[str]) -> int:
     if rc == 0:
         print("✅ team up — run `claudeteam health` to verify")
     else:
-        print("⚠️  team up with errors — see above; `claudeteam health` will list which daemons died")
+        print("⚠️  team up with errors — see above; "
+              "`claudeteam health` will list which daemons died")
     return rc

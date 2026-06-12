@@ -17,7 +17,6 @@ network actually IS slow.
 
 Tests inject a fake subprocess.run via the `run=` kwarg.
 """
-
 from __future__ import annotations
 
 import json
@@ -26,9 +25,10 @@ import pwd
 import shutil
 import subprocess
 import time
-from collections.abc import Callable
+from typing import Callable
 
 from claudeteam.util import env_str
+
 
 _PROXY_KEYS = ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy")
 
@@ -40,9 +40,10 @@ _PROXY_KEYS = ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy")
 # app_id+app_secret here means both one-shot `lark.call()` and the
 # long-running `event +subscribe` daemon pick up a fresh token
 # without an entrypoint script.
-_TENANT_TOKEN_URL = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
+_TENANT_TOKEN_URL = (
+    "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal")
 _TENANT_TOKEN_CACHE = "/tmp/claudeteam_tenant_token.json"
-_TENANT_TOKEN_REFRESH_BUFFER_S = 60  # refetch when within 60s of expiry
+_TENANT_TOKEN_REFRESH_BUFFER_S = 60   # refetch when within 60s of expiry
 
 
 def _fetch_tenant_token(app_id: str, app_secret: str) -> dict | None:
@@ -56,11 +57,10 @@ def _fetch_tenant_token(app_id: str, app_secret: str) -> dict | None:
     import time as _time
     import urllib.error
     import urllib.request
-
     body = _json.dumps({"app_id": app_id, "app_secret": app_secret}).encode()
     req = urllib.request.Request(
-        _TENANT_TOKEN_URL, data=body, headers={"Content-Type": "application/json"}, method="POST"
-    )
+        _TENANT_TOKEN_URL, data=body,
+        headers={"Content-Type": "application/json"}, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = _json.loads(resp.read().decode("utf-8", errors="ignore"))
@@ -76,9 +76,9 @@ def _fetch_tenant_token(app_id: str, app_secret: str) -> dict | None:
     }
 
 
-def _ensure_tenant_token(
-    *, fetch: Callable | None = None, now: Callable | None = None, cache_path: str | None = None
-) -> str | None:
+def _ensure_tenant_token(*, fetch: Callable | None = None,
+                         now: Callable | None = None,
+                         cache_path: str | None = None) -> str | None:
     """Return a usable tenant_access_token from env / cache / live fetch.
 
     Resolution order:
@@ -94,7 +94,6 @@ def _ensure_tenant_token(
     """
     import json as _json
     import time as _time
-
     # Resolve cache_path at call time so test patches of the
     # module-level _TENANT_TOKEN_CACHE constant take effect; default
     # args bind at function-definition time and would freeze the
@@ -107,14 +106,15 @@ def _ensure_tenant_token(
     now_fn = now or _time.time
     now_t = int(now_fn())
     try:
-        with open(cache_path, encoding="utf-8") as fh:
+        with open(cache_path, "r", encoding="utf-8") as fh:
             cached = _json.loads(fh.read())
         if int(cached.get("expire_at", 0)) > now_t and cached.get("token"):
             return str(cached["token"])
     except (OSError, _json.JSONDecodeError, ValueError):
         pass
     app_id = env_str("FEISHU_APP_ID") or env_str("LARKSUITE_CLI_APP_ID")
-    app_secret = env_str("FEISHU_APP_SECRET") or env_str("LARKSUITE_CLI_APP_SECRET")
+    app_secret = (env_str("FEISHU_APP_SECRET")
+                  or env_str("LARKSUITE_CLI_APP_SECRET"))
     if not (app_id and app_secret):
         return None
     fresh = (fetch or _fetch_tenant_token)(app_id, app_secret)
@@ -157,7 +157,6 @@ def subprocess_env() -> dict[str, str]:
         no_proxy = False
     else:
         from claudeteam.runtime import tunables
-
         no_proxy = bool(tunables.tunable("feishu.no_proxy", False))
     if no_proxy:
         for key in _PROXY_KEYS:
@@ -175,8 +174,10 @@ def subprocess_env() -> dict[str, str]:
         # Propagate all three together; if app_id/secret aren't available
         # in env, skip injection and let lark-cli's profile/keychain
         # path take over.
-        app_id = env_str("LARKSUITE_CLI_APP_ID") or env_str("FEISHU_APP_ID")
-        app_secret = env_str("LARKSUITE_CLI_APP_SECRET") or env_str("FEISHU_APP_SECRET")
+        app_id = (env_str("LARKSUITE_CLI_APP_ID")
+                  or env_str("FEISHU_APP_ID"))
+        app_secret = (env_str("LARKSUITE_CLI_APP_SECRET")
+                      or env_str("FEISHU_APP_SECRET"))
         if app_id and app_secret:
             env["LARKSUITE_CLI_TENANT_ACCESS_TOKEN"] = token
             env["LARKSUITE_CLI_APP_ID"] = app_id
@@ -204,7 +205,6 @@ def resolve_cli_prefix() -> list[str]:
     override = env_str("CLAUDETEAM_LARK_CLI_BIN")
     if not override:
         from claudeteam.runtime import tunables
-
         override = str(tunables.tunable("feishu.cli_bin", "") or "")
     if override and os.path.exists(override):
         return [override]
@@ -214,7 +214,8 @@ def resolve_cli_prefix() -> list[str]:
     home = os.path.expanduser("~/.npm/_npx")
     if os.path.isdir(home):
         for entry in os.listdir(home):
-            candidate = os.path.join(home, entry, "node_modules/.bin/lark-cli")
+            candidate = os.path.join(home, entry,
+                                      "node_modules/.bin/lark-cli")
             if os.path.exists(candidate):
                 return [candidate]
     return ["npx", "@larksuite/cli"]
@@ -245,13 +246,11 @@ def _resolve_timeout(explicit: int | None) -> int:
         except ValueError:
             pass
     from claudeteam.runtime import tunables
-
     return max(1, int(tunables.tunable("router.lark_call_timeout_s", 90)))
 
 
-def call(
-    args: list[str], *, profile: str = "", timeout: int | None = None, run: Callable = subprocess.run
-) -> dict | None:
+def call(args: list[str], *, profile: str = "", timeout: int | None = None,
+         run: Callable = subprocess.run) -> dict | None:
     """Execute lark-cli; return parsed `data` JSON, `{}` on empty stdout, None on failure.
 
     `profile` selects the lark-cli profile (`--profile X`).  Pass empty
@@ -267,13 +266,13 @@ def call(
     try:
         r = run(cmd, capture_output=True, text=True, timeout=timeout_s, env=subprocess_env())
     except subprocess.TimeoutExpired:
-        elapsed = time.monotonic() - t0
+        elapsed = (time.monotonic() - t0)
         print(f"  ⚠️ lark-cli timeout ({timeout_s}s after {elapsed:.1f}s): {' '.join(args[:3])}")
         return None
     except FileNotFoundError:
         # npx itself isn't on PATH. claudeteam say / router / chat all hit
         # this — better one-line warn than a top-level traceback.
-        print("  ⚠️ npx not found on PATH; install Node.js to enable lark-cli")
+        print(f"  ⚠️ npx not found on PATH; install Node.js to enable lark-cli")
         return None
     except OSError as e:
         # Other Popen-time OS failures (permission, fork failed, etc.).

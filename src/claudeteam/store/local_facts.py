@@ -25,7 +25,6 @@ Each public function corresponds to one CLI surface: `claudeteam send` →
 `status` → `upsert_status` / `get_status`, `team` → `list_all_statuses`
 + `all_heartbeats`, `log`/`workspace` → `append_log` / `list_logs`.
 """
-
 from __future__ import annotations
 
 import json
@@ -52,49 +51,31 @@ def _new_id(prefix: str) -> str:
     return f"{prefix}_{now_ms()}_{uuid.uuid4().hex[:10]}"
 
 
-# Shard locks: each data domain gets its own lock file so inbox writes
-# don't block status updates or heartbeat touches. The old global
-# .facts.lock is no longer used — existing deployments will have the
-# stale file sitting harmlessly unused (fcntl locks on an un-opened
-# file are no-ops).
-def _inbox_locked():
-    return flock(_facts_dir() / ".inbox.lock")
-
-
-def _status_locked():
-    return flock(_facts_dir() / ".status.lock")
-
-
-def _heartbeat_locked():
-    return flock(_facts_dir() / ".heartbeat.lock")
-
-
-def _log_locked():
-    return flock(_facts_dir() / ".log.lock")
+def _locked():
+    return flock(_facts_dir() / ".facts.lock")
 
 
 # ── inbox ─────────────────────────────────────────────────────────────
 
 
-def append_message(to: str, frm: str, content: str, *, priority: str = "中", task_id: str = "") -> str:
+def append_message(to: str, frm: str, content: str, *,
+                   priority: str = "中", task_id: str = "") -> str:
     """Append a message to the inbox; return its local id."""
-    with _inbox_locked():
+    with _locked():
         path = _inbox_file()
         data = read_json(path, {"messages": []})
         local_id = _new_id("msg")
-        data.setdefault("messages", []).append(
-            {
-                "local_id": local_id,
-                "to": to,
-                "from": frm,
-                "content": str(content or ""),
-                "priority": priority,
-                "task_id": task_id,
-                "created_at": now_ms(),
-                "read": False,
-                "read_at": None,
-            }
-        )
+        data.setdefault("messages", []).append({
+            "local_id": local_id,
+            "to": to,
+            "from": frm,
+            "content": str(content or ""),
+            "priority": priority,
+            "task_id": task_id,
+            "created_at": now_ms(),
+            "read": False,
+            "read_at": None,
+        })
         write_json(path, data)
         return local_id
 
@@ -108,7 +89,7 @@ def list_messages(agent: str, *, unread_only: bool = False) -> list[dict]:
 
 
 def mark_read(local_id: str) -> bool:
-    with _inbox_locked():
+    with _locked():
         path = _inbox_file()
         data = read_json(path, {"messages": []})
         for msg in data.get("messages", []):
@@ -124,7 +105,7 @@ def mark_read(local_id: str) -> bool:
 
 
 def upsert_status(agent: str, status: str, task: str, *, blocker: str = "") -> None:
-    with _status_locked():
+    with _locked():
         path = _status_file()
         data = read_json(path, {"agents": {}})
         data.setdefault("agents", {})[agent] = {
@@ -165,7 +146,7 @@ def touch_heartbeat(agent: str) -> None:
     if not agent:
         return
     try:
-        with _heartbeat_locked():
+        with _locked():
             path = _heartbeat_file()
             data = read_json(path, {})
             data[agent] = now_ms()
@@ -176,7 +157,6 @@ def touch_heartbeat(agent: str) -> None:
         # caught here — those mean a corrupt heartbeat file and the
         # operator should see them.
         import sys
-
         print(f"  ⚠️ heartbeat write failed for {agent}: {e}", file=sys.stderr)
 
 
@@ -201,7 +181,7 @@ def append_log(agent: str, kind: str, content: str, *, ref: str = "") -> str:
         "ref": ref,
         "created_at": now_ms(),
     }
-    with _log_locked():
+    with _locked():
         path = _log_file()
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as fh:

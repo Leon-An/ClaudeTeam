@@ -23,7 +23,6 @@ With no argument, prints the current active team (resolved from env
 vars) so an operator can confirm what they're pointing at without
 greping their shell history.
 """
-
 from __future__ import annotations
 
 import shlex
@@ -32,10 +31,11 @@ from pathlib import Path
 from claudeteam.runtime import config, paths
 from claudeteam.util import env_str, error_exit, maybe_print_help
 
+
 USAGE = (
     "usage: claudeteam switch [<team-dir>]\n"
     "  no arg          — print the current active team\n"
-    '  <team-dir>      — print exports; wrap in `eval "$(...)"` to apply'
+    "  <team-dir>      — print exports; wrap in `eval \"$(...)\"` to apply"
 )
 
 
@@ -57,15 +57,14 @@ def _emit_exports(team_dir: Path) -> int:
     if not team_json.exists():
         return error_exit(
             f"❌ {team_json} not found — pass a directory containing team.json"
-            f"\n   (run `claudeteam init` inside that directory first)"
-        )
+            f"\n   (run `claudeteam init` inside that directory first)")
     state_dir = team_dir / "state"
     rt_json = team_dir / "runtime_config.json"
     print(f"export CLAUDETEAM_STATE_DIR={shlex.quote(str(state_dir))}")
     print(f"export CLAUDETEAM_TEAM_FILE={shlex.quote(str(team_json))}")
     print(f"export CLAUDETEAM_RUNTIME_CONFIG={shlex.quote(str(rt_json))}")
     print(f"# Active team: {team_dir}")
-    print(f'# Apply with: eval "$(claudeteam switch {team_dir})"')
+    print(f"# Apply with: eval \"$(claudeteam switch {team_dir})\"")
     return 0
 
 

@@ -14,17 +14,13 @@ Refuses without `--yes` so an operator typo doesn't take out hours of
 accumulated context. The reset command (`claudeteam reset`) already
 does the whole-state nuke; this is the per-agent scalpel.
 """
-
 from __future__ import annotations
 
 from claudeteam.store import memory
 from claudeteam.util import (
-    error_exit,
-    maybe_print_help,
-    pop_bool_flag,
-    pop_flag,
-    usage_error,
+    error_exit, maybe_print_help, pop_bool_flag, pop_flag, usage_error,
 )
+
 
 USAGE = (
     "usage: claudeteam forget <agent> [--kind K] [--yes]\n"
@@ -44,12 +40,12 @@ def main(argv: list[str]) -> int:
     agent = rest[0]
     if not yes:
         target = f"{agent}'s {kind} memory" if kind else f"{agent}'s memory"
-        recall_hint = f"claudeteam recall {agent} --kind {kind}" if kind else f"claudeteam recall {agent}"
+        recall_hint = (f"claudeteam recall {agent} --kind {kind}" if kind
+                       else f"claudeteam recall {agent}")
         return error_exit(
             f"❌ refusing to wipe {target} without --yes; "
             f"run `{recall_hint}` first to verify what you're about to "
-            f"drop, then re-run with --yes"
-        )
+            f"drop, then re-run with --yes")
 
     memory.warn_unknown_kind(kind)
 
@@ -58,11 +54,13 @@ def main(argv: list[str]) -> int:
         if n == 0:
             print(f"🧠 {agent}: nothing to forget (no entries with kind={kind})")
         else:
-            print(f"🗑  {agent}: forgot {n} {kind} memory entr{'ies' if n != 1 else 'y'}")
+            print(f"🗑  {agent}: forgot {n} {kind} memory entr"
+                  f"{'ies' if n != 1 else 'y'}")
     else:
         n = memory.clear(agent)
         if n == 0:
             print(f"🧠 {agent}: nothing to forget (memory was already empty)")
         else:
-            print(f"🗑  {agent}: forgot {n} memory entr{'ies' if n != 1 else 'y'}")
+            print(f"🗑  {agent}: forgot {n} memory entr"
+                  f"{'ies' if n != 1 else 'y'}")
     return 0

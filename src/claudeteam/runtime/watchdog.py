@@ -25,28 +25,28 @@ new daemon's subscribe doesn't race the orphan for events.
 Best-effort: any subprocess error / missing ps / non-zero return /
 fake Popen yields no orphans.
 """
-
 from __future__ import annotations
 
 import os
 import signal
 import subprocess
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from claudeteam.runtime import paths, pidlock
+
 
 # ── per-process spec & state ──────────────────────────────────────
 
 
 @dataclass(frozen=True)
 class ProcessSpec:
-    name: str  # human-readable label, e.g. "router"
-    pid_file: Path  # where the daemon writes its pid
-    expected_cmdline: str  # substring that must appear in /proc/<pid>/cmdline
-    spawn_cmd: list[str]  # subprocess.Popen argv to (re)start the daemon
+    name: str                 # human-readable label, e.g. "router"
+    pid_file: Path            # where the daemon writes its pid
+    expected_cmdline: str     # substring that must appear in /proc/<pid>/cmdline
+    spawn_cmd: list[str]      # subprocess.Popen argv to (re)start the daemon
     max_retries: int = 3
     cooldown_secs: int = 600
     # If set, before respawning this spec the watchdog scans for processes
@@ -70,7 +70,7 @@ class ProcessState:
     name: str
     fail_count: int = 0
     cooldown_until: float = 0.0
-    last_action: str = ""  # "alive" / "respawned" / "cooldown" / "fail"
+    last_action: str = ""     # "alive" / "respawned" / "cooldown" / "fail"
 
 
 # ── liveness check ────────────────────────────────────────────────
@@ -84,19 +84,17 @@ def _read_cmdline(pid: int) -> str:
             with open(path, "rb") as fh:
                 return fh.read().decode("utf-8", errors="ignore").replace("\0", " ")
         # macOS fallback
-        r = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True, timeout=3)
+        r = subprocess.run(["ps", "-p", str(pid), "-o", "command="],
+                           capture_output=True, text=True, timeout=3)
         return r.stdout.strip() if r.returncode == 0 else ""
     except (OSError, subprocess.TimeoutExpired):
         return ""
 
 
-def is_alive(
-    spec: ProcessSpec,
-    *,
-    read_pid: Callable = pidlock.read_pid,
-    pid_alive: Callable = pidlock.pid_alive,
-    read_cmdline: Callable = _read_cmdline,
-) -> bool:
+def is_alive(spec: ProcessSpec, *,
+             read_pid: Callable = pidlock.read_pid,
+             pid_alive: Callable = pidlock.pid_alive,
+             read_cmdline: Callable = _read_cmdline) -> bool:
     pid = read_pid(spec.pid_file)
     if pid is None or not pid_alive(pid):
         return False
@@ -106,7 +104,8 @@ def is_alive(
 # ── respawn ────────────────────────────────────────────────────────
 
 
-def list_orphan_pids(markers: tuple[str, ...], *, run: Callable = subprocess.run) -> list[int]:
+def list_orphan_pids(markers: tuple[str, ...], *,
+                     run: Callable = subprocess.run) -> list[int]:
     """PIDs of processes whose command line contains every marker AND
     whose PPID is 1 (orphaned to init/launchd).
 
@@ -117,8 +116,10 @@ def list_orphan_pids(markers: tuple[str, ...], *, run: Callable = subprocess.run
     if not markers:
         return []
     try:
-        r = run(["ps", "-eo", "pid,ppid,command"], capture_output=True, text=True, timeout=5)
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError, AttributeError):
+        r = run(["ps", "-eo", "pid,ppid,command"],
+                capture_output=True, text=True, timeout=5)
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError,
+            AttributeError):
         # AttributeError covers test fakes that don't fully implement
         # Popen — orphan reap is best-effort, never load-bearing for
         # liveness, so swallow and bail.
@@ -143,9 +144,10 @@ def list_orphan_pids(markers: tuple[str, ...], *, run: Callable = subprocess.run
     return orphans
 
 
-def reap_orphans(
-    spec: ProcessSpec, *, run: Callable = subprocess.run, kill: Callable = os.kill, log: Callable = print
-) -> int:
+def reap_orphans(spec: ProcessSpec, *,
+                 run: Callable = subprocess.run,
+                 kill: Callable = os.kill,
+                 log: Callable = print) -> int:
     """SIGTERM any orphan processes matching `spec.orphan_markers`.
 
     Idempotent — subsequent calls find nothing once reaped. Safe to call
@@ -167,7 +169,9 @@ def reap_orphans(
     return reaped
 
 
-def respawn(spec: ProcessSpec, *, popen: Callable | None = None, reap: Callable = reap_orphans) -> bool:
+def respawn(spec: ProcessSpec, *,
+            popen: Callable | None = None,
+            reap: Callable = reap_orphans) -> bool:
     """Spawn `spec` detached. Returns True on launch, False on OSError.
 
     Before spawning, reap any orphan subprocess children matching
@@ -200,7 +204,8 @@ def respawn(spec: ProcessSpec, *, popen: Callable | None = None, reap: Callable 
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
     try:
-        runner(spec.spawn_cmd, start_new_session=True, stdout=stdout, stderr=stderr, env=env)
+        runner(spec.spawn_cmd, start_new_session=True,
+               stdout=stdout, stderr=stderr, env=env)
         return True
     except (OSError, ValueError) as e:
         print(f"  ⚠️ {spec.name} respawn failed: {e}")
@@ -218,16 +223,13 @@ def respawn(spec: ProcessSpec, *, popen: Callable | None = None, reap: Callable 
 # ── one sweep ──────────────────────────────────────────────────────
 
 
-def supervise(
-    specs: list[ProcessSpec],
-    states: dict[str, ProcessState],
-    *,
-    now: Callable = time.time,
-    alive_check: Callable = is_alive,
-    respawn_fn: Callable = respawn,
-    alert_fn: Callable | None = None,
-    log: Callable = print,
-) -> None:
+def supervise(specs: list[ProcessSpec],
+              states: dict[str, ProcessState], *,
+              now: Callable = time.time,
+              alive_check: Callable = is_alive,
+              respawn_fn: Callable = respawn,
+              alert_fn: Callable | None = None,
+              log: Callable = print) -> None:
     """Walk every spec once, decide alive / respawn / cooldown.
 
     Mutates `states` in place. Caller wraps this in their own loop.
@@ -285,9 +287,9 @@ def supervise(
 # ── default specs for ClaudeTeam ──────────────────────────────────
 
 
-def _claudeteam_spec(
-    name: str, pid_file: Path, *, orphan_markers: tuple[str, ...] = (), log_file: Path | None = None
-) -> ProcessSpec:
+def _claudeteam_spec(name: str, pid_file: Path, *,
+                     orphan_markers: tuple[str, ...] = (),
+                     log_file: Path | None = None) -> ProcessSpec:
     """Build a ProcessSpec for a `claudeteam <name>` daemon. The cmdline-match
     string is just `\"claudeteam\"` so any process whose argv contains the
     word counts — defends against PID reuse, doesn't lock to argv shape."""
@@ -312,14 +314,9 @@ _ROUTER_SUBSCRIBE_MARKERS = ("@larksuite/cli", "+subscribe")
 def default_specs() -> list[ProcessSpec]:
     """Specs the watchdog supervises. Just the router — the watchdog
     doesn't supervise itself."""
-    return [
-        _claudeteam_spec(
-            "router",
-            paths.router_pid_file(),
-            orphan_markers=_ROUTER_SUBSCRIBE_MARKERS,
-            log_file=paths.router_log_file(),
-        )
-    ]
+    return [_claudeteam_spec("router", paths.router_pid_file(),
+                             orphan_markers=_ROUTER_SUBSCRIBE_MARKERS,
+                             log_file=paths.router_log_file())]
 
 
 def all_known_specs() -> list[ProcessSpec]:
@@ -327,11 +324,9 @@ def all_known_specs() -> list[ProcessSpec]:
     Includes the watchdog itself so health can verify its lock file
     matches a live process."""
     return [
-        _claudeteam_spec(
-            "router",
-            paths.router_pid_file(),
-            orphan_markers=_ROUTER_SUBSCRIBE_MARKERS,
-            log_file=paths.router_log_file(),
-        ),
-        _claudeteam_spec("watchdog", paths.watchdog_pid_file(), log_file=paths.watchdog_log_file()),
+        _claudeteam_spec("router", paths.router_pid_file(),
+                         orphan_markers=_ROUTER_SUBSCRIBE_MARKERS,
+                         log_file=paths.router_log_file()),
+        _claudeteam_spec("watchdog", paths.watchdog_pid_file(),
+                         log_file=paths.watchdog_log_file()),
     ]

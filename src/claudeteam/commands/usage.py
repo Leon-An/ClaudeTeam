@@ -16,31 +16,26 @@ Pure shell-out / direct HTTP wrapper, no caching. With `--json`,
 dump a machine-readable record so `slash._handle_usage` and
 dashboards can ingest the same numbers without re-parsing.
 """
-
 from __future__ import annotations
 
 import json
 import re
 import shutil
 import subprocess
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
-from claudeteam.agents import DEFAULT_CLI
 from claudeteam.runtime import config
 from claudeteam.util import (
-    error_exit,
-    maybe_print_help,
-    pop_bool_flag,
-    pop_flag,
-    print_json,
+    error_exit, maybe_print_help, pop_bool_flag, pop_flag, print_json,
     reject_extra_args,
 )
 
-USAGE = "usage: claudeteam usage [--view daily|monthly|session|blocks] [--days N] [--json]"
+
+USAGE = ("usage: claudeteam usage [--view daily|monthly|session|blocks] "
+         "[--days N] [--json]")
 
 # ccusage's documented views — validated against argv for clearer errors
 _VIEWS = ("daily", "monthly", "session", "blocks")
@@ -55,7 +50,8 @@ _CC_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 _CC_USAGE_BETA = "oauth-2025-04-20"
 
 
-def _read_claude_oauth(home: Path | None = None, *, keychain_runner: Callable | None = None) -> dict:
+def _read_claude_oauth(home: Path | None = None,
+                       *, keychain_runner: Callable | None = None) -> dict:
     """Resolve the freshest Claude OAuth payload available.
 
     On macOS, the keychain (`security find-generic-password -s 'Claude
@@ -74,43 +70,42 @@ def _read_claude_oauth(home: Path | None = None, *, keychain_runner: Callable | 
     Returns `{"ok": True, "oauth": {...}}` on success or
     `{"ok": False, "note": "..."}` with a user-facing reason."""
     import platform
-
     # Production path uses host keychain (`home is None`). Tests pass an
     # explicit home= to fence the call into a tmpdir; treat that as
     # opt-out of the host keychain too so a test machine's real OAuth
     # state can't bleed into assertions. Callers that genuinely want
     # to exercise the keychain path with home= can pass keychain_runner.
     if keychain_runner is None and home is None and platform.system() == "Darwin":
-
         def keychain_runner():
             import subprocess
-
             return subprocess.run(
-                ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
-                capture_output=True,
-                text=True,
-                timeout=5,
+                ["security", "find-generic-password",
+                 "-s", "Claude Code-credentials", "-w"],
+                capture_output=True, text=True, timeout=5,
             )
-
     if keychain_runner is not None:
         try:
             out = keychain_runner()
-            if out is not None and getattr(out, "returncode", 1) == 0 and out.stdout.strip():
-                return {"ok": True, "oauth": json.loads(out.stdout)["claudeAiOauth"]}
+            if out is not None and getattr(out, "returncode", 1) == 0 \
+                    and out.stdout.strip():
+                return {"ok": True,
+                        "oauth": json.loads(out.stdout)["claudeAiOauth"]}
         except (OSError, ValueError, KeyError):
             pass  # fall through to file path
     cred_path = (home or Path.home()) / ".claude" / ".credentials.json"
     try:
-        return {"ok": True, "oauth": json.loads(cred_path.read_text())["claudeAiOauth"]}
+        return {"ok": True,
+                "oauth": json.loads(cred_path.read_text())["claudeAiOauth"]}
     except FileNotFoundError:
-        return {"ok": False, "note": f"{cred_path} 不存在；运行 claude /login"}
+        return {"ok": False,
+                "note": f"{cred_path} 不存在；运行 claude /login"}
     except (OSError, ValueError, KeyError) as e:
         return {"ok": False, "note": f"读取 {cred_path} 失败: {e}"}
 
 
-def _query_cc_usage(
-    home: Path | None = None, *, opener: Callable = None, keychain_runner: Callable | None = None
-) -> dict:
+def _query_cc_usage(home: Path | None = None,
+                    *, opener: Callable = None,
+                    keychain_runner: Callable | None = None) -> dict:
     """Hit Claude Max's `/api/oauth/usage` for real per-window
     utilization (5h / 7d / Sonnet / Opus / Extra) — boss flagged the
     earlier `npx ccusage Total: $X` dump as just cumulative cost,
@@ -129,24 +124,18 @@ def _query_cc_usage(
     token = oauth.get("accessToken", "")
     expires_ms = oauth.get("expiresAt", 0)
     import time as _time
-
     if expires_ms and expires_ms < int(_time.time() * 1000):
-        return {
-            "ok": False,
-            "note": f"access token 已过期 ({_time.strftime('%Y-%m-%d %H:%M', _time.localtime(expires_ms / 1000))})；"
-            f"运行 `claude` 触发刷新",
-        }
+        return {"ok": False,
+                "note": f"access token 已过期 ({_time.strftime('%Y-%m-%d %H:%M', _time.localtime(expires_ms/1000))})；"
+                        f"运行 `claude` 触发刷新"}
     if not token:
         return {"ok": False, "note": "credentials 缺少 accessToken"}
 
-    req = urllib_request.Request(
-        _CC_USAGE_URL,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "anthropic-beta": _CC_USAGE_BETA,
-            "Accept": "application/json",
-        },
-    )
+    req = urllib_request.Request(_CC_USAGE_URL, headers={
+        "Authorization": f"Bearer {token}",
+        "anthropic-beta": _CC_USAGE_BETA,
+        "Accept": "application/json",
+    })
     try:
         with opener(req, timeout=15) as resp:
             data = json.loads(resp.read())
@@ -167,14 +156,12 @@ def _query_cc_usage(
         if util is None:
             continue
         used_pct = int(round(float(util)))
-        metrics.append(
-            {
-                "label": label,
-                "used_pct": used_pct,
-                "remaining_pct": max(0, min(100, 100 - used_pct)),
-                "reset_iso": block.get("resets_at", ""),
-            }
-        )
+        metrics.append({
+            "label": label,
+            "used_pct": used_pct,
+            "remaining_pct": max(0, min(100, 100 - used_pct)),
+            "reset_iso": block.get("resets_at", ""),
+        })
     extra = data.get("extra_usage") or {}
     if extra.get("is_enabled"):
         used = float(extra.get("used_credits", 0) or 0)
@@ -182,15 +169,13 @@ def _query_cc_usage(
         ccy = extra.get("currency", "USD")
         util = extra.get("utilization")
         used_pct = int(round(float(util))) if util is not None else 0
-        metrics.append(
-            {
-                "label": "Extra usage",
-                "used_pct": used_pct,
-                "remaining_pct": max(0, min(100, 100 - used_pct)),
-                "reset_iso": "",
-                "extra": {"used": used, "cap": cap, "ccy": ccy},
-            }
-        )
+        metrics.append({
+            "label": "Extra usage",
+            "used_pct": used_pct,
+            "remaining_pct": max(0, min(100, 100 - used_pct)),
+            "reset_iso": "",
+            "extra": {"used": used, "cap": cap, "ccy": ccy},
+        })
     if not metrics:
         return {"ok": False, "note": "Claude usage API 没返回可解析窗口"}
     return {"ok": True, "metrics": metrics}
@@ -199,7 +184,8 @@ def _query_cc_usage(
 # Back-compat: keep _run_ccusage as a no-op that signals deprecation,
 # in case anyone still imports it. Real CC usage now goes via
 # `_query_cc_usage` above.
-def _run_ccusage(view: str, days: str = "", *, runner: Callable | None = None) -> tuple[int, str]:
+def _run_ccusage(view: str, days: str = "",
+                 *, runner: Callable | None = None) -> tuple[int, str]:
     """DEPRECATED. ccusage only returns cumulative cost ('Total: $X'),
     which is wrong data for quota planning. Real quota % comes from
     `_query_cc_usage` (Anthropic OAuth API). Kept so older callers
@@ -237,13 +223,13 @@ def _codex_login_summary(home: Path | None = None) -> dict:
     if id_token and id_token.count(".") == 2:
         try:
             import base64
-
             payload_b64 = id_token.split(".")[1]
             # JWT base64 may need padding to a multiple of 4
             payload_b64 += "=" * (-len(payload_b64) % 4)
             payload = json.loads(base64.urlsafe_b64decode(payload_b64))
             chatgpt = payload.get("https://api.openai.com/auth", {}) or {}
-            plan = (chatgpt.get("chatgpt_plan_type") or plan).title()
+            plan = (chatgpt.get("chatgpt_plan_type")
+                    or plan).title()
             active_until = chatgpt.get("chatgpt_subscription_active_until", "")
         except (ValueError, TypeError, KeyError):
             pass  # JWT not parseable → just show auth_mode
@@ -254,7 +240,8 @@ def _codex_login_summary(home: Path | None = None) -> dict:
     return {"ok": True, "plan": plan, "metrics": [], "note": note}
 
 
-def _query_codex_usage(home: Path | None = None, *, runner: Callable | None = None) -> dict:
+def _query_codex_usage(home: Path | None = None,
+                       *, runner: Callable | None = None) -> dict:
     """Shell out to `codex-cli-usage` for real % consumed.
 
     The `codex-cli-usage` Python tool (installed via `uv tool
@@ -272,10 +259,8 @@ def _query_codex_usage(home: Path | None = None, *, runner: Callable | None = No
     reset}]}` on success, `{ok: false, note}` on failure.
     """
     if runner is None:
-
-        def runner(argv):
-            return subprocess.run(argv, capture_output=True, text=True, timeout=15)
-
+        runner = lambda argv: subprocess.run(
+            argv, capture_output=True, text=True, timeout=15)
     if shutil.which("codex-cli-usage") is None:
         # Fallback: at least confirm login status from ~/.codex/auth.json.
         # The id_token JWT carries chatgpt_plan_type +
@@ -285,10 +270,8 @@ def _query_codex_usage(home: Path | None = None, *, runner: Callable | None = No
         fallback = _codex_login_summary(home)
         if fallback["ok"]:
             return fallback
-        return {
-            "ok": False,
-            "note": "codex-cli-usage 未安装；运行 `uv tool install codex-cli-usage` 看额度（已登录但显示不出 %）",
-        }
+        return {"ok": False,
+                "note": "codex-cli-usage 未安装；运行 `uv tool install codex-cli-usage` 看额度（已登录但显示不出 %）"}
     try:
         r = runner(["codex-cli-usage"])
     except subprocess.TimeoutExpired:
@@ -306,17 +289,16 @@ def _query_codex_usage(home: Path | None = None, *, runner: Callable | None = No
         err_line = ""
         for ln in reversed(out.splitlines()):
             s = ln.strip()
-            if (
-                s
-                and ":" in s
-                and not s.startswith("File ")
-                and not s.startswith("^")
-                and "most recent call last" not in s
-            ):
+            if (s and ":" in s
+                    and not s.startswith("File ")
+                    and not s.startswith("^")
+                    and "most recent call last" not in s):
                 err_line = s
                 break
         if not err_line:
-            err_line = next((ln.strip() for ln in out.splitlines() if ln.strip()), "未知错误")
+            err_line = next(
+                (ln.strip() for ln in out.splitlines() if ln.strip()),
+                "未知错误")
         # 403 from OpenAI's usage endpoint is a known container-side
         # auth issue (main's docs: codex tokens get IP-pinned). Add
         # a hint so boss knows to `docker compose exec ... codex login`.
@@ -334,14 +316,12 @@ def _query_codex_usage(home: Path | None = None, *, runner: Callable | None = No
         m = _CODEX_USAGE_RE.search(s)
         if m:
             used_pct = int(round(float(m.group("pct"))))
-            metrics.append(
-                {
-                    "label": m.group("label").strip(),
-                    "used_pct": used_pct,
-                    "remaining_pct": max(0, min(100, 100 - used_pct)),
-                    "reset": m.group("reset"),
-                }
-            )
+            metrics.append({
+                "label": m.group("label").strip(),
+                "used_pct": used_pct,
+                "remaining_pct": max(0, min(100, 100 - used_pct)),
+                "reset": m.group("reset"),
+            })
     return {
         "ok": True,
         "plan": plan or "unknown",
@@ -353,7 +333,8 @@ def _opener_default(req, timeout):  # pragma: no cover - thin wrapper
     return urllib_request.urlopen(req, timeout=timeout)
 
 
-def _query_kimi_usage(home: Path | None = None, *, opener: Callable = _opener_default) -> dict:
+def _query_kimi_usage(home: Path | None = None,
+                      *, opener: Callable = _opener_default) -> dict:
     """Hit Kimi's coding API for the current quota window. Bearer
     token lives in `~/.kimi/credentials/kimi-code.json`. Returns
     `{ok, metrics: [{label, used_pct, remaining_pct, used, limit, reset_iso}]}`
@@ -367,7 +348,8 @@ def _query_kimi_usage(home: Path | None = None, *, opener: Callable = _opener_de
         return {"ok": False, "note": f"读取 {cred_path} 失败：{e}"}
     if not token:
         return {"ok": False, "note": "credentials/kimi-code.json 缺少 access_token"}
-    req = urllib_request.Request(_KIMI_USAGE_URL, headers={"Authorization": f"Bearer {token}"})
+    req = urllib_request.Request(
+        _KIMI_USAGE_URL, headers={"Authorization": f"Bearer {token}"})
     try:
         with opener(req, timeout=10) as resp:
             payload = json.loads(resp.read())
@@ -385,16 +367,14 @@ def _query_kimi_usage(home: Path | None = None, *, opener: Callable = _opener_de
         limit = used = 0
     if limit > 0:
         used_pct = round(used / limit * 100)
-        metrics.append(
-            {
-                "label": "Weekly limit",
-                "used": used,
-                "limit": limit,
-                "used_pct": used_pct,
-                "remaining_pct": max(0, 100 - used_pct),
-                "reset_iso": usage.get("resetTime", ""),
-            }
-        )
+        metrics.append({
+            "label": "Weekly limit",
+            "used": used,
+            "limit": limit,
+            "used_pct": used_pct,
+            "remaining_pct": max(0, 100 - used_pct),
+            "reset_iso": usage.get("resetTime", ""),
+        })
     for item in payload.get("limits", []) or []:
         window = item.get("window", {}) or {}
         detail = item.get("detail", {}) or {}
@@ -415,16 +395,14 @@ def _query_kimi_usage(home: Path | None = None, *, opener: Callable = _opener_de
             label = f"{duration}m limit"
         else:
             label = f"{duration}s window"
-        metrics.append(
-            {
-                "label": label,
-                "used": i_used,
-                "limit": i_limit,
-                "used_pct": used_pct,
-                "remaining_pct": max(0, 100 - used_pct),
-                "reset_iso": detail.get("resetTime", ""),
-            }
-        )
+        metrics.append({
+            "label": label,
+            "used": i_used,
+            "limit": i_limit,
+            "used_pct": used_pct,
+            "remaining_pct": max(0, 100 - used_pct),
+            "reset_iso": detail.get("resetTime", ""),
+        })
     if not metrics:
         return {"ok": False, "note": "Kimi API 返回数据无可解析配额"}
     return {"ok": True, "metrics": metrics}
@@ -439,9 +417,9 @@ def _note_for(cli: str) -> str:
     return _NO_TOOL if cli in _KNOWN_NO_TOOL else _UNKNOWN
 
 
-def _build_data(
-    view: str, days: str, clis: set[str], *, home: Path | None = None, opener: Callable = _opener_default
-) -> dict:
+def _build_data(view: str, days: str, clis: set[str],
+                *, home: Path | None = None,
+                opener: Callable = _opener_default) -> dict:
     """Run each CLI's usage probe and return a structured record.
     Used by both the text renderer (formatted lines) and the --json
     renderer (slash._handle_usage card).
@@ -468,9 +446,11 @@ def _build_data(
         # cumulative cost, not actual quota %.
         data["claude_code"] = _query_cc_usage(home, opener=opener)
     home_dir = home or Path.home()
-    if "codex-cli" in clis or "codex" in clis or (home_dir / ".codex" / "auth.json").exists():
+    if ("codex-cli" in clis or "codex" in clis
+            or (home_dir / ".codex" / "auth.json").exists()):
         data["codex"] = _query_codex_usage(home)
-    if "kimi-code" in clis or "kimi-cli" in clis or (home_dir / ".kimi" / "credentials" / "kimi-code.json").exists():
+    if ("kimi-code" in clis or "kimi-cli" in clis
+            or (home_dir / ".kimi" / "credentials" / "kimi-code.json").exists()):
         data["kimi"] = _query_kimi_usage(home, opener=opener)
     handled = {"claude-code", "codex-cli", "codex", "kimi-code", "kimi-cli"}
     for cli in sorted(clis):
@@ -491,14 +471,11 @@ def _emit_text(data: dict) -> None:
             for m in cc.get("metrics", []):
                 extra = m.get("extra")
                 if extra:
-                    print(
-                        f"  {m['label']}: 已用 {m['used_pct']}% · ${extra['used']:.2f} / ${extra['cap']} {extra['ccy']}"
-                    )
+                    print(f"  {m['label']}: 已用 {m['used_pct']}% · "
+                          f"${extra['used']:.2f} / ${extra['cap']} {extra['ccy']}")
                 else:
-                    print(
-                        f"  {m['label']}: 已用 {m['used_pct']}% · "
-                        f"剩余 {m['remaining_pct']}% · 重置 {m.get('reset_iso', '')}"
-                    )
+                    print(f"  {m['label']}: 已用 {m['used_pct']}% · "
+                          f"剩余 {m['remaining_pct']}% · 重置 {m.get('reset_iso', '')}")
     cx = data.get("codex")
     if cx is not None:
         print("\ncodex (codex-cli-usage):")
@@ -507,7 +484,8 @@ def _emit_text(data: dict) -> None:
         else:
             print(f"  Plan: {cx['plan']}")
             for m in cx.get("metrics", []):
-                print(f"  {m['label']}: 已用 {m['used_pct']}% · 剩余 {m['remaining_pct']}% · 重置 {m.get('reset', '')}")
+                print(f"  {m['label']}: 已用 {m['used_pct']}% · "
+                      f"剩余 {m['remaining_pct']}% · 重置 {m.get('reset', '')}")
     km = data.get("kimi")
     if km is not None:
         print("\nkimi-code (api.kimi.com):")
@@ -515,11 +493,9 @@ def _emit_text(data: dict) -> None:
             print(f"  ⚠️  {km['note']}")
         else:
             for m in km["metrics"]:
-                print(
-                    f"  {m['label']}: 已用 {m['used_pct']}% "
-                    f"({m['used']}/{m['limit']}) · 剩余 {m['remaining_pct']}% "
-                    f"· 重置 {m['reset_iso']}"
-                )
+                print(f"  {m['label']}: 已用 {m['used_pct']}% "
+                      f"({m['used']}/{m['limit']}) · 剩余 {m['remaining_pct']}% "
+                      f"· 重置 {m['reset_iso']}")
     if data["other_clis"]:
         print("\nother CLIs:")
         for row in data["other_clis"]:
@@ -545,7 +521,7 @@ def main(argv: list[str]) -> int:
 
     try:
         agents = config.load_team().get("agents", {})
-        clis = {a.get("cli", DEFAULT_CLI) for a in agents.values()}
+        clis = {a.get("cli", "claude-code") for a in agents.values()}
     except Exception:
         clis = set()
 

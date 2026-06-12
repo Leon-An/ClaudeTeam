@@ -10,10 +10,10 @@ Stripped of the old-tree extras (env_overrides, thinking_init_hint,
 CliCapabilities dataclass, proxy prefix wiring).  Those return when a
 concrete capability needs them, not before.
 """
-
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+
 
 # Braille-pattern spinner glyphs that every Ink/Rich/Bubbletea-style CLI
 # uses for "I'm busy" indication. Concrete adapters splice this into their

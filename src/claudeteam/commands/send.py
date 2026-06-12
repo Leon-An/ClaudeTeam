@@ -16,16 +16,18 @@ prompt-style notification and processes inbox proactively. Pass
 audit-only writes (caller is putting context for later, not
 expecting recipient to read NOW).
 """
-
 from __future__ import annotations
 
-from claudeteam.agents import adapter_for_agent
-from claudeteam.agents import identity as _identity
+from claudeteam.agents import adapter_for_agent, identity as _identity
 from claudeteam.runtime import config, lifecycle, tmux, wake
 from claudeteam.store import local_facts
 from claudeteam.util import pop_bool_flag, usage_error
 
-USAGE = "usage: claudeteam send <to> <from> <message> [priority] [--no-inject]"
+
+USAGE = (
+    "usage: claudeteam send <to> <from> <message> [priority] "
+    "[--no-inject]"
+)
 
 
 def main(argv: list[str]) -> int:
@@ -66,22 +68,20 @@ def main(argv: list[str]) -> int:
         cfg = config.agent_config(to) if to in config.agent_names() else {}
         if cfg.get("lazy") and not wake.is_ready(target, adapter):
             from claudeteam.runtime import tunables
-
-            spawn_cmd = f"{lifecycle.pane_env_prefix()} {adapter.spawn_cmd(to, config.agent_model(to))}"
+            spawn_cmd = (f"{lifecycle.pane_env_prefix()} "
+                         f"{adapter.spawn_cmd(to, config.agent_model(to))}")
             wake.wake_if_dormant(
-                target,
-                adapter,
+                target, adapter,
                 spawn_cmd=spawn_cmd,
                 init_msg=_identity.init_prompt(to),
                 timeout_s=float(tunables.tunable("wake.lazy_wake_timeout_s", 30.0)),
-                on_woken=lambda: local_facts.upsert_status(to, "进行中", "responding to first message"),
+                on_woken=lambda: local_facts.upsert_status(
+                    to, "进行中", "responding to first message"),
             )
-        nudge = (
-            f"📥 {frm} → {to}（{local_id}）。"
-            f"`claudeteam inbox {to}` → 处理 → "
-            f"`claudeteam read {local_id}` → 必要时 "
-            f'`claudeteam say {to} "..." --to user`。'
-        )
+        nudge = (f"📥 {frm} → {to}（{local_id}）。"
+                 f"`claudeteam inbox {to}` → 处理 → "
+                 f"`claudeteam read {local_id}` → 必要时 "
+                 f"`claudeteam say {to} \"...\" --to user`。")
         tmux.inject(target, nudge, submit_keys=adapter.submit_keys())
     except Exception as e:
         print(f"  ⚠️ tmux inject best-effort failed for {to}: {e}")

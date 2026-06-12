@@ -37,7 +37,6 @@ swallowed at the alert_fn level (and runtime/watchdog's supervise
 also try/excepts alert_fn). A broken alert path mustn't kill the
 supervisor.
 """
-
 from __future__ import annotations
 
 import json
@@ -51,6 +50,7 @@ from claudeteam.feishu import chat as _chat
 from claudeteam.feishu.cards import simple_card
 from claudeteam.runtime import config, paths, pidlock, tunables, watchdog
 from claudeteam.util import maybe_print_help
+
 
 _CRED_PATH = Path.home() / ".claude" / ".credentials.json"
 # Resolves to /root/.claude/.credentials.json in Docker (HOME=/root) — same
@@ -87,7 +87,6 @@ def _make_alert_fn():
             f"- after fix: `claudeteam down && claudeteam up`"
         )
         from claudeteam.runtime import tunables
-
         alarm_color = str(tunables.tunable("router.alarm_card_color", "red"))
         card = simple_card(title, body, color=alarm_color)
         try:
@@ -97,12 +96,10 @@ def _make_alert_fn():
             # plain text so the alert still lands somehow; if THAT also
             # fails the supervise outer try/except logs it.
             print(f"  ⚠️ watchdog: card alert send failed ({e}); falling back to text")
-            _chat.send_text(
-                chat_id,
-                f"🚨 watchdog: {name} entered {cooldown_secs}s cooldown after {failed_at} failed respawns",
-                profile=profile,
-                as_user=False,
-            )
+            _chat.send_text(chat_id,
+                            f"🚨 watchdog: {name} entered {cooldown_secs}s cooldown "
+                            f"after {failed_at} failed respawns",
+                            profile=profile, as_user=False)
 
     return alert
 
@@ -171,9 +168,7 @@ def _maybe_refresh_claude_oauth(now: float) -> None:
     try:
         r = subprocess.run(
             ["claude", "-p", "Return only OK"],
-            capture_output=True,
-            text=True,
-            timeout=60,
+            capture_output=True, text=True, timeout=60,
         )
     except (subprocess.TimeoutExpired, OSError) as e:
         print(f"  ⚠️ cred-refresh: `claude -p` failed: {e}")

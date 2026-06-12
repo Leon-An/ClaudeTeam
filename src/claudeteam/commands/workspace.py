@@ -3,11 +3,11 @@
 Read back the last N log entries for one agent (default 20).  Tail of the
 audit log per agent.
 """
-
 from __future__ import annotations
 
 from claudeteam.store import local_facts
 from claudeteam.util import fmt_time_ms, pop_flag, usage_error
+
 
 USAGE = "usage: claudeteam workspace <agent> [--limit N]"
 

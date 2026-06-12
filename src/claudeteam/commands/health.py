@@ -13,24 +13,19 @@ this team to actually deliver messages:
 Exit code: 0 if everything green, 1 if any red. Yellow (warning) does
 not fail the check.
 """
-
 from __future__ import annotations
 
 import shutil
 from dataclasses import dataclass, field
 
-from claudeteam.agents import DEFAULT_CLI, get_adapter
+from claudeteam.agents import get_adapter
 from claudeteam.feishu import catchup
 from claudeteam.runtime import config, paths, tmux, watchdog
 from claudeteam.store import local_facts
 from claudeteam.util import (
-    ago_ms,
-    env_str,
-    maybe_print_help,
-    pop_bool_flag,
-    print_json,
-    reject_extra_args,
+    ago_ms, env_str, maybe_print_help, pop_bool_flag, print_json, reject_extra_args,
 )
+
 
 _OK = "✅"
 _BAD = "❌"
@@ -44,7 +39,6 @@ class HealthReport:
     happen in one place so we don't string-search the formatted output
     later to figure out how many warnings we logged.
     """
-
     lines: list[str] = field(default_factory=list)
     bad: int = 0
     warn: int = 0
@@ -78,6 +72,7 @@ class HealthReport:
 def _check_state_dir(rep: HealthReport) -> None:
     src = "env" if env_str("CLAUDETEAM_STATE_DIR") else "default (~/.claudeteam)"
     rep.note(f"state_dir: {paths.state_dir()}  ({src})")
+
 
 
 def _check_team(rep: HealthReport) -> None:
@@ -130,7 +125,8 @@ def _check_session(rep: HealthReport, session: str) -> bool:
     return False
 
 
-def _check_agents(rep: HealthReport, session: str, agents: list[str], session_alive: bool) -> None:
+def _check_agents(rep: HealthReport, session: str, agents: list[str],
+                  session_alive: bool) -> None:
     heartbeats = local_facts.all_heartbeats()
     # Hoist load_team() out of the per-agent loop — each
     # `config.agent_cli` / `agent_config` would otherwise re-read
@@ -149,7 +145,7 @@ def _check_agents(rep: HealthReport, session: str, agents: list[str], session_al
             rep.fail(f"  {agent}: no tmux window{hb_suffix}")
             continue
         cfg = agents_dict.get(agent, {})
-        cli = cfg.get("cli", DEFAULT_CLI)
+        cli = cfg.get("cli", "claude-code")
         try:
             # Resolve adapter from `cli` directly — not via
             # `adapter_for_agent(agent)`, which would re-read the team
@@ -161,9 +157,7 @@ def _check_agents(rep: HealthReport, session: str, agents: list[str], session_al
             elif cfg.get("lazy"):
                 rep.ok(f"  {agent}: lazy pane (CLI starts on first message){hb_suffix}")
             else:
-                rep.yellow(
-                    f"  {agent}: pane up but CLI not ready yet — wait a few seconds or check the pane{hb_suffix}"
-                )
+                rep.yellow(f"  {agent}: pane up but CLI not ready yet — wait a few seconds or check the pane{hb_suffix}")
         except Exception as e:
             rep.yellow(f"  {agent}: probe failed — {e}")
 
@@ -186,11 +180,10 @@ def _check_binaries(rep: HealthReport, agents: list[str]) -> None:
     # each agent's `cli` from the cached dict, get_adapter(cli)
     # skips the per-agent config bounce.
     from claudeteam.agents import get_adapter
-
     agents_dict = config.load_team().get("agents", {})
     seen: dict[str, list[str]] = {}
     for agent in agents:
-        cli = agents_dict.get(agent, {}).get("cli", DEFAULT_CLI)
+        cli = agents_dict.get(agent, {}).get("cli", "claude-code")
         try:
             name = get_adapter(cli).process_name()
         except Exception:
@@ -217,8 +210,7 @@ def _check_proxy_env(rep: HealthReport) -> None:
     else:
         rep.yellow(
             f"HTTPS_PROXY={proxy} set without LARK_CLI_NO_PROXY=1; "
-            "lark-cli requests may fail. `export LARK_CLI_NO_PROXY=1` to strip."
-        )
+            "lark-cli requests may fail. `export LARK_CLI_NO_PROXY=1` to strip.")
 
 
 def _check_cursor(rep: HealthReport) -> None:
@@ -238,14 +230,14 @@ def _check_memory(rep: HealthReport) -> None:
     persisted state that would otherwise need a `find facts/ -name
     memory.jsonl` to discover."""
     from claudeteam.store import memory
-
     agents = sorted(memory.all_agents_with_memory())
     if not agents:
         rep.info("memory: no agent has written entries yet")
         return
     # One-liner if few agents; line-per-agent if many (>5)
     if len(agents) <= 5:
-        rep.info(f"memory: {len(agents)} agent(s) with entries — {', '.join(agents)}")
+        rep.info(f"memory: {len(agents)} agent(s) with entries — "
+                 f"{', '.join(agents)}")
     else:
         rep.info(f"memory: {len(agents)} agent(s) with entries:")
         for a in agents:
@@ -320,14 +312,12 @@ def _emit_json(rep: HealthReport) -> None:
         {"ok": bool, "bad": int, "warn": int, "lines": [str, ...]}
     Smoke conductors / CI can branch on `ok` and inspect `lines` for
     the rendered glyphs (which still appear in `lines`, just packaged)."""
-    print_json(
-        {
-            "ok": rep.bad == 0,
-            "bad": rep.bad,
-            "warn": rep.warn,
-            "lines": list(rep.lines),
-        }
-    )
+    print_json({
+        "ok": rep.bad == 0,
+        "bad": rep.bad,
+        "warn": rep.warn,
+        "lines": list(rep.lines),
+    })
 
 
 def main(argv: list[str]) -> int:
