@@ -31,7 +31,6 @@ Card-building helpers live in `feishu/cards.py`:
                                             (callers pass `ctx.now`)
     fenced_block(text) -> str               monospace lark_md fence
 """
-
 from __future__ import annotations
 
 import re
@@ -39,21 +38,15 @@ import subprocess
 import threading
 import time
 from collections import Counter
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Callable
 
 from claudeteam.agents import identity
 from claudeteam.feishu import pane_state
 from claudeteam.feishu.cards import (
-    beijing_stamp,
-    column_set_2,
-    column_set_3,
-    fenced_block,
-    load_color,
-    remaining_color,
-    rich_card,
-    simple_card,
+    beijing_stamp, column_set_2, column_set_3, fenced_block, load_color,
+    remaining_color, rich_card, simple_card,
 )
 from claudeteam.runtime import tmux
 from claudeteam.store import local_facts
@@ -77,7 +70,6 @@ def _spawn_daemon_thread(fn: Callable[[], None]) -> None:
 class SlashContext:
     """Dependency bag handed to every handler. Keeps handlers pure-ish:
     they only touch what's in here, easy to fake in tests."""
-
     team_agents: list[str]
     session: str
     # Deprecated: handlers now pull live data via `_live_agents()` so
@@ -85,9 +77,9 @@ class SlashContext:
     # router. These two fields are kept for back-compat with tests
     # constructing SlashContext directly.
     lazy_agents: frozenset[str] = frozenset()
-    run: Callable = subprocess.run  # for shell-out (`claudeteam <cmd>`)
-    sleep: Callable = time.sleep  # for /clear's settle delay
-    now: Callable = datetime.now  # injectable clock for header timestamps
+    run: Callable = subprocess.run         # for shell-out (`claudeteam <cmd>`)
+    sleep: Callable = time.sleep           # for /clear's settle delay
+    now: Callable = datetime.now           # injectable clock for header timestamps
     background: Callable[[Callable[[], None]], None] = _spawn_daemon_thread
 
     @property
@@ -96,20 +88,18 @@ class SlashContext:
 
 
 _AGENT_NAME_RE = re.compile(r"[A-Za-z0-9_\-]+")
-_REIDENTIFY_DELAY_S = 45.0  # rough upper bound for claude-code /compact
+_REIDENTIFY_DELAY_S = 45.0   # rough upper bound for claude-code /compact
 
 
 def _tmux_default_lines() -> int:
     """Default `/tmux` capture window (config-driven; was hardcoded 10)."""
     from claudeteam.runtime import tunables
-
     return int(tunables.tunable("limits.tmux_capture_default_lines", 10))
 
 
 def _tmux_max_lines() -> int:
     """Hard upper bound for `/tmux N` (config-driven; was hardcoded 2000)."""
     from claudeteam.runtime import tunables
-
     return int(tunables.tunable("limits.tmux_capture_max_lines", 2000))
 
 
@@ -120,10 +110,11 @@ def _live_agents() -> tuple[list[str], frozenset[str], frozenset[str], dict]:
     effect immediately (no router restart). One disk read per slash
     event — negligible vs the per-agent tmux subprocesses below."""
     from claudeteam.runtime import config as _config
-
     agents_dict = _config.load_team().get("agents", {})
     names = list(agents_dict.keys())
-    return (names, frozenset(names), frozenset(n for n, c in agents_dict.items() if c.get("lazy")), agents_dict)
+    return (names, frozenset(names),
+            frozenset(n for n, c in agents_dict.items() if c.get("lazy")),
+            agents_dict)
 
 
 def _default_agent(ctx: SlashContext) -> str:
@@ -202,7 +193,8 @@ def _handle_team(args: str, ctx: SlashContext) -> dict:
         # firing from a real failure. Caught 2026-05-09.
         status = local_facts.get_status(agent)
         if status and status.get("status") == "已停止":
-            note = status.get("task") or status.get("note") or status.get("blocker") or "已停止"
+            note = (status.get("task") or status.get("note")
+                    or status.get("blocker") or "已停止")
             rows.append((agent, "🚫", f"已停止 ({note})"))
             tally["🚫"] += 1
             continue
@@ -237,7 +229,8 @@ def _handle_team(args: str, ctx: SlashContext) -> dict:
     # ❌ etc.), green otherwise. 💤 idle / 🔄 working / ⏸ lazy / 🚫 fired
     # are intentional states — keep team header green.
     healthy_glyphs = ("💤", "🔄", "⏸", "🚫")
-    color = "green" if all(e in healthy_glyphs for e in tally) else "yellow"
+    color = ("green" if all(e in healthy_glyphs for e in tally)
+             else "yellow")
 
     return simple_card(
         f"👥 /team — 员工实时状态 [{ctx.session}] {beijing_stamp(ctx.now)}",
@@ -275,32 +268,23 @@ def _build_server_load_elements(data: dict) -> list:
     elements: list = []
 
     # 🖥️ 主机总览 — CPU / 内存 / 磁盘
-    cpu_cell = (
-        "**CPU**\n<font color='grey'>无数据</font>"
-        if not cpu
-        else f"**CPU**\n<font color='{load_color(cpu['pct'])}'>"
-        f"**{cpu['load'][0]:.2f} / {cpu['cores']} 核 ({cpu['pct']}%)**"
-        f"</font>\n<font color='grey'>5m {cpu['load'][1]:.2f} · "
-        f"15m {cpu['load'][2]:.2f}</font>"
-    )
-    mem_cell = (
-        "**内存**\n<font color='grey'>无数据</font>"
-        if not mem
-        else f"**内存**\n<font color='{load_color(mem['pct'])}'>"
-        f"**{fmt_bytes(mem['used'])} / {fmt_bytes(mem['total'])}"
-        f" ({mem['pct']}%)**</font>\n<font color='grey'>"
-        f"可用 {fmt_bytes(mem['available'])} · Swap "
-        f"{fmt_bytes(mem['swap']['used'])}/{fmt_bytes(mem['swap']['total'])}"
-        f"</font>"
-    )
-    disk_cell = (
-        "**磁盘**\n<font color='grey'>无数据</font>"
-        if not disk
-        else f"**磁盘** `{disk['mount']}`\n"
-        f"<font color='{load_color(disk['pct'])}'>"
-        f"**{fmt_bytes(disk['used'])} / {fmt_bytes(disk['total'])}"
-        f" ({disk['pct']}%)**</font>"
-    )
+    cpu_cell = ("**CPU**\n<font color='grey'>无数据</font>" if not cpu else
+                f"**CPU**\n<font color='{load_color(cpu['pct'])}'>"
+                f"**{cpu['load'][0]:.2f} / {cpu['cores']} 核 ({cpu['pct']}%)**"
+                f"</font>\n<font color='grey'>5m {cpu['load'][1]:.2f} · "
+                f"15m {cpu['load'][2]:.2f}</font>")
+    mem_cell = ("**内存**\n<font color='grey'>无数据</font>" if not mem else
+                f"**内存**\n<font color='{load_color(mem['pct'])}'>"
+                f"**{fmt_bytes(mem['used'])} / {fmt_bytes(mem['total'])}"
+                f" ({mem['pct']}%)**</font>\n<font color='grey'>"
+                f"可用 {fmt_bytes(mem['available'])} · Swap "
+                f"{fmt_bytes(mem['swap']['used'])}/{fmt_bytes(mem['swap']['total'])}"
+                f"</font>")
+    disk_cell = ("**磁盘**\n<font color='grey'>无数据</font>" if not disk else
+                 f"**磁盘** `{disk['mount']}`\n"
+                 f"<font color='{load_color(disk['pct'])}'>"
+                 f"**{fmt_bytes(disk['used'])} / {fmt_bytes(disk['total'])}"
+                 f" ({disk['pct']}%)**</font>")
     elements.append({"tag": "markdown", "content": "**🖥️ 主机总览**"})
     elements.append(column_set_3([cpu_cell, mem_cell, disk_cell]))
     elements.append({"tag": "hr"})
@@ -314,46 +298,47 @@ def _build_server_load_elements(data: dict) -> list:
         name_preview = " · ".join(c["short"] for c in containers[:3])
         if len(containers) > 3:
             name_preview += " …"
-        elements.append({"tag": "markdown", "content": "**📦 团队容器总量**"})
-        elements.append(
-            column_set_3(
-                [
-                    f"**容器数**\n**{running} / {len(containers)}** 运行中\n<font color='grey'>{name_preview}</font>",
-                    f"**容器 CPU 合计**\n<font color='{load_color(int(total_cpu))}'>"
-                    f"**{total_cpu:.1f}%**</font>\n<font color='grey'>"
-                    f"跨 {len(containers)} 容器加总</font>",
-                    f"**容器内存合计**\n**{fmt_bytes(total_mem)}**\n"
-                    f"<font color='{load_color(int(peak['mem_pct']))}'>"
-                    f"峰值 `{peak['short']}` {peak['mem_pct']:.1f}%</font>",
-                ]
-            )
-        )
+        elements.append({"tag": "markdown",
+                          "content": "**📦 团队容器总量**"})
+        elements.append(column_set_3([
+            f"**容器数**\n**{running} / {len(containers)}** 运行中\n"
+            f"<font color='grey'>{name_preview}</font>",
+            f"**容器 CPU 合计**\n<font color='{load_color(int(total_cpu))}'>"
+            f"**{total_cpu:.1f}%**</font>\n<font color='grey'>"
+            f"跨 {len(containers)} 容器加总</font>",
+            f"**容器内存合计**\n**{fmt_bytes(total_mem)}**\n"
+            f"<font color='{load_color(int(peak['mem_pct']))}'>"
+            f"峰值 `{peak['short']}` {peak['mem_pct']:.1f}%</font>",
+        ]))
         elements.append({"tag": "hr"})
 
     # 👤 员工细分 Top N
     if agents:
         topn = agents[:9]
-        elements.append(
-            {"tag": "markdown", "content": (f"**👤 员工细分 Top {len(topn)} / 共 {len(agents)}**（按 CPU 降序）")}
-        )
+        elements.append({"tag": "markdown",
+                          "content": (f"**👤 员工细分 Top {len(topn)}"
+                                       f" / 共 {len(agents)}**"
+                                       f"（按 CPU 降序）")})
         for i in range(0, len(topn), 3):
             row_cells = [
                 f"{_agent_emoji(a['cpu'])} **{a['agent']}**\n"
                 f"CPU `{a['cpu']:.1f}%` · Mem `{fmt_bytes(a['mem'])}`\n"
                 f"<font color='grey'>{a['location']}</font>"
-                for a in topn[i : i + 3]
+                for a in topn[i:i + 3]
             ]
             elements.append(column_set_3(row_cells))
         if len(agents) > 9:
-            elements.append(
-                {"tag": "markdown", "content": (f"<font color='grey'>… 另有 {len(agents) - 9} 个员工未显示</font>")}
-            )
+            elements.append({"tag": "markdown",
+                              "content": (f"<font color='grey'>… 另有 "
+                                           f"{len(agents) - 9} 个员工未显示"
+                                           f"</font>")})
         elements.append({"tag": "hr"})
 
     # 🚨 异常告警
     if alarms:
         body = "\n".join(f"- <font color='red'>⚠️ {a}</font>" for a in alarms)
-        elements.append({"tag": "markdown", "content": f"**🚨 异常告警**\n{body}"})
+        elements.append({"tag": "markdown",
+                          "content": f"**🚨 异常告警**\n{body}"})
         elements.append({"tag": "hr"})
 
     # Drop the trailing hr before the note footer
@@ -374,7 +359,6 @@ def _handle_health(args: str, ctx: SlashContext) -> dict:
     — common inside the container on macOS Docker Desktop.
     """
     from claudeteam.runtime import server_metrics
-
     _, agent_set, _, _ = _live_agents()
     data = server_metrics.collect_server_load(
         agent_set=agent_set,
@@ -384,14 +368,10 @@ def _handle_health(args: str, ctx: SlashContext) -> dict:
     # Lark v2 schema doesn't support the `note` element; use a
     # grey-font markdown line instead so the footer still reads as
     # subdued metadata.
-    elements.append(
-        {
-            "tag": "markdown",
-            "content": (
-                f"<font color='grey'>采集 {beijing_stamp(ctx.now)} · 数据源 uptime/free/df/docker stats/ps</font>"
-            ),
-        }
-    )
+    elements.append({"tag": "markdown",
+                      "content": (f"<font color='grey'>采集 {beijing_stamp(ctx.now)}"
+                                   f" · 数据源 uptime/free/df/docker stats/ps"
+                                   f"</font>")})
     # Yellow when alarms exist, otherwise purple (matches main's branding).
     color = "yellow" if data.get("alarms") else "purple"
     return rich_card(
@@ -401,16 +381,10 @@ def _handle_health(args: str, ctx: SlashContext) -> dict:
     )
 
 
-def _usage_section(
-    *,
-    heading: str,
-    ok: bool,
-    fail_text: str,
-    plan_text: str | None,
-    metrics: list,
-    no_metrics_note: str | None,
-    format_metric,
-) -> list:
+def _usage_section(*, heading: str, ok: bool, fail_text: str,
+                   plan_text: str | None, metrics: list,
+                   no_metrics_note: str | None,
+                   format_metric) -> list:
     """Render one CLI's section in the /usage card.
 
     Pulled out of `_codex_section` / `_kimi_section` because both
@@ -421,13 +395,15 @@ def _usage_section(
     """
     rows: list = [{"tag": "markdown", "content": heading}]
     if not ok:
-        rows.append(column_set_2("**Status**", f"<font color='red'>{fail_text}</font>"))
+        rows.append(column_set_2(
+            "**Status**", f"<font color='red'>{fail_text}</font>"))
         return rows
     if plan_text:
         rows.append(column_set_2("**Plan**", plan_text))
     if not metrics:
         if no_metrics_note:
-            rows.append(column_set_2("**Status**", f"<font color='grey'>{no_metrics_note}</font>"))
+            rows.append(column_set_2(
+                "**Status**", f"<font color='grey'>{no_metrics_note}</font>"))
         return rows
     for m in metrics:
         rows.append(column_set_2(f"**{m['label']}**", format_metric(m)))
@@ -437,14 +413,10 @@ def _usage_section(
 def _codex_section(cx: dict) -> list:
     """Render Codex section rows for `/usage` card."""
     plan = cx.get("plan") or "unknown"
-
     def fmt(m):
         color = remaining_color(m["remaining_pct"])
-        return (
-            f"<font color='{color}'>**剩余 {m['remaining_pct']}%**</font> "
-            f"· 已用 {m['used_pct']}% · 重置 {m.get('reset', '')}"
-        )
-
+        return (f"<font color='{color}'>**剩余 {m['remaining_pct']}%**</font> "
+                f"· 已用 {m['used_pct']}% · 重置 {m.get('reset', '')}")
     # When the upstream probe (codex-cli-usage) isn't installed we fall
     # back to ok=True with empty metrics + a `note` summarising the
     # auth.json login status. Surface that note in the no-metrics slot
@@ -456,22 +428,19 @@ def _codex_section(cx: dict) -> list:
         fail_text=f"Codex 用量读取失败</font> · {cx.get('note', '')}",
         plan_text=f"<font color='blue'>**{plan}**</font>" if cx.get("ok") else None,
         metrics=cx.get("metrics") or [],
-        no_metrics_note=(cx.get("note") or "codex-cli-usage 跑通但没返回 % 数据"),
+        no_metrics_note=(cx.get("note")
+                         or "codex-cli-usage 跑通但没返回 % 数据"),
         format_metric=fmt,
     )
 
 
 def _kimi_section(km: dict) -> list:
     """Render Kimi section rows for `/usage` card."""
-
     def fmt(m):
         color = remaining_color(m["remaining_pct"])
-        return (
-            f"<font color='{color}'>**剩余 {m['remaining_pct']}%**</font> "
-            f"· 已用 {m['used_pct']}% ({m['used']}/{m['limit']}) "
-            f"· 重置 {m.get('reset_iso', '')}"
-        )
-
+        return (f"<font color='{color}'>**剩余 {m['remaining_pct']}%**</font> "
+                f"· 已用 {m['used_pct']}% ({m['used']}/{m['limit']}) "
+                f"· 重置 {m.get('reset_iso', '')}")
     return _usage_section(
         heading="**🟧 Kimi (api.kimi.com)**",
         ok=bool(km.get("ok")),
@@ -481,6 +450,7 @@ def _kimi_section(km: dict) -> list:
         no_metrics_note=None,
         format_metric=fmt,
     )
+    return rows
 
 
 def _handle_usage(args: str, ctx: SlashContext) -> dict:
@@ -500,7 +470,6 @@ def _handle_usage(args: str, ctx: SlashContext) -> dict:
     raw = _shell(ctx, argv, timeout=120)
     try:
         import json as _json
-
         data = _json.loads(raw)
     except (ValueError, TypeError):
         data = {"view": view}
@@ -508,28 +477,27 @@ def _handle_usage(args: str, ctx: SlashContext) -> dict:
     elements: list = []
     cc = data.get("claude_code")
     if cc is not None:
-        elements.append({"tag": "markdown", "content": "**📊 Claude Code (api.anthropic.com)**"})
+        elements.append({"tag": "markdown",
+                          "content": "**📊 Claude Code (api.anthropic.com)**"})
         if not cc.get("ok"):
-            elements.append(
-                column_set_2("**Status**", f"<font color='red'>Claude usage 读取失败</font> · {cc.get('note', '')}")
-            )
+            elements.append(column_set_2(
+                "**Status**",
+                f"<font color='red'>Claude usage 读取失败</font> · {cc.get('note', '')}"))
         else:
             metrics = cc.get("metrics") or []
             if not metrics:
-                elements.append(column_set_2("**Status**", "<font color='grey'>API 跑通但没返回可解析窗口</font>"))
+                elements.append(column_set_2(
+                    "**Status**",
+                    f"<font color='grey'>API 跑通但没返回可解析窗口</font>"))
             for m in metrics:
                 color = remaining_color(m["remaining_pct"])
                 extra = m.get("extra")
                 if extra:
-                    right = (
-                        f"<font color='{color}'>**已用 {m['used_pct']}%**</font>"
-                        f" · ${extra['used']:.2f} / ${extra['cap']} {extra['ccy']}"
-                    )
+                    right = (f"<font color='{color}'>**已用 {m['used_pct']}%**</font>"
+                             f" · ${extra['used']:.2f} / ${extra['cap']} {extra['ccy']}")
                 else:
-                    right = (
-                        f"<font color='{color}'>**剩余 {m['remaining_pct']}%**</font>"
-                        f" · 已用 {m['used_pct']}% · 重置 {m.get('reset_iso', '')}"
-                    )
+                    right = (f"<font color='{color}'>**剩余 {m['remaining_pct']}%**</font>"
+                             f" · 已用 {m['used_pct']}% · 重置 {m.get('reset_iso', '')}")
                 elements.append(column_set_2(f"**{m['label']}**", right))
         elements.append({"tag": "hr"})
 
@@ -545,25 +513,26 @@ def _handle_usage(args: str, ctx: SlashContext) -> dict:
 
     other = data.get("other_clis") or []
     if other:
-        elements.append({"tag": "markdown", "content": "**📦 其他 CLI**"})
+        elements.append({"tag": "markdown",
+                          "content": "**📦 其他 CLI**"})
         for row in other:
-            elements.append(column_set_2(f"**{row['cli']}**", f"<font color='grey'>{row['note']}</font>"))
+            elements.append(column_set_2(
+                f"**{row['cli']}**",
+                f"<font color='grey'>{row['note']}</font>"))
         elements.append({"tag": "hr"})
 
     if not (cc or cx or km or other):
-        elements.append({"tag": "markdown", "content": "<font color='grey'>(无数据)</font>"})
+        elements.append({"tag": "markdown",
+                          "content": "<font color='grey'>(无数据)</font>"})
 
     if elements and elements[-1].get("tag") == "hr":
         elements.pop()
 
-    elements.append(
-        {
-            "tag": "markdown",
-            "content": (
-                f"<font color='grey'>采集 {beijing_stamp(ctx.now)} · data source `claudeteam usage --json`</font>"
-            ),
-        }
-    )
+    elements.append({"tag": "markdown",
+                      "content": (f"<font color='grey'>采集 "
+                                   f"{beijing_stamp(ctx.now)} · "
+                                   f"data source `claudeteam usage --json`"
+                                   f"</font>")})
 
     cc_failed = cc and not cc.get("ok")
     cx_failed = cx and not cx.get("ok")
@@ -588,7 +557,8 @@ def _handle_tmux(args: str, ctx: SlashContext) -> str | dict:
     one-line — a card here would be over-formatting)."""
     parts = args.split()
     agent = parts[0] if parts else _default_agent(ctx)
-    raw_lines = int(parts[1]) if len(parts) >= 2 and parts[1].isdigit() else _tmux_default_lines()
+    raw_lines = (int(parts[1]) if len(parts) >= 2 and parts[1].isdigit()
+                 else _tmux_default_lines())
     n_lines = max(1, min(raw_lines, _tmux_max_lines()))
     _, agent_set, _, _ = _live_agents()
     if agent not in agent_set:
@@ -604,12 +574,12 @@ def _handle_tmux(args: str, ctx: SlashContext) -> str | dict:
 
 def _handle_send(args: str, ctx: SlashContext) -> str:
     if not args.strip():
-        return '用法: /send <agent> <message>\n例: /send worker_cc "看一下 README"'
+        return "用法: /send <agent> <message>\n例: /send worker_cc \"看一下 README\""
     parts = args.split(None, 1)
     if len(parts) < 2 or not parts[1].strip():
         return "用法: /send <agent> <message>（缺少消息内容）"
     agent, msg = parts[0].strip(), parts[1].strip()
-    if warn := _bad_agent(agent, ctx):
+    if (warn := _bad_agent(agent, ctx)):
         return warn
     target = tmux.Target(ctx.session, agent)
     ok = tmux.inject(target, msg)
@@ -635,7 +605,7 @@ def _handle_compact(args: str, ctx: SlashContext) -> str:
     "已让 agent 自压缩上下文" line."""
     parts = args.split()
     agent = (parts[0] if parts else _default_agent(ctx)).strip()
-    if warn := _bad_agent(agent, ctx):
+    if (warn := _bad_agent(agent, ctx)):
         return warn
     target = tmux.Target(ctx.session, agent)
     ok = tmux.inject(target, "/compact")
@@ -649,10 +619,8 @@ def _handle_compact(args: str, ctx: SlashContext) -> str:
     ctx.sleep(2.0)
     pane = tmux.capture_pane(target, lines=20) or ""
     if _COMPACT_REJECT_MARKER in pane:
-        return (
-            f"⚠️ /compact → {ctx.session}:{agent} · claude 把 /compact 当成"
-            f"消息文本回了（autoinjected 时常见，2.x 行为）。建议 /clear 替代。"
-        )
+        return (f"⚠️ /compact → {ctx.session}:{agent} · claude 把 /compact 当成"
+                f"消息文本回了（autoinjected 时常见，2.x 行为）。建议 /clear 替代。")
     # Schedule the re-identify on a background thread so the bot reply
     # comes back to chat immediately (no 45s block).
     init_msg = identity.init_prompt(agent)
@@ -662,17 +630,15 @@ def _handle_compact(args: str, ctx: SlashContext) -> str:
         tmux.inject(target, init_msg)
 
     ctx.background(_reidentify_later)
-    return (
-        f"{glyph} /compact → {ctx.session}:{agent} · 已让 agent 自压缩上下文 · "
-        f"{int(_REIDENTIFY_DELAY_S)}s 后自动重注 identity"
-    )
+    return (f"{glyph} /compact → {ctx.session}:{agent} · 已让 agent 自压缩上下文 · "
+            f"{int(_REIDENTIFY_DELAY_S)}s 后自动重注 identity")
 
 
 def _handle_stop(args: str, ctx: SlashContext) -> str:
     if not args.strip():
         return "用法: /stop <agent>\n例: /stop worker_cc（送 C-c 中断当前动作）"
     agent = args.strip().split()[0]
-    if warn := _bad_agent(agent, ctx):
+    if (warn := _bad_agent(agent, ctx)):
         return warn
     ok = tmux.send_keys(tmux.Target(ctx.session, agent), "C-c")
     glyph = "✅" if ok else "❌"
@@ -681,13 +647,11 @@ def _handle_stop(args: str, ctx: SlashContext) -> str:
 
 def _handle_clear(args: str, ctx: SlashContext) -> str:
     if not args.strip():
-        return (
-            "用法: /clear <agent>\n"
-            "例: /clear worker_cc（清上下文 + 重新入职 init_msg，相当于 rehire）\n"
-            "⚠️ 会丢 agent 当前会话记忆，谨慎用"
-        )
+        return ("用法: /clear <agent>\n"
+                "例: /clear worker_cc（清上下文 + 重新入职 init_msg，相当于 rehire）\n"
+                "⚠️ 会丢 agent 当前会话记忆，谨慎用")
     agent = args.strip().split()[0]
-    if warn := _bad_agent(agent, ctx):
+    if (warn := _bad_agent(agent, ctx)):
         return warn
     target = tmux.Target(ctx.session, agent)
     if not tmux.inject(target, "/clear"):

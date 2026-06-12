@@ -8,7 +8,6 @@ Always best-effort — a missing pid file or already-dead process does
 not raise. Returns 0 unless something we expected to be alive refused
 to die.
 """
-
 from __future__ import annotations
 
 import os
@@ -63,7 +62,8 @@ def _kill_pid_file(name: str, pid_file) -> int:
             pid_file.unlink(missing_ok=True)
             return 0
         time.sleep(0.1)
-    return error_exit(f"⚠️  {name}: pid {pid} still alive after 12s SIGTERM+SIGKILL — investigate manually")
+    return error_exit(
+        f"⚠️  {name}: pid {pid} still alive after 12s SIGTERM+SIGKILL — investigate manually")
 
 
 def main(argv: list[str]) -> int:

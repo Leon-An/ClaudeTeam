@@ -1,5 +1,4 @@
 """CLI adapter registry — maps a `cli` identifier to its CliAdapter."""
-
 from __future__ import annotations
 
 from claudeteam.runtime.config import agent_cli
@@ -11,9 +10,6 @@ from .gemini_cli import GeminiCliAdapter
 from .kimi_code import KimiCodeAdapter
 from .qwen_code import QwenCodeAdapter
 
-# Default CLI type when team.json doesn't specify one. Centralised here
-# so every `.get("cli", "claude-code")` falls back to the same constant.
-DEFAULT_CLI = "claude-code"
 
 _kimi = KimiCodeAdapter()
 _qwen = QwenCodeAdapter()
@@ -35,7 +31,8 @@ def known_clis() -> tuple[str, ...]:
 def get_adapter(cli_name: str) -> CliAdapter:
     """Return the adapter for `cli_name`. Raises KeyError if not registered."""
     if cli_name not in _REGISTRY:
-        raise KeyError(f"unknown cli: {cli_name!r} (known: {', '.join(_REGISTRY)})")
+        raise KeyError(
+            f"unknown cli: {cli_name!r} (known: {', '.join(_REGISTRY)})")
     return _REGISTRY[cli_name]
 
 

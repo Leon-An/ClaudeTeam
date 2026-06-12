@@ -18,19 +18,14 @@ Use cases:
 Default output is human-readable bullets; `--json` dumps the underlying
 records for piping to jq / smoke conductors.
 """
-
 from __future__ import annotations
 
 from claudeteam.store import memory
 from claudeteam.util import (
-    error_exit,
-    fmt_time_ms,
-    maybe_print_help,
-    pop_bool_flag,
-    pop_flag,
-    print_json,
-    usage_error,
+    error_exit, fmt_time_ms, maybe_print_help, pop_bool_flag, pop_flag,
+    print_json, usage_error,
 )
+
 
 USAGE = (
     "usage: claudeteam recall <agent> [--limit N] [--kind K] [--json]\n"
@@ -74,9 +69,8 @@ def main(argv: list[str]) -> int:
         print(f"🧠 {agent}: no memory entries{suffix}")
         return 0
     filter_note = f", filter kind={kind_filter}" if kind_filter else ""
-    print(
-        f"🧠 {agent}: {len(rows)} entr{'ies' if len(rows) != 1 else 'y'} (oldest first, capped at {limit}{filter_note})"
-    )
+    print(f"🧠 {agent}: {len(rows)} entr{'ies' if len(rows) != 1 else 'y'} "
+          f"(oldest first, capped at {limit}{filter_note})")
     for row in rows:
         ts = fmt_time_ms(row.get("created_at", 0))
         kind = row.get("kind", "?")

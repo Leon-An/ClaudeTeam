@@ -4,16 +4,16 @@ Codex only accepts OpenAI-native model names (gpt-/o1/o3/o4/codex prefixes);
 other aliases (sonnet/opus/haiku) are silently dropped so Codex falls back
 to its configured default.
 """
-
 from __future__ import annotations
 
 import shlex
 from pathlib import Path
 
-from .base import MULTILINE_SUBMIT_KEYS, SPINNER_CHARS, CliAdapter
+from .base import CliAdapter, MULTILINE_SUBMIT_KEYS, SPINNER_CHARS
 
 
-def ensure_workdir_trusted(workdir: Path, config_path: Path | None = None) -> None:
+def ensure_workdir_trusted(workdir: Path,
+                           config_path: Path | None = None) -> None:
     """Pre-trust `workdir` in ~/.codex/config.toml so the first-run
     "Do you trust this directory?" prompt doesn't block a freshly-spawned
     pane. Idempotent: a no-op if the entry already exists.
@@ -37,20 +37,11 @@ _OPENAI_PREFIXES = ("gpt-", "o1", "o3", "o4", "codex")
 
 class CodexCliAdapter(CliAdapter):
     def spawn_cmd(self, agent: str, model: str) -> str:
-        import os
-
         args = ["--dangerously-bypass-approvals-and-sandbox"]
-        base_url = os.environ.get("OPENAI_BASE_URL", "")
-        api_key = os.environ.get("OPENAI_API_KEY", "")
-        mimo_env = ""
-        if base_url:
-            mimo_env += f"OPENAI_BASE_URL={shlex.quote(base_url)} "
-        if api_key:
-            mimo_env += f"OPENAI_API_KEY={shlex.quote(api_key)} "
-        if model:
+        if model and any(model.startswith(p) for p in _OPENAI_PREFIXES):
             args += ["--model", model]
         quoted = " ".join(shlex.quote(a) for a in args)
-        return f"{mimo_env}CODEX_AGENT={shlex.quote(agent)} codex {quoted}"
+        return f"CODEX_AGENT={shlex.quote(agent)} codex {quoted}"
 
     def ready_markers(self) -> list[str]:
         # Banner lines after CLI 0.124+ becomes interactive.  Avoids matching

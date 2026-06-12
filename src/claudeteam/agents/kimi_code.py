@@ -1,8 +1,7 @@
 """Moonshot Kimi Code adapter."""
-
 from __future__ import annotations
 
-from .base import MULTILINE_SUBMIT_KEYS, SPINNER_CHARS, CliAdapter
+from .base import CliAdapter, MULTILINE_SUBMIT_KEYS, SPINNER_CHARS
 
 
 class KimiCodeAdapter(CliAdapter):

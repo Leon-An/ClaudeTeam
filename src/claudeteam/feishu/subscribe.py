@@ -7,13 +7,12 @@ event dict, classifies it, and applies the decision.
 
 Returns a tally of (handled, dropped) so callers can log heartbeat.
 """
-
 from __future__ import annotations
 
 import json
 from collections import Counter
-from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+from typing import Callable, Iterable
 
 from claudeteam.feishu.deliver import apply
 from claudeteam.feishu.router import classify_event
@@ -54,7 +53,9 @@ def _normalise(raw: dict) -> dict:
     msg = ev.get("message") or {}
     sender = ev.get("sender") or {}
 
-    msg_type = msg.get("message_type") or ev.get("message_type") or ev.get("msg_type", "text")
+    msg_type = (msg.get("message_type")
+                or ev.get("message_type")
+                or ev.get("msg_type", "text"))
 
     # Content: legacy puts it under msg.content, modern at ev.content.
     # In either form it might be JSON-encoded ({"text": "..."} for text,
@@ -69,11 +70,15 @@ def _normalise(raw: dict) -> dict:
     # `sender.id_type`. Needed for bot-self detection so manager's
     # own cards don't loop back into manager's inbox via catchup
     # (host_smoke 2026-05-06: 7 forward loops before this caught).
-    sender_type = sender.get("sender_type") or sender.get("id_type") or ev.get("sender_type", "")
+    sender_type = (sender.get("sender_type")
+                   or sender.get("id_type")
+                   or ev.get("sender_type", ""))
     return {
         "message_id": msg.get("message_id") or ev.get("message_id", ""),
         "chat_id": msg.get("chat_id") or ev.get("chat_id", ""),
-        "sender_id": (sender.get("sender_id", {}).get("open_id") or sender.get("id") or ev.get("sender_id", "")),
+        "sender_id": (sender.get("sender_id", {}).get("open_id")
+                      or sender.get("id")
+                      or ev.get("sender_id", "")),
         "sender_type": sender_type,
         "text": text,
         "msg_type": msg_type,
@@ -199,18 +204,15 @@ def _record_drop(stats: LoopStats, reason: str) -> None:
     stats.drops_by_reason[reason] += 1
 
 
-def process_lines(
-    lines: Iterable[str],
-    *,
-    team_agents: list[str],
-    chat_id: str = "",
-    bot_id: str = "",
-    default_target: str = "manager",
-    apply_fn: Callable = apply,
-    on_progress: Callable | None = None,
-    on_line_received: Callable | None = None,
-    seen_msg_ids: set[str] | None = None,
-) -> LoopStats:
+def process_lines(lines: Iterable[str], *,
+                  team_agents: list[str],
+                  chat_id: str = "",
+                  bot_id: str = "",
+                  default_target: str = "manager",
+                  apply_fn: Callable = apply,
+                  on_progress: Callable | None = None,
+                  on_line_received: Callable | None = None,
+                  seen_msg_ids: set[str] | None = None) -> LoopStats:
     """Run the subscribe loop over `lines` (one Feishu event JSON each).
 
     Designed to be exited by exhausting the iterator.  The production

@@ -11,18 +11,14 @@ config.
 
 Refuses to overwrite an existing `claudeteam.toml` unless --force.
 """
-
 from __future__ import annotations
 
-from claudeteam.runtime import config as _config
-from claudeteam.runtime import paths
+from claudeteam.runtime import config as _config, paths
 from claudeteam.util import (
-    error_exit,
-    maybe_print_help,
-    pop_bool_flag,
-    pop_flag,
+    error_exit, maybe_print_help, pop_bool_flag, pop_flag,
     reject_extra_args,
 )
+
 
 USAGE = "usage: claudeteam init [--session NAME] [--force] [--upgrade]"
 
@@ -144,19 +140,25 @@ def _upgrade_from_legacy(session: str) -> str:
     sections from legacy files. Comments preserved by string-substituting
     only known fields.
     """
-    legacy_team = _config.load_team()  # via legacy reader
-    legacy_runtime = _config.load_runtime_config()  # via legacy reader
+    legacy_team = _config.load_team()                 # via legacy reader
+    legacy_runtime = _config.load_runtime_config()    # via legacy reader
 
     template = _render_template(legacy_team.get("session") or session)
 
     # Replace chat_id / lark_profile lines
     if cid := legacy_runtime.get("chat_id"):
-        template = template.replace('chat_id      = ""                         #', f'chat_id      = "{cid}"  #', 1)
+        template = template.replace(
+            'chat_id      = ""                         #',
+            f'chat_id      = "{cid}"  #', 1)
     if lp := legacy_runtime.get("lark_profile"):
-        template = template.replace('lark_profile = ""                         #', f'lark_profile = "{lp}"  #', 1)
+        template = template.replace(
+            'lark_profile = ""                         #',
+            f'lark_profile = "{lp}"  #', 1)
     if dm := legacy_team.get("default_model"):
         if dm != "opus":
-            template = template.replace('default_model = "opus"', f'default_model = "{dm}"', 1)
+            template = template.replace(
+                'default_model = "opus"',
+                f'default_model = "{dm}"', 1)
 
     # Replace agent block. Drop the 3 default agents and rebuild from legacy.
     legacy_agents = legacy_team.get("agents", {})
@@ -168,7 +170,7 @@ def _upgrade_from_legacy(session: str) -> str:
             new_agent_block = ""
             for name, cfg in legacy_agents.items():
                 lines = [f"[team.agents.{name}]"]
-                lines.append(f'cli   = "{cfg.get("cli", "claude-code")}"')
+                lines.append(f'cli   = "{cfg.get("cli","claude-code")}"')
                 if model := cfg.get("model"):
                     lines.append(f'model = "{model}"')
                 if role := cfg.get("role"):
@@ -176,20 +178,16 @@ def _upgrade_from_legacy(session: str) -> str:
                 if cfg.get("lazy"):
                     lines.append("lazy  = true")
                 # default card_color by name prefix
-                color = (
-                    "blue"
-                    if name == "manager"
-                    else "purple"
-                    if "codex" in name
-                    else "orange"
-                    if "kimi" in name
-                    else "yellow"
-                    if "gemini" in name
-                    else "green"
-                )
+                color = ("blue" if name == "manager"
+                         else "purple" if "codex" in name
+                         else "orange" if "kimi" in name
+                         else "yellow" if "gemini" in name
+                         else "green")
                 lines.append(f'card_color = "{color}"')
                 new_agent_block += "\n".join(lines) + "\n\n"
-            template = template[:agents_start] + new_agent_block.rstrip() + "\n" + template[agents_end:]
+            template = (template[:agents_start]
+                        + new_agent_block.rstrip() + "\n"
+                        + template[agents_end:])
 
     return template
 
@@ -210,7 +208,8 @@ def main(argv: list[str]) -> int:
     cfg_path = paths.config_file()
 
     if cfg_path.exists() and not force:
-        return error_exit(f"❌ {cfg_path} already exists; pass --force to overwrite")
+        return error_exit(
+            f"❌ {cfg_path} already exists; pass --force to overwrite")
 
     if upgrade:
         # Sanity check legacy files actually exist before running merge,
@@ -219,8 +218,8 @@ def main(argv: list[str]) -> int:
         rt_path = _config.runtime_config_file()
         if not team_path.exists() and not rt_path.exists():
             return error_exit(
-                f"❌ --upgrade: neither {team_path.name} nor {rt_path.name} found in cwd; nothing to migrate"
-            )
+                f"❌ --upgrade: neither {team_path.name} nor {rt_path.name} "
+                f"found in cwd; nothing to migrate")
         content = _upgrade_from_legacy(session)
     else:
         content = _render_template(session)
@@ -232,7 +231,7 @@ def main(argv: list[str]) -> int:
         team_path = _config.team_file()
         rt_path = _config.runtime_config_file()
         print(f"  legacy {team_path.name} + {rt_path.name} preserved as backup;")
-        print("  remove them once you've verified `claudeteam health` is green.")
+        print(f"  remove them once you've verified `claudeteam health` is green.")
     else:
         print("Next:")
         print(f"  - edit {cfg_path.name} to set chat_id + adjust agents")

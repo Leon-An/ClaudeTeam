@@ -3,7 +3,6 @@
 Keeping it small on purpose — anything bigger than a few one-liners
 belongs in its own module under runtime/, store/, or feishu/.
 """
-
 from __future__ import annotations
 
 import contextlib
@@ -100,7 +99,7 @@ def pop_flag(rest: list[str], flag: str) -> str | None:
     if i + 1 >= len(rest):
         return None
     val = rest[i + 1]
-    del rest[i : i + 2]
+    del rest[i:i + 2]
     return val
 
 

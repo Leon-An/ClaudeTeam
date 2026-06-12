@@ -12,7 +12,6 @@ Layout:
         watchdog.pid
         router.cursor      ← catchup replay state
 """
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -57,7 +56,6 @@ def config_file() -> Path:
     runtime_config.json). Override via CLAUDETEAM_CONFIG_FILE env, else
     looks for `./claudeteam.toml` relative to cwd."""
     from claudeteam.util import env_path
-
     return env_path("CLAUDETEAM_CONFIG_FILE") or Path.cwd() / "claudeteam.toml"
 
 

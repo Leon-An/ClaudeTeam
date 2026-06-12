@@ -1,5 +1,4 @@
 """Anthropic Claude Code adapter."""
-
 from __future__ import annotations
 
 import json
@@ -9,7 +8,7 @@ from pathlib import Path
 
 from claudeteam.runtime import paths
 
-from .base import SPINNER_CHARS, CliAdapter
+from .base import CliAdapter, SPINNER_CHARS
 
 
 def _read_oauth_token(agent: str) -> str | None:
@@ -86,38 +85,24 @@ class ClaudeCodeAdapter(CliAdapter):
         #   keychain) and threading it through env keeps claude in
         #   file-only auth mode for the lifetime of the pane.
         oauth_token = _read_oauth_token(agent)
-        token_prefix = f"CLAUDE_CODE_OAUTH_TOKEN={shlex.quote(oauth_token)} " if oauth_token else ""
-        # mimo API 配置：从环境变量读取，注入到 tmux pane
-        import os
-
-        base_url = os.environ.get("ANTHROPIC_BASE_URL", "")
-        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-        mimo_env = ""
-        if base_url:
-            mimo_env += f"ANTHROPIC_BASE_URL={shlex.quote(base_url)} "
-        if api_key:
-            mimo_env += f"ANTHROPIC_API_KEY={shlex.quote(api_key)} "
+        token_prefix = (f"CLAUDE_CODE_OAUTH_TOKEN={shlex.quote(oauth_token)} "
+                        if oauth_token else "")
         return (
             f"HOME={agent_home(agent)} "
             f"{token_prefix}"
-            f"{mimo_env}"
             f"CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1 DISABLE_AUTOUPDATER=1 "
-            f"claude --bare "
+            f"IS_SANDBOX=1 claude --dangerously-skip-permissions "
             f"--model {model} --name {agent}"
         )
 
     def ready_markers(self) -> list[str]:
-        return ["? for shortcuts", "for shortcuts", "for agents"]
+        return ["bypass permissions on", "? for shortcuts"]
 
     def busy_markers(self) -> list[str]:
         return [
             *SPINNER_CHARS,
-            "◐",
-            "◑",
-            "◒",
-            "◓",
-            "Thinking",
-            "Running tool",
+            "◐", "◑", "◒", "◓",
+            "Thinking", "Running tool",
         ]
 
     def process_name(self) -> str:

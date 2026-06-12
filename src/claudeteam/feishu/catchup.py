@@ -23,17 +23,17 @@ Specifically:
   - lark-cli 1.0.21 live: `{content: "...", create_time: "2026-05-03 18:53"}`
 The shape-normalisation helpers below accept both.
 """
-
 from __future__ import annotations
 
 import datetime as _dt
 import json
-from collections.abc import Callable, Iterable
+from typing import Callable, Iterable
 
 from claudeteam.feishu import chat as _chat
 from claudeteam.feishu.router import Decision
 from claudeteam.runtime import paths
 from claudeteam.util import env_str, read_json, write_json
+
 
 # ── cursor persistence ─────────────────────────────────────────
 
@@ -50,7 +50,8 @@ def write_cursor(message_id: str, create_time: str) -> None:
     """Persist the last-seen message marker. No-op if either field is empty."""
     if not message_id or not create_time:
         return
-    write_json(paths.router_cursor_file(), {"message_id": message_id, "create_time": str(create_time)})
+    write_json(paths.router_cursor_file(),
+               {"message_id": message_id, "create_time": str(create_time)})
 
 
 def record_decision(decision: Decision) -> None:
@@ -93,7 +94,8 @@ def _msg_to_event_line(fei_msg: dict) -> str:
             },
             "sender": {
                 "sender_id": {"open_id": sender.get("id", "")},
-                "sender_type": sender.get("sender_type") or sender.get("id_type", ""),
+                "sender_type": sender.get("sender_type")
+                                or sender.get("id_type", ""),
             },
         }
     }
@@ -145,19 +147,18 @@ def _newer_than(messages: Iterable[dict], cursor_create_time: str) -> list[dict]
     """
     raw_cutoff = _to_epoch_ms(cursor_create_time)
     cutoff = (raw_cutoff // 60_000) * 60_000  # floor to minute
-
     def keep(m: dict) -> bool:
         ts = _to_epoch_ms(m.get("create_time"))
         return ts > 0 and ts >= cutoff
-
     fresh = [m for m in messages if keep(m)]
     fresh.sort(key=lambda m: _to_epoch_ms(m.get("create_time")))
     return fresh
 
 
-def pending_lines(
-    chat_id: str, *, profile: str = "", page_size: int = 50, list_fn: Callable | None = None
-) -> list[str]:
+def pending_lines(chat_id: str, *,
+                  profile: str = "",
+                  page_size: int = 50,
+                  list_fn: Callable | None = None) -> list[str]:
     """Return NDJSON lines for messages newer than the saved cursor.
 
     Oldest-first so process_lines applies them in chronological order.
@@ -187,13 +188,11 @@ def pending_lines(
             as_value = legacy
         else:
             from claudeteam.runtime import tunables
-
             as_value = str(tunables.tunable("feishu.send_as", "user")).lower()
         as_user = as_value != "bot"
-
         def list_fn():
-            return _chat.list_recent(chat_id, profile=profile, page_size=page_size, as_user=as_user)
-
+            return _chat.list_recent(chat_id, profile=profile,
+                                     page_size=page_size, as_user=as_user)
     msgs = list_fn() or []
     fresh = _newer_than(msgs, cursor_ct)
     return [_msg_to_event_line(m) for m in fresh]

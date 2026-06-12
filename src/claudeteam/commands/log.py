@@ -3,11 +3,11 @@
 Append a workspace log entry.  Append-only JSONL; agents leave a trail
 that can be tailed for audit / replay.
 """
-
 from __future__ import annotations
 
 from claudeteam.store import local_facts
 from claudeteam.util import usage_error
+
 
 USAGE = "usage: claudeteam log <agent> <kind> <content> [ref]"
 
