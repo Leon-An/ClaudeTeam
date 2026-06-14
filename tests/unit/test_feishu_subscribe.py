@@ -609,3 +609,124 @@ def test_on_line_received_callback_failure_does_not_kill_loop():
     )
     assert fires == [1]  # callback ran
     assert stats.handled == 1  # loop kept going
+
+
+# ── suppress_slash (catchup replay must not re-run control commands) ──
+
+
+def test_suppress_slash_skips_dispatch_on_catchup():
+    """F-G2-restore: replaying a /restart or /shutdown 确认 from a bring-up
+    backlog would re-run `down` and tear the team back down. With
+    suppress_slash the slash is a counted DROP, never dispatched."""
+    line = _ndjson(_wrapped("om_s", "oc_team", "ou_user", "/restart"))
+    applied = []
+    stats = process_lines(line, team_agents=_AGENTS, chat_id="oc_team",
+                          apply_fn=applied.append, suppress_slash=True)
+    assert applied == []                       # NOT dispatched
+    assert stats.handled == 0
+    assert stats.dropped == 1
+    assert stats.drops_by_reason["catchup_slash_skip"] == 1
+
+
+def test_slash_dispatched_when_not_suppressed_live():
+    """The LIVE path (default suppress_slash=False) still dispatches slash."""
+    line = _ndjson(_wrapped("om_s", "oc_team", "ou_user", "/restart"))
+    applied = []
+    process_lines(line, team_agents=_AGENTS, chat_id="oc_team",
+                  apply_fn=applied.append)
+    assert len(applied) == 1
+    assert applied[0].action.value == "slash"
+
+
+def test_suppress_slash_still_advances_cursor_via_on_progress():
+    """Skipped slash must still move the cursor (+seen) so a respawn doesn't
+    re-encounter it."""
+    line = _ndjson(_wrapped("om_s", "oc_team", "ou_user", "/shutdown 确认"))
+    progressed = []
+    process_lines(line, team_agents=_AGENTS, chat_id="oc_team",
+                  apply_fn=lambda d: None,
+                  on_progress=lambda d, s: progressed.append(d),
+                  suppress_slash=True)
+    assert len(progressed) == 1
+    assert progressed[0].msg_id == "om_s"
+
+
+def test_suppress_slash_still_routes_human_messages():
+    """suppress_slash only gates slash — real boss messages still deliver."""
+    line = _ndjson(_wrapped("om_h", "oc_team", "ou_user", "please help"))
+    applied = []
+    stats = process_lines(line, team_agents=_AGENTS, chat_id="oc_team",
+                          apply_fn=applied.append, suppress_slash=True)
+    assert len(applied) == 1
+    assert stats.handled == 1
+
+
+# ── catchup freshness discrimination (F-suppress-eats-fresh-slash) ──
+#
+# In a WS-dead env catchup is the *fallback delivery* path for live boss
+# commands, so blanket-suppressing every catchup slash silently eats fresh
+# /login //task etc. (the "slash slow / no response"). Suppress only stale
+# replays + destructive lifecycle commands; dispatch fresh non-lifecycle.
+import time as _t
+
+
+def _slash_line(text, create_time_ms, *, msg_id="om_s", chat_id="oc_team"):
+    import json as _j
+    ev = {"event": {"message": {"message_id": msg_id, "chat_id": chat_id,
+            "message_type": "text", "content": _j.dumps({"text": text}),
+            "create_time": str(create_time_ms)},
+          "sender": {"sender_id": {"open_id": "ou_user"}, "sender_type": "user"}}}
+    return [_j.dumps(ev)]
+
+
+def test_catchup_dispatches_fresh_nonlifecycle_slash():
+    """A FRESH non-lifecycle slash via catchup (WS-fallback) must dispatch."""
+    now = int(_t.time() * 1000)
+    applied = []
+    stats = process_lines(_slash_line("/login cc", now), team_agents=_AGENTS,
+                          chat_id="oc_team", apply_fn=applied.append,
+                          suppress_slash=True)
+    assert len(applied) == 1                                   # dispatched
+    assert stats.drops_by_reason.get("catchup_slash_skip", 0) == 0
+
+
+def test_catchup_suppresses_stale_nonlifecycle_slash():
+    """An OLD non-lifecycle slash (genuine backlog replay) stays suppressed."""
+    old = int(_t.time() * 1000) - 700_000                      # > 600s window
+    applied = []
+    stats = process_lines(_slash_line("/login cc", old), team_agents=_AGENTS,
+                          chat_id="oc_team", apply_fn=applied.append,
+                          suppress_slash=True)
+    assert applied == []
+    assert stats.drops_by_reason.get("catchup_slash_skip", 0) == 1
+
+
+def test_catchup_always_suppresses_lifecycle_even_when_fresh():
+    """Destructive lifecycle slashes suppressed at ANY age — a replayed
+    /restart re-runs down → kill-before-persist loop (F-G2)."""
+    now = int(_t.time() * 1000)
+    applied = []
+    stats = process_lines(_slash_line("/restart", now), team_agents=_AGENTS,
+                          chat_id="oc_team", apply_fn=applied.append,
+                          suppress_slash=True)
+    assert applied == []
+    assert stats.drops_by_reason.get("catchup_slash_skip", 0) == 1
+
+
+def test_catchup_dispatches_slash_with_no_create_time():
+    """Unparseable/missing create_time → can't age it → don't risk dropping a
+    fresh boss slash; dispatch it."""
+    applied = []
+    process_lines(_slash_line("/task", ""), team_agents=_AGENTS,
+                  chat_id="oc_team", apply_fn=applied.append, suppress_slash=True)
+    assert len(applied) == 1
+
+
+def test_catchup_fresh_window_is_tunable():
+    """A 700s-old slash is fresh under an 800s window → dispatched."""
+    old = int(_t.time() * 1000) - 700_000
+    applied = []
+    process_lines(_slash_line("/login cc", old), team_agents=_AGENTS,
+                  chat_id="oc_team", apply_fn=applied.append,
+                  suppress_slash=True, catchup_slash_fresh_ms=800_000)
+    assert len(applied) == 1

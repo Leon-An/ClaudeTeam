@@ -296,6 +296,43 @@ def _watch_subscribe_health(proc: subprocess.Popen, stop_event: threading.Event,
             return
 
 
+def _catchup_slash_fresh_ms() -> int:
+    """Freshness threshold (ms) below which a catchup-delivered slash is
+    treated as a live WS-fallback command (dispatch) rather than a stale
+    backlog replay (suppress). Tunable; default 180s. <=0 is clamped to the
+    default so a misconfig can't make everything 'stale' and re-eat slashes."""
+    from claudeteam.runtime import tunables
+    try:
+        v = int(tunables.tunable("router.catchup_slash_fresh_ms", 600_000))
+    except (TypeError, ValueError):
+        v = 600_000
+    return v if v > 0 else 180_000
+
+
+def _notify_catchup_skips(default_target: str, *, dropped_stale: int,
+                          slash_skipped: int) -> None:
+    """After catchup, tell the routing-target agent (default manager) if the
+    replay skipped anything — over-cap stale messages or un-replayed control
+    commands — so it doesn't over-claim it received the whole backlog
+    (F-catchup-visibility). No-op when nothing was skipped. Best-effort: a
+    notice-write failure must never break bring-up."""
+    if dropped_stale <= 0 and slash_skipped <= 0:
+        return
+    parts = []
+    if dropped_stale > 0:
+        parts.append(f"{dropped_stale} 条超上限的陈旧历史消息未重放")
+    if slash_skipped > 0:
+        parts.append(f"{slash_skipped} 条控制命令(/...)按规则未重放")
+    note = ("⚠️ 恢复(catchup)时跳过了部分历史：" + "；".join(parts)
+            + "。本次你**未必收到完整 backlog**——涉及老板原话/约束请 "
+              "`task intent get` 现读或请老板重发，别按记忆脑补。")
+    try:
+        from claudeteam.store import local_facts
+        local_facts.append_message(default_target, "router", note, priority="高")
+    except Exception as e:
+        warn(f"⚠️ catchup skip-notice failed: {e}")
+
+
 def main(argv: list[str]) -> int:
     if maybe_print_help(argv, "usage: claudeteam router"):
         return 0
@@ -399,14 +436,30 @@ def main(argv: list[str]) -> int:
         )
 
         # Catchup: replay anything newer than the cursor before going live
+        catchup_meta: dict = {}
         try:
-            pending = catchup.pending_lines(chat, profile=profile)
+            pending = catchup.pending_lines(chat, profile=profile, meta=catchup_meta)
         except Exception as e:
             warn(f"⚠️  catchup fetch failed: {e}")
             pending = []
         if pending:
             print(f"📥 catching up {len(pending)} missed message(s)")
-            process_lines(iter(pending), **loop_kwargs)
+            # suppress_slash: drop a STALE replay or a destructive lifecycle
+            # command (/restart, /shutdown 确认) from the backlog — replaying
+            # those re-runs `down` and tears the team back down (F-G2-restore).
+            # But a FRESH non-lifecycle slash arriving here is a WS-fallback
+            # delivery of a live boss command (WS down) — it must dispatch,
+            # not get eaten; the freshness threshold draws that line.
+            cstats = process_lines(iter(pending), suppress_slash=True,
+                                   catchup_slash_fresh_ms=_catchup_slash_fresh_ms(),
+                                   **loop_kwargs)
+            # F-catchup-visibility: tell the routing-target agent if the
+            # replay skipped anything (over-cap stale / un-replayed control
+            # commands) so it doesn't over-claim it got the whole backlog.
+            _notify_catchup_skips(
+                loop_kwargs["default_target"],
+                dropped_stale=catchup_meta.get("dropped_stale", 0),
+                slash_skipped=cstats.drops_by_reason.get("catchup_slash_skip", 0))
 
         stats = process_lines(proc.stdout, **loop_kwargs)
         print(f"router exited: handled={stats.handled} dropped={stats.dropped}")
