@@ -66,6 +66,7 @@ def test_wake_returns_true_when_already_ready_no_spawn():
         target, _ClaudeFake(), spawn_cmd="claude --foo",
         capture=capture,
         spawn=lambda t, c: spawn_calls.append((str(t), c)) or True,
+        is_retired=lambda t: False,
         sleep=lambda s: None,
     )
     assert ok is True
@@ -84,6 +85,7 @@ def test_wake_spawns_and_polls_until_ready():
         target, _ClaudeFake(), spawn_cmd="claude",
         capture=capture,
         spawn=lambda t, c: spawn_calls.append(c) or True,
+        is_retired=lambda t: False,
         sleep=lambda s: sleeps.append(s),
         timeout_s=5.0, poll_interval_s=0.1,
     )
@@ -99,6 +101,7 @@ def test_wake_returns_false_when_spawn_fails():
         target, _ClaudeFake(), spawn_cmd="claude",
         capture=capture,
         spawn=lambda t, c: False,
+        is_retired=lambda t: False,
         sleep=lambda s: None,
     )
     assert ok is False
@@ -171,8 +174,39 @@ def test_wake_returns_false_on_timeout():
         target, _ClaudeFake(), spawn_cmd="claude",
         capture=capture,
         spawn=lambda t, c: True,
+        is_retired=lambda t: False,
         sleep=lambda s: None,
         now=now,
         timeout_s=1.0, poll_interval_s=0.1,
     )
     assert ok is False
+
+
+def test_wake_refuses_to_revive_retired_agent():
+    """A fired agent (status 已停止) returns False without spawning OR
+    capturing — firing is an authoritative 'stay down' signal."""
+    target = tmux.Target("S", "worker_fired")
+    capture_calls = []
+    spawn_calls = []
+    ok = wake.wake_if_dormant(
+        target, _ClaudeFake(), spawn_cmd="claude",
+        capture=lambda t, lines=80: capture_calls.append(t) or "",
+        spawn=lambda t, c: spawn_calls.append(c) or True,
+        is_retired=lambda t: True,
+        sleep=lambda s: None,
+    )
+    assert ok is False
+    assert spawn_calls == []   # never tried to revive
+    assert capture_calls == []  # gated before the capture call too
+
+
+def test_default_is_retired_reads_status_row():
+    """The production default consults local_facts.is_retired keyed on the
+    pane's window name. Uses the project's isolated_env helper (stdlib
+    runner has no pytest tmp_path/monkeypatch fixtures)."""
+    from helpers import isolated_env
+    from claudeteam.store import local_facts
+    with isolated_env():
+        local_facts.upsert_status("worker_fired", "已停止", "fired")
+        assert wake._default_is_retired(tmux.Target("S", "worker_fired")) is True
+        assert wake._default_is_retired(tmux.Target("S", "worker_live")) is False

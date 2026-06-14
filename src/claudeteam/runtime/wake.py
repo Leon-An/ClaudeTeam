@@ -110,6 +110,14 @@ def wait_until_ready(target: tmux.Target, adapter: CliAdapter, *,
     )
 
 
+def _default_is_retired(target: tmux.Target) -> bool:
+    """Module-default retirement check: consult the agent's status row.
+    The agent name is the tmux window name. Imported lazily so wake.py
+    stays import-light for tests that inject their own check."""
+    from claudeteam.store import local_facts
+    return local_facts.is_retired(target.window)
+
+
 def wake_if_dormant(target: tmux.Target, adapter: CliAdapter, *,
                     spawn_cmd: str,
                     init_msg: str | None = None,
@@ -119,6 +127,7 @@ def wake_if_dormant(target: tmux.Target, adapter: CliAdapter, *,
                     capture: Callable | None = None,
                     spawn: Callable | None = None,
                     inject: Callable | None = None,
+                    is_retired: Callable[[tmux.Target], bool] | None = None,
                     sleep: Callable | None = None,
                     now: Callable | None = None) -> bool:
     """Ensure the agent's CLI is ready to receive input.
@@ -126,6 +135,12 @@ def wake_if_dormant(target: tmux.Target, adapter: CliAdapter, *,
     Returns True iff the pane shows a ready marker (already awake, or
     woken in time).  Returns False on timeout — caller decides whether
     to inject anyway, queue, or surface to boss.
+
+    A *retired* agent (status 已停止 — fired) returns False WITHOUT
+    spawning: firing is an authoritative "stay down" signal, so neither
+    a router delivery nor a peer `send` may silently revive the pane.
+    The deliberate bring-back path is `claudeteam hire`, which goes
+    through `provision_pane` (not this function) and clears the row.
 
     When the function had to actually spawn (pane was dormant on entry)
     AND `init_msg` is provided, it injects the identity/init prompt
@@ -135,8 +150,14 @@ def wake_if_dormant(target: tmux.Target, adapter: CliAdapter, *,
     capture = capture or tmux.capture_pane
     spawn = spawn or tmux.spawn_agent
     inject = inject or tmux.inject
+    is_retired = is_retired or _default_is_retired
     sleep = sleep or time.sleep
     now = now or time.monotonic
+
+    # Retirement gate first — before the capture call — so a fired agent
+    # is never revived regardless of what its (dead) pane currently shows.
+    if is_retired(target):
+        return False
 
     if is_ready(target, adapter, capture=capture):
         return True  # already awake — caller already handled identity at start

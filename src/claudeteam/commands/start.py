@@ -6,6 +6,7 @@ window per agent, each running its configured CLI.
 from __future__ import annotations
 
 from claudeteam.runtime import config, lifecycle, tmux
+from claudeteam.store import local_facts
 from claudeteam.util import error_exit, maybe_print_help, warn
 
 
@@ -30,7 +31,19 @@ def main(argv: list[str]) -> int:
         return error_exit(f"❌ failed to create tmux session {session}")
     print(f"🚀 created tmux session {session} (initial window: {first})")
 
+    skipped_fired = 0
+    provisioned = 0
     for agent in agent_list:
+        # Retirement gate: a fired agent (status 已停止) is NOT re-provisioned
+        # by a mass `start`/`up`. Firing is an authoritative "stay down"
+        # marker; reviving the whole roster blind used to resurrect agents
+        # the boss had deliberately stopped (裁员不彻底). Deliberate
+        # bring-back is `claudeteam hire <agent>`, which clears the row.
+        if local_facts.is_retired(agent):
+            print(f"  ⏸️  {agent} 已停止 (fired); skipping "
+                  f"(use `claudeteam hire {agent}` to bring back)")
+            skipped_fired += 1
+            continue
         target = tmux.Target(session, agent)
         if agent != first and not tmux.new_window(target):
             warn(f"⚠️  failed to create window for {agent}, skipping")
@@ -41,6 +54,7 @@ def main(argv: list[str]) -> int:
         # internal hoist for the same reason.
         cli = agents.get(agent, {}).get("cli", "claude-code")
         outcome = lifecycle.provision_pane(agent, target)
+        provisioned += 1
         if outcome == lifecycle.LAZY:
             print(f"  → {agent} ({cli}) lazy-pane ready")
         elif outcome == lifecycle.SPAWN_FAILED:
@@ -54,5 +68,6 @@ def main(argv: list[str]) -> int:
         else:  # READY
             print(f"  → {agent} ({cli}) spawned")
 
-    print(f"✅ team {session} started ({len(agent_list)} agents)")
+    tail = f" ({skipped_fired} fired, skipped)" if skipped_fired else ""
+    print(f"✅ team {session} started ({provisioned} agents){tail}")
     return 0

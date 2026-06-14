@@ -157,6 +157,53 @@ def test_append_message_exception_skips_inject_for_that_agent():
     assert inject_calls == ["S:worker_b"]
 
 
+# ── retirement gate ─────────────────────────────────────────────
+
+
+def test_route_to_retired_agent_keeps_inbox_but_skips_pane():
+    """A fired agent (status 已停止) still gets its inbox row (recoverable
+    via hire) but its pane is never woken/injected — the delivery-path
+    half of the 反复自动重启 fix."""
+    decision = Decision(action=Action.ROUTE, targets=["worker_fired"],
+                        text="ping", msg_id="om")
+    inject_calls = []
+    wake_calls = []
+    with isolated_env():
+        local_facts.upsert_status("worker_fired", local_facts.RETIRED_STATUS, "fired")
+        report = apply(
+            decision,
+            adapter_for_agent=_adapter_factory,
+            tmux_inject=lambda t, *a, **kw: inject_calls.append(str(t)) or True,
+            wake_fn=lambda *a, **kw: wake_calls.append(a) or True,
+            session="S",
+        )
+    assert report.written == ["worker_fired"]   # inbox row kept
+    assert report.retired == ["worker_fired"]   # tracked as retired
+    assert report.injected == []
+    assert inject_calls == []                    # pane never touched
+    assert wake_calls == []                      # never tried to wake/revive
+
+
+def test_route_mixed_retired_and_live_targets():
+    """Firing one target doesn't block delivery to a live peer."""
+    decision = Decision(action=Action.ROUTE,
+                        targets=["worker_fired", "worker_live"],
+                        text="x", msg_id="om")
+    inject_calls = []
+    with isolated_env():
+        local_facts.upsert_status("worker_fired", local_facts.RETIRED_STATUS, "fired")
+        report = apply(
+            decision,
+            adapter_for_agent=_adapter_factory,
+            tmux_inject=lambda t, *a, **kw: inject_calls.append(str(t)) or True,
+            session="S",
+        )
+    assert set(report.written) == {"worker_fired", "worker_live"}
+    assert report.retired == ["worker_fired"]
+    assert report.injected == ["worker_live"]
+    assert inject_calls == ["S:worker_live"]
+
+
 # ── adapter integration ─────────────────────────────────────────
 
 

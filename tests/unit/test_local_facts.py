@@ -64,6 +64,16 @@ def test_status_upsert_then_get():
         assert snap["status"] == "已完成"
 
 
+def test_is_retired_reflects_status_row():
+    with isolated_env():
+        assert local_facts.is_retired("a") is False          # never-seen agent
+        local_facts.upsert_status("a", "进行中", "working")
+        assert local_facts.is_retired("a") is False          # live agent
+        local_facts.upsert_status("a", local_facts.RETIRED_STATUS, "fired")
+        assert local_facts.is_retired("a") is True            # fired
+        assert local_facts.RETIRED_STATUS == "已停止"
+
+
 def test_log_append_then_list():
     with isolated_env():
         local_facts.append_log("a", "info", "first")
