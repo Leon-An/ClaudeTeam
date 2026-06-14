@@ -542,3 +542,77 @@ def test_reads_legacy_task_without_new_fields():
         assert iid == "I-1"
         # and the legacy task is still updatable normally
         assert tasks.update("T-1", status="已完成") is True
+
+
+# ── intent creator attribution ────────────────────────────────────
+
+
+def test_create_intent_creator_override():
+    """An agent recording a derived/relayed ask can attribute the intent
+    to itself via creator=; the CLI's --by surfaces this. Default stays
+    'user' (the canonical boss-verbatim case)."""
+    with isolated_env():
+        iid = tasks.create_intent("派生需求", creator="manager")
+        assert tasks.get_intent(iid)["creator"] == "manager"
+        # default unchanged
+        assert tasks.get_intent(tasks.create_intent("老板原话"))["creator"] == "user"
+
+
+# ── void / tombstone ──────────────────────────────────────────────
+
+
+def test_void_retires_a_mistakenly_completed_task():
+    """The ONLY path out of a 已完成 card: the generic update() path freezes
+    terminals, reject() is 需审批-only — void() opens 已完成 → 已取消."""
+    with isolated_env():
+        tid = tasks.create("w", "误建的重复活")
+        tasks.update(tid, status="已完成")
+        assert tasks.void(tid, reason="重复任务，作废", voided_by="manager") is True
+        t = tasks.get(tid)
+        assert t["status"] == "已取消"
+        assert t["completed_at"] is not None      # terminal bookkeeping
+        assert t["approval_note"] == "重复任务，作废"
+        assert t["paused_by"] == "manager"
+
+
+def test_void_works_from_any_non_cancelled_state():
+    with isolated_env():
+        for setup in (
+            lambda tid: None,                                  # 待处理
+            lambda tid: tasks.update(tid, status="进行中"),
+            lambda tid: tasks.update(tid, status="已完成"),
+        ):
+            tid = tasks.create("w", "x")
+            setup(tid)
+            assert tasks.void(tid) is True
+            assert tasks.get(tid)["status"] == "已取消"
+
+
+def test_void_idempotent_noop_preserves_reason():
+    """Re-voiding an already-cancelled task is a no-op and never clobbers
+    the original reason."""
+    with isolated_env():
+        tid = tasks.create("w", "x")
+        tasks.void(tid, reason="第一次作废理由")
+        assert tasks.void(tid, reason="覆盖?") is False
+        assert tasks.get(tid)["approval_note"] == "第一次作废理由"
+
+
+def test_void_missing_task_returns_false():
+    with isolated_env():
+        assert tasks.void("T-404") is False
+
+
+def test_void_does_not_thaw_the_generic_update_freeze():
+    """void() is the only doorway terminal→已取消; the generic update()
+    path stays frozen on terminals so a stray --status can't resurrect."""
+    with isolated_env():
+        tid = tasks.create("w", "x")
+        tasks.update(tid, status="已完成")
+        for target in ("待处理", "进行中"):
+            try:
+                tasks.update(tid, status=target)
+            except ValueError as e:
+                assert "terminal" in str(e)
+            else:
+                raise AssertionError(f"已完成 → {target} via update should still raise")

@@ -8,7 +8,8 @@
   task pause <id>         [--note <why>] [--to <who>] [--by <agent>]
   task approve <id>       [--done]
   task reject <id> <feedback> [--cancel]
-  task intent create <raw...> [--src <msg_id>] [--key <points>]
+  task void <id>          [--note <why>] [--by <agent>]
+  task intent create <raw...> [--src <msg_id>] [--key <points>] [--by <agent>]
   task intent get <I-n>
 """
 from __future__ import annotations
@@ -30,7 +31,8 @@ USAGE = (
     "  claudeteam task pause <id> [--note <why>] [--to <who>] [--by <agent>]\n"
     "  claudeteam task approve <id> [--done] [--note <裁决内容>]\n"
     "  claudeteam task reject <id> <feedback> [--cancel]\n"
-    "  claudeteam task intent create <raw...> [--src <msg_id>] [--key <points>]\n"
+    "  claudeteam task void <id> [--note <why>] [--by <agent>]\n"
+    "  claudeteam task intent create <raw...> [--src <msg_id>] [--key <points>] [--by <agent>]\n"
     "  claudeteam task intent get <I-n>"
 )
 
@@ -247,6 +249,25 @@ def _cmd_reject(rest: list[str]) -> int:
     return 0
 
 
+def _cmd_void(rest: list[str]) -> int:
+    note = pop_flag(rest, "--note") or ""
+    by = pop_flag(rest, "--by") or ""
+    if len(rest) < 1:
+        return usage_error(USAGE)
+    tid = rest[0]
+    before = tasks.get(tid)
+    if not tasks.void(tid, reason=note, voided_by=by):
+        return error_exit(f"❌ cannot void {tid} (missing or already 已取消)")
+    t = tasks.get(tid)
+    suffix = f": {note}" if note else ""
+    prev = before["status"] if before else "?"
+    local_facts.append_log(t["assignee"], "task_transition",
+                           f"{tid} {prev}→已取消 (void){suffix}", ref=tid)
+    _refresh_anchor(t["assignee"])
+    print(f"🗑️  voided {tid} → 已取消")
+    return 0
+
+
 def _cmd_intent(rest: list[str]) -> int:
     if not rest:
         return usage_error(USAGE)
@@ -254,9 +275,11 @@ def _cmd_intent(rest: list[str]) -> int:
     if action == "create":
         src = pop_flag(rest, "--src") or ""
         key = pop_flag(rest, "--key") or ""
+        by = pop_flag(rest, "--by") or ""
         raw = " ".join(rest[1:])
         try:
-            iid = tasks.create_intent(raw, source_msg=src, key_points=key)
+            iid = tasks.create_intent(raw, source_msg=src, key_points=key,
+                                      creator=by or "user")
         except ValueError as e:
             return error_exit(f"❌ {e}")
         print(f"✅ intent {iid}")
@@ -284,6 +307,7 @@ SUBCOMMANDS = {
     "pause":   _cmd_pause,
     "approve": _cmd_approve,
     "reject":  _cmd_reject,
+    "void":    _cmd_void,
     "intent":  _cmd_intent,
 }
 

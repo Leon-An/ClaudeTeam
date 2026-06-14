@@ -274,3 +274,36 @@ def reject(task_id: str, *, feedback: str = "", cancel: bool = False) -> bool:
         task["approval_note"] = feedback
         _save(data)
         return True
+
+
+def void(task_id: str, *, reason: str = "", voided_by: str = "") -> bool:
+    """Tombstone a task → 已取消 from ANY state, including the frozen
+    terminal 已完成. This is the ONLY path that can retire a
+    mistakenly-completed task (smoke 2026-06-14: a duplicate task was
+    `done` and then had no exit — reject is 需审批-only and the generic
+    update() path freezes terminals).
+
+    Why this is safe even though update() deliberately freezes terminals:
+    that freeze stops a *stray* `task update --status` from resurrecting +
+    re-anchoring a finished task. A void is different in kind — explicit,
+    audited, and one-directional toward a terminal. 已取消 is itself
+    terminal and excluded from the anchor projection (identity only reads
+    进行中/需审批 tasks), so voiding REMOVES the card from the assignee's
+    CLAUDE.md anchor rather than reviving a stale intent. The
+    terminal→active freeze stays fully intact; only terminal→已取消 is
+    opened, and only through this verb.
+
+    Returns False if the task is missing or already 已取消 (idempotent
+    no-op — re-voiding never clobbers the original reason)."""
+    with _locked():
+        data = _load()
+        task = _find(data, task_id)
+        if task is None or task.get("status") == "已取消":
+            return False
+        _set_status(task, "已取消")
+        task["awaiting"] = ""
+        task["approval_note"] = reason
+        task["paused_by"] = voided_by
+        task["paused_at"] = now_ms()
+        _save(data)
+        return True

@@ -479,3 +479,51 @@ def test_reidentify_stale_anchor_swallows_unknown_agent():
         with attr_patch(tmux_mod, inject=fake_inject):
             task_cmd._reidentify_stale_anchor("ghost")   # must not raise
         assert sink == []
+
+
+# ── intent --by attribution ───────────────────────────────────────
+
+
+def test_task_intent_create_by_attributes_creator():
+    """--by stamps the real author; without it the intent stays 'user'
+    (the boss-verbatim default)."""
+    with isolated_env():
+        run_cli(["task", "intent", "create", "manager 代记的派生需求",
+                 "--by", "manager"])
+        assert tasks.get_intent("I-1")["creator"] == "manager"
+        run_cli(["task", "intent", "create", "老板逐字原话"])
+        assert tasks.get_intent("I-2")["creator"] == "user"
+
+
+# ── void ──────────────────────────────────────────────────────────
+
+
+def test_task_void_retires_completed_task():
+    with isolated_env():
+        run_cli(["task", "create", "w", "重复活"])
+        run_cli(["task", "done", "T-1"])
+        rc, out, _ = run_cli(["task", "void", "T-1", "--note", "重复，作废",
+                              "--by", "manager"])
+        assert rc == 0 and "voided T-1" in out
+        t = tasks.get("T-1")
+        assert t["status"] == "已取消"
+        assert t["approval_note"] == "重复，作废"
+
+
+def test_task_void_unknown_or_already_cancelled_returns_one():
+    with isolated_env():
+        rc, _, err = run_cli(["task", "void", "T-404"])
+        assert rc == 1 and "cannot void" in err
+        run_cli(["task", "create", "w", "x"])
+        run_cli(["task", "void", "T-1"])
+        rc, _, err = run_cli(["task", "void", "T-1"])   # already 已取消
+        assert rc == 1 and "cannot void" in err
+
+
+def test_task_void_writes_audit_log():
+    with isolated_env():
+        run_cli(["task", "create", "w", "x"])
+        run_cli(["task", "done", "T-1"])
+        run_cli(["task", "void", "T-1", "--note", "作废"])
+        kinds = [(l["type"], l["ref"]) for l in local_facts.list_logs("w")]
+        assert ("task_transition", "T-1") in kinds
