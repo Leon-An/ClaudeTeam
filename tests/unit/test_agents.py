@@ -86,6 +86,16 @@ def test_interrupt_keys_are_uniform_escape_across_every_cli():
         assert get_adapter(cli).interrupt_keys() == ["Escape"], cli
 
 
+def test_resubmit_on_idle_true_except_kimi():
+    """Autosubmit re-nudge (F-respawn) is safe on claude/codex/gemini/qwen,
+    but kimi's TUI reads the re-sent submit key as an interrupt → kimi alone
+    opts out (container 2026-06-16)."""
+    assert KimiCodeAdapter().resubmit_on_idle() is False
+    for a in (ClaudeCodeAdapter(), CodexCliAdapter(),
+              GeminiCliAdapter(), QwenCodeAdapter()):
+        assert a.resubmit_on_idle() is True, type(a).__name__
+
+
 # ── per-adapter spawn shape ──────────────────────────────────────
 
 

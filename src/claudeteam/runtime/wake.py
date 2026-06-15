@@ -143,6 +143,11 @@ def inject_and_confirm(target: tmux.Target, adapter: CliAdapter, text: str, *,
     submit_keys = adapter.submit_keys() or ["Enter"]
 
     inject(target, text, submit_keys=submit_keys)
+    # Some CLIs (kimi) read a re-sent submit key as an interrupt — they opt
+    # out of the re-nudge and keep the plain single inject (no worse than the
+    # pre-fix behavior). Only claude/codex-style CLIs get verify+renudge.
+    if not adapter.resubmit_on_idle():
+        return True
     # Check-then-nudge: if the inject already submitted (agent busy), return
     # immediately — no sleep, no stray keypress. Otherwise settle and re-send
     # the primary submit key, up to `attempts` times.

@@ -64,6 +64,15 @@ class KimiCodeAdapter(CliAdapter):
         return (f"DISABLE_UPDATE_CHECK=1 KIMI_AGENT={shlex.quote(agent)} "
                 f"kimi --yolo{model_arg}")
 
+    def resubmit_on_idle(self) -> bool:
+        # kimi-cli's TUI reads inject_and_confirm's re-sent submit key as an
+        # interrupt ("Interrupted by user" + context 0.0%, container
+        # 2026-06-16) — unlike claude/codex where the re-nudge is clean. So
+        # kimi opts out of the autosubmit re-nudge and gets a plain single
+        # inject (no worse than pre-fix) until kimi's submit/interrupt key
+        # semantics are handled on the kimi track (F-kimi-* / managed-model).
+        return False
+
     def display_model(self, model: str) -> str:
         # model is a no-op for kimi (see spawn_cmd) — it runs whatever its
         # own config selects, so don't label the agent with the team alias.

@@ -69,6 +69,21 @@ class CliAdapter(ABC):
         """
         return ["Escape"]
 
+    def resubmit_on_idle(self) -> bool:
+        """Whether wake.inject_and_confirm may RE-SEND the submit key if the
+        pane looks idle after the post-spawn identity inject (the autosubmit
+        re-nudge that fixes F-respawn-not-autosubmit).
+
+        Default True — verified safe on claude-code + codex (the re-nudge
+        only lands when the agent isn't busy, and a stray submit on an empty
+        prompt is a harmless blank line). kimi-cli overrides to False: its
+        TUI reads the re-sent submit key as an interrupt ("Interrupted by
+        user", container 2026-06-16), so for kimi inject_and_confirm does a
+        plain single inject (no re-nudge) until kimi's submit/interrupt
+        semantics are handled on the kimi track.
+        """
+        return True
+
     def display_model(self, model: str) -> str:
         """Human-facing model label for the agent's identity file.
 

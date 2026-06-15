@@ -15,6 +15,16 @@ class _ClaudeFake:
     def submit_keys(self):
         return ["Enter", "C-m", "C-j"]
 
+    def resubmit_on_idle(self):
+        return True
+
+
+class _NoRenudgeFake(_ClaudeFake):
+    """A CLI (like kimi) whose TUI reads a re-sent submit key as an interrupt
+    → opts out of the autosubmit re-nudge."""
+    def resubmit_on_idle(self):
+        return False
+
 
 def _capturer(text_per_call: list[str]):
     """Return a capture_pane fake that yields one text per call."""
@@ -97,6 +107,24 @@ def test_inject_and_confirm_renudges_then_succeeds():
     assert ok is True
     assert sends == [("Enter",)]   # nudged once with submit_keys[0]
     assert len(sleeps) == 1
+
+
+def test_inject_and_confirm_optout_adapter_injects_once_no_renudge():
+    """A CLI that opts out (resubmit_on_idle False, e.g. kimi) gets a plain
+    single inject — never a re-nudge keypress — even when the pane looks idle
+    (so the re-sent submit key can't be misread as an interrupt)."""
+    injects = []
+    sends = []
+    ok = wake.inject_and_confirm(
+        tmux.Target("S", "w"), _NoRenudgeFake(), "hi",
+        inject=lambda t, text, *, submit_keys=None: injects.append(text) or True,
+        send_keys=lambda t, *k: sends.append(k),
+        capture=_capturer(["$ ", "$ ", "$ "]),  # idle — would normally nudge
+        sleep=lambda s: None,
+    )
+    assert ok is True
+    assert injects == ["hi"]   # injected exactly once
+    assert sends == []         # NEVER re-nudged (no interrupt risk)
 
 
 def test_inject_and_confirm_gives_up_after_attempts():
