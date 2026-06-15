@@ -162,7 +162,11 @@ _HELP_TEXT = """🆘 ClaudeTeam 自定义斜杠命令（零 LLM，router/hook �
 /stop <agent>            → 送 C-c 到 agent 窗口（中断当前动作）
 /clear <agent>           → 送 /clear + 重新入职 init_msg（相当于 rehire）
 /task [all]              → 任务看板：按状态分组（只读）；已完成/已取消
-                           默认折叠为计数，加 all 展开明细"""
+                           默认折叠为计数，加 all 展开明细
+/shutdown [确认]         → 下线整队（≈down）；先回卡确认，/shutdown 确认 才真拆
+/restart                 → 重启整队（≈down→up）；清残留后拉起，直接执行
+/login <cli> [agent]     → 触发某 CLI 重新认证，群里弹验证链接/设备码
+                           （需 controls.allow_* 开关；默认关闭=安全）"""
 
 
 def _handle_help(args: str, ctx: SlashContext) -> dict:
@@ -745,6 +749,417 @@ def _handle_task(args: str, ctx: SlashContext) -> dict:
     )
 
 
+# ── team control: /shutdown /restart /login ───────────────────────
+#
+# Safety model (defense in depth, three layers):
+#   L1  classify_event drops any event whose chat_id != this team's
+#       ("cross_team", router.py) BEFORE it can become a slash — a
+#       /shutdown from the live group never reaches the test router.
+#   L2  down/up only touch config.session_name() + local pidfiles, so
+#       they are container-local — can't reach another deployment.
+#   L3  these handlers are DEFAULT-DENY: gated behind explicit per-feature
+#       opt-ins (controls.allow_lifecycle_slash / controls.allow_login_slash)
+#       that the live maintenance team never sets. Even a misconfigured
+#       chat_id can't tear down or re-auth a team that didn't opt in.
+
+
+def _lifecycle_gate() -> dict | None:
+    """Refusal card if chat-driven team teardown/restart isn't enabled for
+    this deployment; None if allowed. The live maintenance team never sets
+    the flag, so /shutdown & /restart are inert there by construction."""
+    from claudeteam.runtime import teamctl
+    if not teamctl.lifecycle_slash_enabled():
+        return simple_card(
+            "🔒 团队生命周期控制未开启",
+            "本部署未开启聊天端 down/up 控制。\n"
+            "如确需，在 claudeteam.toml 设 `[controls] allow_lifecycle_slash = true` "
+            "后重启 router。\n"
+            "（live 维护群默认关闭 = 从作用域封死，无法被误操作下线。）",
+            color="red")
+    return None
+
+
+_SHUTDOWN_CONFIRM = {"确认", "confirm", "yes", "y"}
+
+
+def _handle_shutdown(args: str, ctx: SlashContext) -> dict:
+    """`/shutdown` — tear the team down (≈ `claudeteam down`). Two-step:
+    a bare `/shutdown` shows what will be torn down; `/shutdown 确认`
+    actually does it via a DETACHED runner (so killing the router that's
+    handling this slash can't abort the teardown), which posts a
+    '已下线' card when finished."""
+    if (gate := _lifecycle_gate()) is not None:
+        return gate
+    from claudeteam.runtime import teamctl
+    if args.strip().lower() not in _SHUTDOWN_CONFIRM:
+        names, _, _, _ = _live_agents()
+        return simple_card(
+            "⚠️ 确认下线团队？",
+            f"`/shutdown` 将下线本团队（session `{ctx.session}`）：\n"
+            f"• 停止 router / watchdog 守护进程\n"
+            f"• 杀掉 tmux 会话与全部 {len(names)} 个 agent pane\n\n"
+            f"团队会保持下线，需 `/restart` 或运维 `up` 才能恢复。\n"
+            f"**确认请回复 `/shutdown 确认`。**",
+            color="yellow")
+    teamctl.spawn_detached(["team-shutdown"])
+    return simple_card(
+        "🛑 团队下线中…",
+        f"已触发 down（detached, session `{ctx.session}`）。完成后补一张『已下线』卡。",
+        color="yellow")
+
+
+def _handle_restart(args: str, ctx: SlashContext) -> dict:
+    """`/restart` — restart the whole team (≈ down then up). Direct (no
+    confirm — it's recoverable, the team comes back). Runs in a DETACHED
+    runner: robust down (which also clears stragglers — stale pidfiles,
+    orphan tmux, leftover npx/node groups), abort if anything refuses to
+    die, else up; posts a '已重启' card when finished."""
+    if (gate := _lifecycle_gate()) is not None:
+        return gate
+    from claudeteam.runtime import teamctl
+    teamctl.spawn_detached(["team-restart"])
+    return simple_card(
+        "♻️ 团队重启中…",
+        f"已触发 down→up（detached, session `{ctx.session}`）。"
+        "先清残留（死 pidfile / 孤儿 tmux / 旧 router 进程组）再拉起；"
+        "若有东西杀不掉会中止 up 并报错。完成后补一张『已重启』卡。",
+        color="yellow")
+
+
+# /login ────────────────────────────────────────────────────────────
+#
+# cli alias → canonical adapter name.
+_LOGIN_CLI_ALIASES = {
+    "cc": "claude-code", "claude": "claude-code", "claude-code": "claude-code",
+    "codex": "codex-cli", "codex-cli": "codex-cli",
+    "kimi": "kimi-code", "kimi-code": "kimi-code",
+    "gemini": "gemini-cli", "gemini-cli": "gemini-cli",
+    "qwen": "qwen-code", "qwen-code": "qwen-code",
+}
+
+# Per-CLI re-auth spec for the ZERO-LLM path: the router runs `login_argv`
+# as a DIRECT subprocess (never injected into the agent pane), so /login
+# works even when the agent's model is down / token is expired (401) — the
+# exact recovery scenario. `env_var` is the per-agent credential-home env
+# the subprocess needs (so the token writes to the isolated /data home, not
+# the host); `cred_relpath` is under that home. `shared_home` flags CLIs
+# whose creds are NOT per-agent-isolated (kimi) — those are hard-refused by
+# the allowlist anyway. Verified zero-LLM: codex login --device-auth prints
+# URL+code to stdout (devops 2026-06-14: "one-time code: MMLU-W452Y"); claude
+# auth login is a real subcommand (flow being calibrated). gemini/qwen are
+# best-effort starting points (not in the default allowlist).
+# `interactive` = the login waits for the user to paste a code back to STDIN
+# (claude `auth login`: prints URL → "Paste code here >"). A pure-chat relay
+# of that paste would have to survive the ~135s router respawn that the
+# get-URL→authorize→paste window inevitably spans (the OAuth URL is bound to
+# the live process, so the SAME process must both emit the URL and read the
+# code) — a detached-subprocess + persistent-FIFO + cross-restart registry
+# that's fragile enough to leave a half-login worse than none. So interactive
+# CLIs take path B: the router surfaces guidance to complete it in the pane
+# (still zero-LLM — `claude auth login` is a CLI auth command, not inference,
+# so it works at 401). codex is fire-and-forget (False) = full pure-chat.
+_LOGIN_SPEC = {
+    "claude-code": {"login_argv": ["claude", "auth", "login"], "interactive": True,
+                    "env_var": "HOME",       "cred_relpath": ".claude/.credentials.json", "shared_home": False},
+    "codex-cli":   {"login_argv": ["codex", "login", "--device-auth"], "interactive": False,
+                    "env_var": "CODEX_HOME", "cred_relpath": ".codex/auth.json",          "shared_home": False},
+    "gemini-cli":  {"login_argv": ["gemini", "auth", "login"], "interactive": True,
+                    "env_var": "HOME",       "cred_relpath": ".gemini/oauth_creds.json",  "shared_home": False},
+    "qwen-code":   {"login_argv": ["qwen", "auth", "login"], "interactive": True,
+                    "env_var": "HOME",       "cred_relpath": ".qwen/oauth_creds.json",    "shared_home": False},
+    "kimi-code":   {"login_argv": ["kimi", "login"], "interactive": True,
+                    "env_var": "HOME",       "cred_relpath": ".kimi",                     "shared_home": True},
+}
+
+
+def _login_env(cli: str, agent: str) -> dict:
+    """Build the subprocess env so the CLI's login writes its token to the
+    agent's ISOLATED per-agent home (/data/agent-home/<agent>...), never the
+    host's. claude/gemini/qwen key off HOME; codex off CODEX_HOME
+    (= <agent_home>/.codex). Mirrors the spawn env in agents/*.py."""
+    import os
+    from claudeteam.agents.claude_code import agent_home
+    env = dict(os.environ)
+    spec = _LOGIN_SPEC[cli]
+    if spec["env_var"] == "CODEX_HOME":
+        env["CODEX_HOME"] = f"{agent_home(agent)}/.codex"
+    else:
+        env["HOME"] = agent_home(agent)
+    return env
+
+# Whitelist scrapers for the verification SURFACE only. We surface a login
+# URL + a short human-facing pairing/device code — both are meant to be
+# shown to a person and are not secrets. We NEVER echo the raw pane (which
+# can contain the resulting access token after the flow completes) and
+# NEVER a long token-shaped string.
+_LOGIN_URL_RE = re.compile(
+    r"https?://[^\s'\"<>]+", re.IGNORECASE)
+# Pairing codes: short, human-typeable. Two shapes, each its own regex so
+# `findall` returns the full match cleanly (a single combined pattern with
+# one capture group silently returns '' for the un-grouped alternative).
+#   - XXXX-XXXXX style device codes (group lengths vary: codex emits 4-5
+#     e.g. MLGX-BJYY9, GitHub 4-4; allow 4-6 each side with word boundaries)
+#   - a value labeled "code:" / "码:" — hyphen allowed, length-capped so a
+#     long opaque token can never be mistaken for a pairing code.
+# A captured code must contain at least one LETTER: real device codes are
+# alphanumeric, whereas a pure-digit dddd-dddd is almost always a date /
+# anchor — the persistent [QUICKSTART-0613-1913] anchor in a worker pane was
+# being mis-surfaced as the codex device code (devops 2026-06-14).
+_LOGIN_CODE_PAIR_RE = re.compile(r"\b[A-Z0-9]{4,6}-[A-Z0-9]{4,6}\b")
+_LOGIN_CODE_LABELED_RE = re.compile(
+    r"(?:code|码)[:：]\s*([A-Za-z0-9][A-Za-z0-9-]{3,11})\b", re.IGNORECASE)
+# Defense: never surface a captured line that smells like a secret/token.
+_SECRET_HINT_RE = re.compile(
+    r"sk-|ya29\.|eyJ|access[_-]?token|refresh[_-]?token|api[_-]?key|"
+    r"bearer\s|secret|-----BEGIN", re.IGNORECASE)
+# CLI login output is colorized — codex wraps the device code in ANSI
+# (\x1b[94mMNOG-E7MBX\x1b[0m), which makes the bare-code regex miss it and
+# leaks [0m residue into the URL (devops 2026-06-14). Strip ANSI/CSI escape
+# sequences before scraping so the URL + code come out clean.
+_ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+
+
+def _extract_login_surface(pane_text: str) -> dict:
+    """Pull ONLY the verification URL + short pairing code out of captured
+    text. Security-critical: returns nothing for any line that looks like it
+    carries a secret/token, and caps code length so an access token can never
+    be mistaken for a pairing code. ANSI escapes are stripped first (login
+    output is colorized). Pure + table-tested."""
+    urls: list[str] = []
+    codes: list[str] = []
+    for line in _ANSI_RE.sub("", pane_text).splitlines():
+        if _SECRET_HINT_RE.search(line):
+            continue  # never surface a line that might carry a token
+        for m in _LOGIN_URL_RE.findall(line):
+            # only verification-style URLs, and never one with a token query
+            if _SECRET_HINT_RE.search(m):
+                continue
+            if any(k in m.lower() for k in
+                   ("login", "oauth", "auth", "verify", "device", "activate", "callback")):
+                urls.append(m)
+        for code in (_LOGIN_CODE_PAIR_RE.findall(line)
+                     + _LOGIN_CODE_LABELED_RE.findall(line)):
+            code = code.strip()
+            if (code and len(code) <= 12 and any(c.isalpha() for c in code)
+                    and not _SECRET_HINT_RE.search(code)):
+                codes.append(code)
+    # de-dup, preserve order
+    return {"urls": list(dict.fromkeys(urls)), "codes": list(dict.fromkeys(codes))}
+
+
+def _login_gate() -> dict | None:
+    """Refusal card if chat-driven CLI re-auth isn't enabled. Separate from
+    the lifecycle gate so /shutdown & /restart can be demoed while /login
+    stays inert until creds are isolated from the host (devops 2026-06-14:
+    container panes run HOME=/root with host-mounted cred files — a /login
+    write there would clobber the operator's personal credentials)."""
+    from claudeteam.runtime import teamctl
+    if not teamctl.login_slash_enabled():
+        return simple_card(
+            "🔒 /login 未开启",
+            "聊天端 CLI 重新认证未开启。\n"
+            "需在 claudeteam.toml 设 `[controls] allow_login_slash = true` 后重启 router；"
+            "且仅当容器凭证已与宿主机隔离（HOME=容器本地 agent-home）时才可开启，"
+            "否则 /login 会覆盖宿主机本人凭证。",
+            color="red")
+    return None
+
+
+def _login_resolve_agent(cli: str, agent_arg: str, ctx: SlashContext) -> tuple[str, dict | None]:
+    """Resolve which agent's CLI to re-auth. Returns (agent, error_card).
+    Honors an explicit agent arg; else picks the sole agent on that cli;
+    else asks the operator to disambiguate."""
+    names, agent_set, _, agents_dict = _live_agents()
+    if agent_arg:
+        if agent_arg not in agent_set:
+            return "", simple_card("⚠️ 未知 agent",
+                                   f"`{agent_arg}` 不在花名册（合法名: {sorted(agent_set)}）",
+                                   color="red")
+        return agent_arg, None
+    matches = [n for n in names if agents_dict.get(n, {}).get("cli") == cli]
+    if not matches:
+        return "", simple_card("⚠️ 没有该 CLI 的 agent",
+                               f"花名册里没有跑 `{cli}` 的 agent。", color="red")
+    if len(matches) > 1:
+        return "", simple_card("⚠️ 多个 agent 跑该 CLI",
+                               f"`{cli}` 有多个 agent：{matches}。"
+                               f"请指定：`/login {cli} <agent>`", color="yellow")
+    return matches[0], None
+
+
+def _handle_login(args: str, ctx: SlashContext) -> dict:
+    """`/login <cli> [agent]` — trigger a CLI's re-auth flow and surface the
+    verification URL + pairing code to the operator. The CLI writes the new
+    token back to its own cred file; it takes effect on the agent's next
+    call — we do NOT auto-restart (manager ruling 2026-06-14).
+
+    Two safety layers: the master `allow_login_slash` gate, then a per-CLI
+    isolation allowlist (`login_allowed_clis`). A CLI whose creds are NOT
+    isolated from the host — kimi shares ~/.kimi, and any deployment whose
+    panes run a host-mounted cred dir — is HARD-REFUSED, not merely warned:
+    a /login write there would clobber the operator's personal credentials
+    (devops 2026-06-14)."""
+    if (gate := _login_gate()) is not None:
+        return gate
+    parts = args.split()
+    if not parts:
+        return simple_card("用法",
+                           "`/login <cli> [agent]`\n例：`/login cc` / `/login codex worker_x`\n"
+                           f"支持的 cli：{sorted(set(_LOGIN_CLI_ALIASES))}", color="blue")
+    alias = parts[0].strip().lower()
+    cli = _LOGIN_CLI_ALIASES.get(alias)
+    if cli is None:
+        return simple_card("⚠️ 未知 CLI",
+                           f"`{alias}` 不认识。支持：{sorted(set(_LOGIN_CLI_ALIASES))}",
+                           color="red")
+    # Per-CLI isolation gate: only re-auth CLIs whose creds are isolated from
+    # the host in THIS deployment, else a /login write clobbers the operator's
+    # personal credentials. kimi (shared ~/.kimi) and any un-isolated CLI are
+    # HARD-REFUSED until explicitly allowlisted post-isolation.
+    from claudeteam.runtime import teamctl
+    allowed = teamctl.login_allowed_clis()
+    if cli not in allowed:
+        return simple_card(
+            "🚫 该 CLI 的 /login 未启用",
+            f"`{cli}` 的凭证在本部署**未与宿主机隔离**"
+            f"（如 kimi 共享 ~/.kimi），为避免覆盖老板本机凭证，/login 对它**硬拒**。\n"
+            f"隔离完成后在 claudeteam.toml `[controls] login_allowed_clis` 加入它。\n"
+            f"当前允许：{sorted(allowed)}",
+            color="red")
+    agent_arg = parts[1].strip() if len(parts) > 1 else ""
+    agent, err = _login_resolve_agent(cli, agent_arg, ctx)
+    if err is not None:
+        return err
+
+    spec = _LOGIN_SPEC[cli]
+    warn_line = ""
+    if spec["shared_home"]:
+        warn_line = ("\n\n⚠️ **共享 HOME**：本次登录会影响**所有**该 CLI pane 的凭证。")
+
+    argv_str = " ".join(spec["login_argv"])
+    if spec["interactive"]:
+        # Path B — interactive (stdin-paste) login. A pure-chat relay can't
+        # robustly survive the router respawn the authorize→paste window
+        # spans, so guide the operator to complete it in the agent's pane.
+        # Still ZERO-LLM: `claude auth login` is a CLI auth command (not
+        # model inference), so it works even at 401 / model-down.
+        return simple_card(
+            f"🔑 /login {alias} → {agent} · 需在 pane 内完成",
+            f"`{cli}` 的登录是**交互式**（给一个授权 URL，再要你把授权后拿到的码"
+            f"粘回）。这步跨容器 router 重起会断，聊天通道无法可靠闭环，所以请在 "
+            f"**{agent} 的 pane 里直接跑** `{argv_str}`：打开它给的 URL 授权、粘码完成。\n"
+            f"这步是 **CLI 认证、不经大模型**（token 过期 / 模型掉线也能登），"
+            f"token 写回该 agent 隔离 cred home。\n"
+            f"（codex 这类非交互 CLI 走纯机械 /login，聊天里直接出码。）"
+            + warn_line,
+            color="yellow")
+    # Path A — fire-and-forget (ZERO-LLM, boss命门): the router runs the CLI's
+    # login as a DIRECT subprocess (never injected into the agent pane), so it
+    # works when the agent's model is down / token expired (401). Streams
+    # stdout to a temp file, polls for the URL+code, posts a follow-up card.
+    # Token writes to the agent's ISOLATED cred home, not the host's.
+    env = _login_env(cli, agent)
+    ctx.background(lambda: _login_run_subprocess(ctx, spec["login_argv"], env,
+                                                 alias, agent, cli))
+    return simple_card(
+        f"🔑 /login {alias} → {agent} · 已触发（纯机械）",
+        f"router 已直接拉起 `{argv_str}`（**不经 agent 大模型**，"
+        f"模型掉线 / token 过期也能登），正在等验证链接 / 设备码……\n"
+        f"出码后**自动补一张卡**。登录完成后 token 写回该 CLI 凭证文件，"
+        f"**下次调用自然生效**（无需重启）。"
+        + warn_line,
+        color="blue")
+
+
+# Background poll cadence for the login-subprocess stdout. ctx.sleep is real
+# time in production; tests inject a short/no-op sleep so the loop is quick.
+_LOGIN_POLL_INTERVAL_S = 5.0
+_LOGIN_POLL_ATTEMPTS = 18          # ~90s total
+
+
+def _login_surface_body(surface: dict) -> str:
+    body = []
+    if surface["urls"]:
+        body.append("**验证链接**（点开在浏览器完成登录）：")
+        body.extend(surface["urls"])
+    if surface["codes"]:
+        body.append("\n**设备码**：" + " / ".join(f"`{c}`" for c in surface["codes"]))
+    body.append("\n登录完成后新 token 写回该 CLI 凭证文件，**下次调用自然生效**（无需重启）。")
+    return "\n".join(body)
+
+
+def _login_post_card(title: str, body: str, *, color: str) -> None:
+    """Post a follow-up /login card to the team chat from the background
+    runner (the original slash reply already returned). Best-effort: never
+    raise."""
+    try:
+        from claudeteam.feishu import chat
+        from claudeteam.runtime import config
+        cid = config.chat_id()
+        if cid:
+            chat.send_card(cid, simple_card(title, body, color=color),
+                           profile=config.lark_profile())
+    except Exception:
+        pass
+
+
+def _login_run_subprocess(ctx: SlashContext, argv: list, env: dict,
+                          alias: str, agent: str, cli: str) -> None:
+    """ZERO-LLM login: run the CLI's login subprocess DIRECTLY (no agent pane,
+    no agent LLM), stream its stdout to a temp file, poll the file for the
+    verification URL+code, post a follow-up card. Works when the agent's model
+    is down / token is expired — the recovery scenario the boss requires.
+
+    The subprocess is detached (start_new_session) so it survives this poll
+    thread / a router restart to complete the device auth + write the token.
+    We intentionally never kill it. Best-effort: any failure is swallowed."""
+    import os
+    import subprocess
+    import tempfile
+    try:
+        fd, out_path = tempfile.mkstemp(prefix="ct-login-", suffix=".out")
+        os.close(fd)
+        try:
+            out = open(out_path, "wb")
+            proc = subprocess.Popen(argv, env=env, stdout=out,
+                                    stderr=subprocess.STDOUT,
+                                    stdin=subprocess.DEVNULL,
+                                    start_new_session=True)
+            out.close()   # child keeps its dup'd fd; parent handle not needed
+        except (OSError, ValueError) as e:
+            _login_post_card(
+                f"❌ /login {alias} → {agent}",
+                f"router 拉起 `{argv[0]}` 失败：{e}。确认该 CLI 在容器内可执行。",
+                color="red")
+            return
+        for _ in range(_LOGIN_POLL_ATTEMPTS):
+            ctx.sleep(_LOGIN_POLL_INTERVAL_S)
+            try:
+                txt = open(out_path, encoding="utf-8", errors="replace").read()
+            except OSError:
+                txt = ""
+            surface = _extract_login_surface(txt)
+            if surface["urls"] or surface["codes"]:
+                _login_post_card(f"🔑 /login {alias} → {agent} · 验证信息",
+                                 _login_surface_body(surface), color="blue")
+                return
+            if proc.poll() is not None:
+                # exited without ever printing a surface → already logged in,
+                # or errored. Surface the tail so the operator can tell which.
+                tail = (txt.strip().splitlines() or ["(无输出)"])[-1][:200]
+                _login_post_card(
+                    f"🔑 /login {alias} → {agent} · 无验证码",
+                    f"`{argv[0]}` 登录进程已退出但没出验证链接 / 码——可能已登录或出错。"
+                    f"末行：`{tail}`。可重试或 `/tmux {agent}` 看。", color="yellow")
+                return
+        _login_post_card(
+            f"🔑 /login {alias} → {agent} · 暂未捕获",
+            f"等了 ~{int(_LOGIN_POLL_INTERVAL_S * _LOGIN_POLL_ATTEMPTS)}s 仍没抓到验证链接 / "
+            f"设备码。可重试或 `/tmux {agent}` 看。", color="yellow")
+    except Exception:
+        pass
+
+
 _HANDLERS: dict[str, Callable[[str, SlashContext], str]] = {
     "/help": _handle_help,
     "/team": _handle_team,
@@ -756,10 +1171,14 @@ _HANDLERS: dict[str, Callable[[str, SlashContext], str]] = {
     "/stop": _handle_stop,
     "/clear": _handle_clear,
     "/task": _handle_task,
+    "/shutdown": _handle_shutdown,
+    "/restart": _handle_restart,
+    "/login": _handle_login,
 }
-# 10 chat slash commands: /help /team /health /usage /tmux /send
-# /compact /stop /clear /task. Memory commands (`claudeteam recall` /
-# `forget` / `remember`) live only as agent-pane CLIs, not chat slash.
+# 13 chat slash commands: /help /team /health /usage /tmux /send
+# /compact /stop /clear /task /shutdown /restart /login. Memory commands
+# (`claudeteam recall` / `forget` / `remember`) live only as agent-pane
+# CLIs, not chat slash.
 
 
 def _split_cmd(text: str) -> tuple[str, str]:

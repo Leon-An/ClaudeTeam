@@ -16,6 +16,7 @@ from claudeteam.commands.router import (
     _build_subscribe_cmd,
     _load_seen_msg_ids,
     _make_on_progress,
+    _notify_catchup_skips,
     _stale_event_threshold_s,
     _watch_subscribe_health,
 )
@@ -360,3 +361,32 @@ def test_seen_persists_across_simulated_restart():
         # Simulate restart: load again
         seen = _load_seen_msg_ids()
         assert "om_X" in seen
+
+
+# ── F-catchup-visibility: post a skip-notice to the routing target ──
+
+
+def test_notify_catchup_skips_posts_when_dropped_or_slash():
+    from claudeteam.store import local_facts
+    with isolated_env():
+        _notify_catchup_skips("manager", dropped_stale=3, slash_skipped=2)
+        msgs = local_facts.list_messages("manager")
+    assert len(msgs) == 1
+    body = msgs[0]["content"]
+    assert "3 条" in body and "2 条" in body
+    assert "task intent get" in body          # ties to live-read discipline
+
+
+def test_notify_catchup_skips_noop_when_nothing_skipped():
+    from claudeteam.store import local_facts
+    with isolated_env():
+        _notify_catchup_skips("manager", dropped_stale=0, slash_skipped=0)
+        assert local_facts.list_messages("manager") == []
+
+
+def test_notify_catchup_skips_only_slash():
+    from claudeteam.store import local_facts
+    with isolated_env():
+        _notify_catchup_skips("manager", dropped_stale=0, slash_skipped=4)
+        msgs = local_facts.list_messages("manager")
+    assert len(msgs) == 1 and "4 条控制命令" in msgs[0]["content"]

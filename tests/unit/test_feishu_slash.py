@@ -1,9 +1,10 @@
 """Tests for feishu/slash.py — router-level slash command dispatch."""
 from __future__ import annotations
 
-from helpers import attr_patch, tmux_patch
+from helpers import attr_patch, isolated_env, tmux_patch
 from claudeteam.feishu import slash
 from claudeteam.runtime import tmux
+from claudeteam.runtime import teamctl as _teamctl
 
 
 def _elements(reply):
@@ -1031,3 +1032,281 @@ def test_task_empty_terminal_columns_render_none_not_fold():
     body = reply["body"]["elements"][0]["content"]
     assert "已折叠" not in body
     assert body.count("　无") >= 2     # 已完成 + 已取消 both plain-empty
+
+
+# ── team control: /shutdown /restart (lifecycle gate) ──────────────
+
+
+def test_shutdown_refused_when_lifecycle_disabled():
+    spawned = []
+    with _team_env(), attr_patch(_teamctl, lifecycle_slash_enabled=lambda: False,
+                                 spawn_detached=lambda a: spawned.append(a)):
+        reply = slash.dispatch("/shutdown", _ctx())
+    assert "未开启" in _all_markdown(reply)
+    assert spawned == []          # default-deny: nothing torn down
+
+
+def test_shutdown_requires_confirmation():
+    spawned = []
+    with _team_env(), attr_patch(_teamctl, lifecycle_slash_enabled=lambda: True,
+                                 spawn_detached=lambda a: spawned.append(a)):
+        reply = slash.dispatch("/shutdown", _ctx())
+    assert "确认" in _all_markdown(reply)
+    assert spawned == []          # bare /shutdown only previews, never tears down
+
+
+def test_shutdown_confirm_spawns_detached_runner():
+    spawned = []
+    with _team_env(), attr_patch(_teamctl, lifecycle_slash_enabled=lambda: True,
+                                 spawn_detached=lambda a: spawned.append(a)):
+        reply = slash.dispatch("/shutdown 确认", _ctx())
+    assert spawned == [["team-shutdown"]]
+    assert "detached" in _all_markdown(reply)
+
+
+def test_restart_refused_when_lifecycle_disabled():
+    spawned = []
+    with _team_env(), attr_patch(_teamctl, lifecycle_slash_enabled=lambda: False,
+                                 spawn_detached=lambda a: spawned.append(a)):
+        reply = slash.dispatch("/restart", _ctx())
+    assert "未开启" in _all_markdown(reply)
+    assert spawned == []
+
+
+def test_restart_direct_spawns_detached_runner():
+    """/restart is recoverable → no confirm step; fires immediately."""
+    spawned = []
+    with _team_env(), attr_patch(_teamctl, lifecycle_slash_enabled=lambda: True,
+                                 spawn_detached=lambda a: spawned.append(a)):
+        reply = slash.dispatch("/restart", _ctx())
+    assert spawned == [["team-restart"]]
+    assert "detached" in _all_markdown(reply)
+
+
+# ── team control: /login (login gate, independent of lifecycle) ────
+
+
+def test_login_refused_when_login_disabled():
+    with _team_env(), attr_patch(_teamctl, login_slash_enabled=lambda: False):
+        reply = slash.dispatch("/login cc", _ctx())
+    assert "未开启" in _all_markdown(reply)
+
+
+def test_login_gate_is_independent_of_lifecycle_gate():
+    """Lifecycle ON but login OFF → /login still refused. The two flags are
+    separate so /shutdown can be demoed while /login stays inert until creds
+    are isolated."""
+    with _team_env(), attr_patch(_teamctl, lifecycle_slash_enabled=lambda: True,
+                                 login_slash_enabled=lambda: False):
+        reply = slash.dispatch("/login cc", _ctx())
+    assert "未开启" in _all_markdown(reply)
+
+
+def test_login_unknown_cli():
+    with _team_env(), attr_patch(_teamctl, login_slash_enabled=lambda: True):
+        reply = slash.dispatch("/login frobnicate", _ctx())
+    assert "不认识" in _all_markdown(reply)
+
+
+def test_login_no_args_shows_usage():
+    with _team_env(), attr_patch(_teamctl, login_slash_enabled=lambda: True):
+        reply = slash.dispatch("/login", _ctx())
+    assert "/login <cli>" in _all_markdown(reply)
+
+
+def test_login_ambiguous_cli_requires_agent():
+    # _team_env has manager + worker_cc both on claude-code → must disambiguate
+    with _team_env(), attr_patch(_teamctl, login_slash_enabled=lambda: True):
+        reply = slash.dispatch("/login cc", _ctx())
+    assert "多个 agent" in _all_markdown(reply)
+
+
+def _real_sleep_ctx():
+    import time as _t
+    return _ctx(sleep=lambda s: _t.sleep(0.03))
+
+
+def test_login_triggers_subprocess_immediate_ack_zero_llm():
+    """ZERO-LLM path: /login returns an immediate ack and schedules the
+    router-driven subprocess in the background (NOT injected into the agent
+    pane). The ack must advertise the pure-mechanical, model-down-safe path."""
+    scheduled = []
+    with _team_env(), attr_patch(_teamctl, login_slash_enabled=lambda: True):
+        reply = slash.dispatch("/login codex",
+                               _ctx(background=lambda fn: scheduled.append(fn)))
+    md = _all_markdown(reply)
+    assert "不经 agent 大模型" in md           # boss命门 guarantee (body)
+    assert "codex login --device-auth" in md  # router runs it directly
+    assert len(scheduled) == 1                # background subprocess scheduled
+
+
+def test_login_interactive_cli_returns_pane_guidance_path_b():
+    """Interactive (stdin-paste) CLIs like claude take path B: no fragile
+    chat relay — guide the operator to complete in the pane (still zero-LLM,
+    no router subprocess spawned)."""
+    scheduled = []
+    with _team_env(), attr_patch(_teamctl, login_slash_enabled=lambda: True):
+        reply = slash.dispatch("/login cc worker_cc",
+                               _ctx(background=lambda fn: scheduled.append(fn)))
+    md = _all_markdown(reply)
+    assert "pane 里直接跑" in md and "claude auth login" in md
+    assert "不经大模型" in md                  # zero-LLM guarantee preserved
+    assert scheduled == []                     # NO subprocess for interactive path
+
+
+def test_login_run_subprocess_captures_stdout_surface():
+    """The runner spawns the login command directly and scrapes its STDOUT
+    (no agent, no LLM) — codex device-auth shape (devops 2026-06-14)."""
+    import os
+    posted = []
+    argv = ["sh", "-c",
+            "printf 'Open: https://auth.openai.com/codex/device\\n"
+            "one-time code: MMLU-W452Y\\n'"]
+    with attr_patch(slash, _login_post_card=lambda t, b, *, color: posted.append((t, b, color))):
+        slash._login_run_subprocess(_real_sleep_ctx(), argv, os.environ.copy(),
+                                    "codex", "worker_codex", "codex-cli")
+    assert len(posted) == 1
+    _, body, color = posted[0]
+    assert "auth.openai.com/codex/device" in body
+    assert "MMLU-W452Y" in body
+    assert color == "blue"
+
+
+def test_login_run_subprocess_exit_without_surface():
+    """A login subprocess that exits with no verification surface → a
+    'no code' card (already logged in / errored), not an infinite poll."""
+    import os
+    posted = []
+    with attr_patch(slash, _login_post_card=lambda t, b, *, color: posted.append((t, b, color))):
+        slash._login_run_subprocess(_real_sleep_ctx(), ["sh", "-c", "exit 0"],
+                                    os.environ.copy(), "codex", "worker_codex", "codex-cli")
+    assert len(posted) == 1
+    assert "无验证码" in posted[0][0] and posted[0][2] == "yellow"
+
+
+def test_login_run_subprocess_spawn_failure():
+    """A non-executable login binary → an honest failure card, never a crash."""
+    import os
+    posted = []
+    with attr_patch(slash, _login_post_card=lambda t, b, *, color: posted.append((t, b, color))):
+        slash._login_run_subprocess(_real_sleep_ctx(), ["ct-no-such-binary-zzz"],
+                                    os.environ.copy(), "x", "worker_codex", "codex-cli")
+    assert len(posted) == 1
+    assert "失败" in posted[0][1] and posted[0][2] == "red"
+
+
+def test_login_env_isolates_codex_and_claude_homes():
+    """The subprocess env points the CLI's token write at the agent's
+    ISOLATED per-agent home, never the host's."""
+    from claudeteam.agents.claude_code import agent_home
+    with _team_env():
+        ce = slash._login_env("codex-cli", "worker_codex")
+        assert ce["CODEX_HOME"] == f"{agent_home('worker_codex')}/.codex"
+        he = slash._login_env("claude-code", "manager")
+        assert he["HOME"] == agent_home("manager")
+
+
+def test_login_kimi_hard_refused_not_isolated():
+    """kimi shares ~/.kimi (not host-isolated) → /login HARD-REFUSED, never
+    injected, so it can't clobber the operator's host kimi creds."""
+    team = {"session": "ClaudeTeam", "agents": {
+        "manager": {"cli": "claude-code"},
+        "worker_kimi": {"cli": "kimi-code"}}}
+    injected = []
+    with isolated_env(team=team), \
+            attr_patch(_teamctl, login_slash_enabled=lambda: True), \
+            tmux_patch(inject=lambda *a, **kw: injected.append(a) or True,
+                       capture_pane=lambda *a, **kw: ""):
+        reply = slash.dispatch("/login kimi",
+                               _ctx(agents=("manager", "worker_kimi")))
+    md = _all_markdown(reply)
+    assert "未启用" in md or "硬拒" in md
+    assert injected == []          # never touched the pane / host creds
+
+
+def test_login_cli_allowed_when_in_allowlist_tunable():
+    """A CLI added to controls.login_allowed_clis is no longer refused."""
+    from helpers import env_patch
+    from claudeteam.runtime import tunables
+    team = {"session": "ClaudeTeam", "agents": {
+        "manager": {"cli": "claude-code"},
+        "worker_kimi": {"cli": "kimi-code"}}}
+    pane = "https://auth.moonshot.cn/device\ncode: ABCD-1234\n"
+    with isolated_env(team=team) as tmp:
+        toml = tmp / "controls.toml"
+        toml.write_text("[controls]\nlogin_allowed_clis = \"claude-code,kimi-code\"\n",
+                        encoding="utf-8")
+        with env_patch(CLAUDETEAM_CONFIG_FILE=str(toml)):
+            tunables.reset_cache()
+            with attr_patch(_teamctl, login_slash_enabled=lambda: True), \
+                    tmux_patch(inject=lambda *a, **kw: True,
+                               capture_pane=lambda *a, **kw: pane):
+                reply = slash.dispatch("/login kimi",
+                                       _ctx(agents=("manager", "worker_kimi")))
+    md = _all_markdown(reply)
+    assert "未启用" not in md                 # now allowed (not hard-refused)
+    assert "不经大模型" in md and "pane 里直接跑" in md   # interactive → path-B guidance
+
+
+# ── security: the /login verification-surface scraper ──────────────
+
+
+def test_extract_login_surface_pulls_url_and_code():
+    text = "Visit https://auth.example.com/device to log in\nCode: ABCD-1234\n"
+    s = slash._extract_login_surface(text)
+    assert any("auth.example.com/device" in u for u in s["urls"])
+    assert "ABCD-1234" in s["codes"]
+
+
+def test_extract_login_surface_drops_token_bearing_lines():
+    text = ("https://login.example.com/oauth?x=1\n"
+            "access_token: sk-ABCDEF1234567890\n"
+            "refresh_token=eyJhbGciOiJ\n"
+            "export ANTHROPIC_API_KEY=sk-ant-xxxxxxxx\n")
+    s = slash._extract_login_surface(text)
+    assert any("login.example.com/oauth" in u for u in s["urls"])
+    blob = " ".join(s["urls"] + s["codes"]).lower()
+    assert "sk-" not in blob
+    assert "eyj" not in blob
+    assert "access_token" not in blob
+    assert "api_key" not in blob
+
+
+def test_extract_login_surface_caps_code_length():
+    """A long opaque token must never be surfaced as a pairing code."""
+    text = "code: ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\n"
+    s = slash._extract_login_surface(text)
+    assert s["codes"] == []
+
+
+def test_extract_login_surface_drops_url_with_token_query():
+    text = "https://x.com/callback?access_token=sk-secret123&code=ok\n"
+    s = slash._extract_login_surface(text)
+    assert s["urls"] == []          # token-bearing line skipped wholesale
+
+
+def test_extract_login_surface_codex_device_auth_ignores_anchor():
+    """Regression (devops 2026-06-14): the persistent worker-pane anchor
+    [QUICKSTART-0613-1913] (pure-digit dddd-dddd) was mis-surfaced as the
+    codex device code, posting prematurely and missing the real one. Real
+    codes have letters → anchor ignored, real MLGX-BJYY9 + URL surfaced."""
+    pane = ("worker_codex 上下文 anchor [QUICKSTART-0613-1913] ...\n"
+            "Codex device login is waiting for authorization.\n"
+            "Open: https://auth.openai.com/codex/device\n"
+            "Enter code: MLGX-BJYY9  (expires in 15min)\n")
+    s = slash._extract_login_surface(pane)
+    assert "MLGX-BJYY9" in s["codes"]
+    assert "0613-1913" not in s["codes"]          # anchor NOT a device code
+    assert any("auth.openai.com/codex/device" in u for u in s["urls"])
+
+
+def test_extract_login_surface_strips_ansi_color_codes():
+    """Regression (devops 2026-06-14): codex wraps the device code in ANSI
+    (\\x1b[94m...\\x1b[0m); without stripping, the code is missed and [0m
+    residue leaks into the URL. Strip ANSI → clean URL + code."""
+    pane = ("Open: \x1b[4mhttps://auth.openai.com/codex/device\x1b[0m\n"
+            "Enter this one-time code: \x1b[94mMNOG-E7MBX\x1b[0m\n")
+    s = slash._extract_login_surface(pane)
+    assert "MNOG-E7MBX" in s["codes"]
+    assert any(u == "https://auth.openai.com/codex/device" for u in s["urls"])  # no [0m residue
+    assert all("\x1b" not in u and "[0m" not in u for u in s["urls"])

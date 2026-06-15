@@ -32,7 +32,7 @@ from typing import Callable, Iterable
 from claudeteam.feishu import chat as _chat
 from claudeteam.feishu.router import Decision
 from claudeteam.runtime import paths
-from claudeteam.util import env_str, read_json, write_json
+from claudeteam.util import env_str, read_json, warn, write_json
 
 
 # ── cursor persistence ─────────────────────────────────────────
@@ -194,7 +194,17 @@ def _newer_than(messages: Iterable[dict], cursor_create_time: str, *,
     def keep(m: dict) -> bool:
         ts = _to_epoch_ms(m.get("create_time"))
         return ts > 0 and ts >= cutoff
-    fresh = [m for m in messages if keep(m)]
+    # REST list_recent returns NEWEST-first, but create_time is minute
+    # precision — so same-minute messages tie on the sort key, and a stable
+    # sort would preserve REST's newest-first order = reversed WITHIN the
+    # minute (F-catchup-order: messages 1-9 replayed 4→3→2→1→9→8…). Reverse
+    # to oldest-first BEFORE the stable minute-sort so tied (same-minute)
+    # rows replay oldest-first; cross-minute order still comes from the epoch
+    # key. Minute precision means we can't truly order within a minute —
+    # oldest-first by REST position is the best available.
+    ordered = list(messages)
+    ordered.reverse()
+    fresh = [m for m in ordered if keep(m)]
     fresh.sort(key=lambda m: _to_epoch_ms(m.get("create_time")))
     return fresh
 
@@ -202,12 +212,19 @@ def _newer_than(messages: Iterable[dict], cursor_create_time: str, *,
 def pending_lines(chat_id: str, *,
                   profile: str = "",
                   page_size: int = 50,
-                  list_fn: Callable | None = None) -> list[str]:
+                  list_fn: Callable | None = None,
+                  meta: dict | None = None) -> list[str]:
     """Return NDJSON lines for messages newer than the saved cursor.
 
     Oldest-first so process_lines applies them in chronological order.
     `list_fn` is injectable for tests; in production it goes through
     `feishu.chat.list_recent`.
+
+    `meta` (optional out-dict) is populated with `dropped_stale` = how many
+    over-cap stale messages were skipped, so the caller (router) can tell
+    the routing-target agent it didn't get the whole backlog — otherwise a
+    silent cap makes the agent over-claim it received everything
+    (F-catchup-visibility). Absent when nothing was dropped.
     """
     cursor = read_cursor()
     cursor_ct = str(cursor.get("create_time") or "")
@@ -244,6 +261,22 @@ def pending_lines(chat_id: str, *,
     msgs = list_fn() or []
     fresh = _newer_than(msgs, cursor_ct, cursor_ms=cursor_ms,
                         lookback_ms=_catchup_lookback_ms())
+    cap = _catchup_max_messages()
+    if cap > 0 and len(fresh) > cap:
+        dropped = len(fresh) - cap
+        fresh = fresh[-cap:]   # keep most recent `cap` (list is oldest-first)
+        # Seed the cursor FORWARD to the newest kept row BEFORE replay, so
+        # if the router dies mid-bring-up its respawn starts catchup from
+        # here instead of re-fetching the same oversized backlog and
+        # re-choking (F-G2-restore crash-loop). Loud, never a silent cut.
+        newest = fresh[-1]
+        write_cursor(newest.get("message_id", ""),
+                     str(newest.get("create_time", "")))
+        warn(f"⚠️ catchup backlog exceeded cap {cap}: skipping {dropped} "
+             f"stale message(s), replaying most recent {cap}, cursor seeded "
+             f"forward")
+        if meta is not None:
+            meta["dropped_stale"] = dropped
     return [_msg_to_event_line(m) for m in fresh]
 
 
@@ -257,3 +290,21 @@ def _catchup_lookback_ms() -> int:
                                     _DEFAULT_CATCHUP_LOOKBACK_MS))
     except Exception:
         return _DEFAULT_CATCHUP_LOOKBACK_MS
+
+
+_DEFAULT_CATCHUP_MAX_MESSAGES = 30  # < list_recent page_size (50): a real bound
+
+
+def _catchup_max_messages() -> int:
+    """Hard cap on how many backlog messages one catchup replays. A
+    bring-up after a long gap can surface a large backlog; replaying all of
+    it can choke the router on constrained hosts (macOS Docker WS silent
+    drop/stall), and the older tail is rarely worth re-delivering. Over the
+    cap we keep only the most recent N, seed the cursor past the rest, and
+    log the drop (never silent). Tunable; <= 0 disables the cap."""
+    try:
+        from claudeteam.runtime import tunables
+        return int(tunables.tunable("router.catchup_max_messages",
+                                    _DEFAULT_CATCHUP_MAX_MESSAGES))
+    except Exception:
+        return _DEFAULT_CATCHUP_MAX_MESSAGES

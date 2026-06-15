@@ -552,3 +552,99 @@ def test_cross_minute_miss_delivered_once_through_process_lines():
     delivered = [d.msg_id for d in applies]
     assert delivered == ["om_early"], f"expected only the miss delivered, got {delivered}"
     assert stats.handled == 1
+
+
+# ── catchup volume cap + seed-forward (F-G2-restore) ────────────────
+
+
+def test_pending_lines_caps_backlog_and_seeds_cursor_forward():
+    """A large bring-up backlog must not all replay (router choke). Over the
+    cap, keep only the most recent N, seed the cursor forward past the rest
+    so a mid-bring-up respawn doesn't re-fetch and re-choke."""
+    base = 1778047500000
+    history = [_msg(f"om_{i}", str(base + i * 60000)) for i in range(40)]
+    with isolated_env():
+        catchup.write_cursor("om_cursor", str(base - 600000))  # 10 min before
+        lines = catchup.pending_lines("oc_x", list_fn=lambda: history)
+        cur = catchup.read_cursor()             # read INSIDE the temp state dir
+    ids = [json.loads(l)["event"]["message"]["message_id"] for l in lines]
+    assert len(ids) == 30                       # default cap
+    assert ids[0] == "om_10" and ids[-1] == "om_39"   # most-recent 30
+    assert cur["message_id"] == "om_39"         # cursor seeded forward
+
+
+def test_pending_lines_under_cap_replays_all():
+    base = 1778047500000
+    history = [_msg(f"om_{i}", str(base + i * 60000)) for i in range(5)]
+    with isolated_env():
+        catchup.write_cursor("om_cursor", str(base - 600000))
+        lines = catchup.pending_lines("oc_x", list_fn=lambda: history)
+    assert len(lines) == 5                       # under cap → untouched
+
+
+def test_pending_lines_cap_is_tunable_off():
+    """router.catchup_max_messages <= 0 disables the cap."""
+    base = 1778047500000
+    history = [_msg(f"om_{i}", str(base + i * 60000)) for i in range(40)]
+    with isolated_env() as tmp:
+        toml = tmp / "controls.toml"
+        toml.write_text("[router]\ncatchup_max_messages = 0\n", encoding="utf-8")
+        from helpers import env_patch
+        from claudeteam.runtime import tunables
+        with env_patch(CLAUDETEAM_CONFIG_FILE=str(toml)):
+            tunables.reset_cache()
+            catchup.write_cursor("om_cursor", str(base - 600000))
+            lines = catchup.pending_lines("oc_x", list_fn=lambda: history)
+    assert len(lines) == 40                      # cap off → all replay
+
+
+# ── F-catchup-order: same-minute must replay oldest-first ──────────
+
+
+def test_pending_lines_same_minute_replays_oldest_first():
+    """REST returns newest-first + minute precision → same-minute messages
+    tie on the sort key. Sent 1→5 within one minute, REST gives 5→1; catchup
+    must emit 1→5, not the reversed 5→1 (F-catchup-order)."""
+    minute = "1778047680000"          # one minute, all share it
+    history = [_msg("om_5", minute), _msg("om_4", minute), _msg("om_3", minute),
+               _msg("om_2", minute), _msg("om_1", minute)]   # REST newest-first
+    with isolated_env():
+        catchup.write_cursor("om_cursor", "1778047620000")   # the minute before
+        lines = catchup.pending_lines("oc_x", list_fn=lambda: history)
+    ids = [json.loads(l)["event"]["message"]["message_id"] for l in lines]
+    assert ids == ["om_1", "om_2", "om_3", "om_4", "om_5"]
+
+
+def test_pending_lines_cross_minute_still_chronological():
+    """Distinct minutes still order by time regardless of REST order."""
+    history = [_msg("om_late", "1778047740000"),     # 14:09 (REST newest)
+               _msg("om_mid", "1778047680000"),      # 14:08
+               _msg("om_early", "1778047620000")]    # 14:07
+    with isolated_env():
+        catchup.write_cursor("om_cursor", "1778047500000")   # 14:05
+        lines = catchup.pending_lines("oc_x", list_fn=lambda: history)
+    ids = [json.loads(l)["event"]["message"]["message_id"] for l in lines]
+    assert ids == ["om_early", "om_mid", "om_late"]
+
+
+# ── F-catchup-visibility: cap reports dropped count via meta ───────
+
+
+def test_pending_lines_meta_reports_dropped_stale():
+    base = 1778047500000
+    history = [_msg(f"om_{i}", str(base + i * 60000)) for i in range(40)]
+    meta = {}
+    with isolated_env():
+        catchup.write_cursor("om_cursor", str(base - 600000))
+        catchup.pending_lines("oc_x", list_fn=lambda: history, meta=meta)
+    assert meta["dropped_stale"] == 10        # 40 - default cap 30
+
+
+def test_pending_lines_meta_absent_when_under_cap():
+    base = 1778047500000
+    history = [_msg(f"om_{i}", str(base + i * 60000)) for i in range(5)]
+    meta = {}
+    with isolated_env():
+        catchup.write_cursor("om_cursor", str(base - 600000))
+        catchup.pending_lines("oc_x", list_fn=lambda: history, meta=meta)
+    assert "dropped_stale" not in meta        # no cap → no key

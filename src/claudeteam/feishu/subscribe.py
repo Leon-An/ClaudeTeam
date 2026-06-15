@@ -10,12 +10,49 @@ Returns a tally of (handled, dropped) so callers can log heartbeat.
 from __future__ import annotations
 
 import json
+import time
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Callable, Iterable
 
 from claudeteam.feishu.deliver import apply
-from claudeteam.feishu.router import classify_event
+from claudeteam.feishu.router import Action, classify_event
+
+
+# Destructive team-lifecycle slashes — never auto-replay these from the
+# catchup path at ANY age: a replayed /restart runs `down`, which kills the
+# router before it can persist cursor/seen, so the respawn re-fetches and
+# re-runs it = the F-G2-restore crash-loop. /shutdown 确认 likewise tears
+# the team down on every bring-up.
+_LIFECYCLE_SLASH = ("/shutdown", "/restart")
+# Default freshness window: a catchup slash newer than this is treated as a
+# WS-fallback delivery of a *new* command (dispatch it), not a stale backlog
+# replay (suppress it). Tunable via router.catchup_slash_fresh_ms.
+_DEFAULT_CATCHUP_SLASH_FRESH_MS = 600_000  # > the ~135s WS-dead respawn cycle, w/ margin
+
+
+def _catchup_suppresses_slash(decision, *, now_ms: int, fresh_ms: int) -> bool:
+    """On the catchup path, decide whether to DROP this slash.
+
+    catchup is not only bring-up replay — when the WebSocket is down it's the
+    fallback delivery path for *live* messages too. Suppressing every slash
+    there silently eats the boss's fresh /login //task etc. (the reported
+    "slash slow / no response"). So drop a catchup slash ONLY when it's a
+    genuine replay we must not re-run:
+      • a destructive lifecycle command (/shutdown,/restart) — any age, or
+      • older than the freshness window (a real stale backlog replay).
+    A fresh non-lifecycle slash is dispatched normally. Already-applied
+    commands never reach here — classify_event dedups them via the persisted
+    `seen` set before this check."""
+    text = (decision.text or "").strip()
+    head = text.split(None, 1)[0] if text else ""
+    if head in _LIFECYCLE_SLASH:
+        return True
+    from claudeteam.feishu.catchup import _to_epoch_ms
+    epoch = _to_epoch_ms(getattr(decision, "create_time", ""))
+    if epoch <= 0:
+        return False   # can't age it → don't risk dropping a fresh boss slash
+    return (now_ms - epoch) > fresh_ms
 
 
 @dataclass
@@ -212,7 +249,10 @@ def process_lines(lines: Iterable[str], *,
                   apply_fn: Callable = apply,
                   on_progress: Callable | None = None,
                   on_line_received: Callable | None = None,
-                  seen_msg_ids: set[str] | None = None) -> LoopStats:
+                  seen_msg_ids: set[str] | None = None,
+                  suppress_slash: bool = False,
+                  catchup_slash_fresh_ms: int = _DEFAULT_CATCHUP_SLASH_FRESH_MS
+                  ) -> LoopStats:
     """Run the subscribe loop over `lines` (one Feishu event JSON each).
 
     Designed to be exited by exhausting the iterator.  The production
@@ -224,10 +264,20 @@ def process_lines(lines: Iterable[str], *,
     messages that were already handled before the restart (host_smoke
     2026-05-06: same /tmux manager card forwarded into manager inbox
     every ~3.5min as router self-restarted).
+
+    `suppress_slash` is set on the catchup path. It does NOT blanket-drop
+    every slash — catchup is also the WS-fallback delivery path, so a blanket
+    drop silently eats the boss's *fresh* slashes when the WebSocket is down
+    (the reported "slash slow / no response"; F-G2 regression). Instead, only
+    a genuine stale-replay or a destructive lifecycle command is dropped — see
+    `_catchup_suppresses_slash`. Suppressed slashes still advance the cursor
+    (via on_progress) so a respawn doesn't re-encounter them.
+    `catchup_slash_fresh_ms` is the staleness threshold for that decision.
     """
     stats = LoopStats()
     if seen_msg_ids is not None:
         stats.seen_msg_ids = seen_msg_ids
+    now_ms = int(time.time() * 1000)
     for raw_line in lines:
         line = raw_line.strip()
         if not line:
@@ -260,6 +310,23 @@ def process_lines(lines: Iterable[str], *,
         )
         if decision.is_drop():
             _record_drop(stats, decision.reason or "drop")
+            continue
+        if (suppress_slash and decision.action is Action.SLASH
+                and _catchup_suppresses_slash(
+                    decision, now_ms=now_ms, fresh_ms=catchup_slash_fresh_ms)):
+            # Stale replay or destructive lifecycle command on the catchup
+            # path: drop it, but still advance the cursor (and mark seen) via
+            # on_progress so a respawn doesn't re-fetch it. A FRESH non-
+            # lifecycle slash falls through to normal dispatch below — that's
+            # the WS-down boss command we must NOT eat.
+            _record_drop(stats, "catchup_slash_skip")
+            if decision.msg_id:
+                stats.seen_msg_ids.add(decision.msg_id)
+            if on_progress is not None:
+                try:
+                    on_progress(decision, stats)
+                except Exception as e:
+                    print(f"  ⚠️ on_progress callback failed on {decision.msg_id}: {e}")
             continue
         try:
             apply_fn(decision)
