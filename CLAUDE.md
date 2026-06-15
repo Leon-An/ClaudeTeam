@@ -145,28 +145,27 @@ fixture instead of a real subprocess.
 8. (done) `claudeteam health`, `up`, `down`, agent heartbeats
 9. (done) Slash command hooks (`claudeteam install-hooks` → .claude/commands/)
 10. (done) `claudeteam usage` — ccusage wrapper for claude-code agents
-11. (done) Rate-limit detection (adapter `rate_limit_markers`, deliver skips)
-12. (done) `claudeteam reset` + 15-helper `util.py` shared stdlib
-13. (done) Image / file / audio / sticker Feishu messages → placeholder text
-14. (done) Post-compact identity reread (`/compact` schedules background re-init)
-15. (done) Slash command router-level dispatch (zero LLM `/help /team /tmux /send /compact /stop /clear /usage /health`)
-16. (done) Broadcast routing (`@team` / `@all` / `全体X` → fan out to non-sender agents)
-17. (done) Lifecycle helper extraction (`runtime/lifecycle.provision_pane`)
-18. (done) Dockerfile + compose (base image: python:3.11-slim + tmux + nodejs; agent CLIs left to derived images)
-19. (done) Multi-team isolation UX (`claudeteam switch <team-dir>` emits shell exports)
-20. (done) Watchdog orphan-reap (kill PPID=1 lark-cli `+subscribe` left by SIGKILL'd router before respawn)
-21. (done) Feishu interactive cards for `/help` `/team` `/health` slash replies, with health-aware header colour
-22. (done) Watchdog → Feishu chat alert when a daemon enters cooldown
-23. (done) Per-agent durable memory (`store/memory.py`, `facts/<agent>/memory.jsonl`) with auto-injection into identity init prompt on wake
-24. (done) Memory CRUD CLI: `claudeteam remember` / `recall` / `forget` — R172.b retired the matching `/recall` and `/forget` slash dispatch (boss-flagged not-in-main); CLI form stays for agent-pane use
-25. (done) `gemini-cli` adapter; manager identity v2 ported management discipline rules from main (角色边界 / 集合指令必须 dispatch / 巡视核实 / 沟通格式)
-26. (done) Lark perf — bypass `npx`'s package-lookup overhead (`feishu/lark._resolve_cli_prefix`); 73s → 0.6s on macOS host
-27. (done) Structured `--help` output grouped by `[bootstrap]` / `[team lifecycle]` / `[durable agent memory]` etc.
-28. (done) `claudeteam reidentify --all` for batch re-injection across the team
-29. (done) Watchdog cooldown alert promoted to red Feishu card with recovery checklist (was plain text)
-30. (done) `claudeteam say <agent> <msg> --card` for card-formatted chat replies; manager → blue / worker_* → green template by convention
-31. (done) `qwen-code` adapter (alias `qwen-cli`); adapter coverage 5/5 with old main (claude-code / codex-cli / gemini-cli / kimi-code / qwen-code)
-32. (done) `claudeteam peek <agent> [N]` branded fast path for the 5-min 巡视 cadence; install-hooks `/peek` + manager identity v2 migrated off raw `tmux capture-pane`
-33. (done) Slash hook coverage parity with R83-R96 commands: `/say --card` / `/remember` / `/recall` / `/peek` all in `claudeteam install-hooks`
-34. (done) Round C playbook refresh (post-R86 perf reality, "what's already verified piece-meal" map)
-35. (done) Round C real-task end-to-end smoke — confirmed 2026-05-05 in test_a chat: boss `@manager 让 worker_cc 数 feishu/ 下 .py 数量，结果 say 到群，你做汇总` → manager dispatched → worker_cc say-ed result → worker_cc also `claudeteam send manager` (per R173 summary-cue hint) → manager posted final summary "任务已闭环". Loop closes when the boss message contains a summary cue (汇总/汇报/总结/报告/summarize/etc); without one, dispatch + chat-only-say still works for casual messages.
+11. (done) `claudeteam reset` + 15-helper `util.py` shared stdlib
+12. (done) Image / file / audio / sticker Feishu messages → placeholder text
+13. (done) Post-compact identity reread (`/compact` schedules background re-init)
+14. (done) Slash command router-level dispatch (zero LLM `/help /team /tmux /send /compact /stop /clear /usage /health`)
+15. (done) Broadcast routing (`@team` / `@all` / `全体X` → fan out to non-sender agents)
+16. (done) Lifecycle helper extraction (`runtime/lifecycle.provision_pane`)
+17. (done) Dockerfile + compose (base image: python:3.11-slim + tmux + nodejs; agent CLIs left to derived images)
+18. (done) Multi-team isolation UX (`claudeteam switch <team-dir>` emits shell exports)
+19. (done) Watchdog orphan-reap (kill PPID=1 lark-cli `+subscribe` left by SIGKILL'd router before respawn)
+20. (done) Feishu interactive cards for `/help` `/team` `/health` slash replies, with health-aware header colour
+21. (done) Watchdog → Feishu chat alert when a daemon enters cooldown
+22. (done) Per-agent durable memory (`store/memory.py`, `facts/<agent>/memory.jsonl`) with auto-injection into identity init prompt on wake
+23. (done) Memory CRUD CLI: `claudeteam remember` / `recall` / `forget` — R172.b retired the matching `/recall` and `/forget` slash dispatch (boss-flagged not-in-main); CLI form stays for agent-pane use
+24. (done) `gemini-cli` adapter; manager identity v2 ported management discipline rules from main (角色边界 / 集合指令必须 dispatch / 巡视核实 / 沟通格式)
+25. (done) Lark perf — bypass `npx`'s package-lookup overhead (`feishu/lark._resolve_cli_prefix`); 73s → 0.6s on macOS host
+26. (done) Structured `--help` output grouped by `[bootstrap]` / `[team lifecycle]` / `[durable agent memory]` etc.
+27. (done) `claudeteam reidentify --all` for batch re-injection across the team
+28. (done) Watchdog cooldown alert promoted to red Feishu card with recovery checklist (was plain text)
+29. (done) `claudeteam say <agent> <msg> --card` for card-formatted chat replies; manager → blue (fixed), every other agent → a distinct color cycled from `_AGENT_PALETTE` (blue-excluded) by team-config order; per-agent `card_color` in claudeteam.toml overrides
+30. (done) `qwen-code` adapter (alias `qwen-cli`); adapter coverage 5/5 with old main (claude-code / codex-cli / gemini-cli / kimi-code / qwen-code)
+31. (done) `claudeteam peek <agent> [N]` branded fast path for the 5-min 巡视 cadence; install-hooks `/peek` + manager identity v2 migrated off raw `tmux capture-pane`
+32. (done) Slash hook coverage parity with R83-R96 commands: `/say --card` / `/remember` / `/recall` / `/peek` all in `claudeteam install-hooks`
+33. (done) Round C playbook refresh (post-R86 perf reality, "what's already verified piece-meal" map)
+34. (done) Round C real-task end-to-end smoke — confirmed 2026-05-05 in test_a chat: boss `@manager 让 worker_cc 数 feishu/ 下 .py 数量，结果 say 到群，你做汇总` → manager dispatched → worker_cc say-ed result → worker_cc also `claudeteam send manager` (per R173 summary-cue hint) → manager posted final summary "任务已闭环". Loop closes when the boss message contains a summary cue (汇总/汇报/总结/报告/summarize/etc); without one, dispatch + chat-only-say still works for casual messages.
