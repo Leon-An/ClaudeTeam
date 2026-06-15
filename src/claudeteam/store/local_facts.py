@@ -104,6 +104,31 @@ def mark_read(local_id: str) -> bool:
 # ── status ────────────────────────────────────────────────────────────
 
 
+# Authoritative retirement marker. `claudeteam fire` writes this status,
+# and every pane-spawning path consults `is_retired()` before bringing a
+# pane back up:
+#   • commands/start.py provision loop   (mass restart)
+#   • runtime/wake.wake_if_dormant        (lazy + delivery wake)
+#   • feishu/deliver._inject_to_pane      (router delivery)
+#   • commands/send.py                    (peer nudge)
+# Without this gate "已停止" was only a display string — a fired agent got
+# silently revived by the next inbound message or `claudeteam start`
+# (boss-flagged: 裁员不彻底 + 反复自动重启). The deliberate bring-back path
+# (`claudeteam hire`) intentionally does NOT consult it — provision_pane
+# overwrites the row with 待命/进行中, clearing retirement.
+RETIRED_STATUS = "已停止"
+
+
+def is_retired(agent: str) -> bool:
+    """True iff `agent`'s latest status row marks it retired (fired).
+
+    The single source of truth for "this agent was fired; do not revive
+    its pane". Reads the status snapshot; a missing row (never-seen agent)
+    is not retired."""
+    row = get_status(agent)
+    return bool(row) and row.get("status") == RETIRED_STATUS
+
+
 def upsert_status(agent: str, status: str, task: str, *, blocker: str = "") -> None:
     with _locked():
         path = _status_file()

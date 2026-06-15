@@ -52,6 +52,14 @@ def main(argv: list[str]) -> int:
         target = tmux.Target(session, to)
         if not tmux.has_window(target):
             return 0
+        # Retirement gate: a fired agent (status 已停止) keeps its inbox row
+        # (written above — picked up on a future `hire`) but its pane is
+        # never nudged/woken. Without this, a peer `send` to a fired agent
+        # whose window still lingers would inject (and the lazy branch
+        # below could even respawn its CLI), reviving a retired agent.
+        if local_facts.is_retired(to):
+            print(f"  ⏸️  {to} 已停止 (fired); inbox row kept, pane not nudged")
+            return 0
         adapter = adapter_for_agent(to)
         # Lazy worker only: pane exists as placeholder shell, CLI hasn't
         # spawned yet. Without wake_if_dormant the inject below would land

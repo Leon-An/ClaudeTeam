@@ -124,6 +124,40 @@ def test_send_calls_wake_only_for_lazy_agent():
     assert calls["wake_if_dormant"] == 1
 
 
+def test_send_to_retired_agent_writes_inbox_but_skips_nudge():
+    """A fired agent (status 已停止) still gets its inbox row but its pane
+    is never nudged/woken — the peer-`send` half of the no-revive fix.
+    Even with a live window + lazy config, wake must not fire."""
+    from helpers import attr_patch
+    from claudeteam.runtime import wake, tmux, lifecycle
+    calls = {"is_ready": 0, "wake_if_dormant": 0, "inject": 0}
+    with isolated_env(team={"agents": {"worker_fired": {
+            "cli": "claude-code", "lazy": True}}}):
+        local_facts.upsert_status(
+            "worker_fired", local_facts.RETIRED_STATUS, "fired")
+        with attr_patch(wake,
+                        is_ready=lambda *a, **kw: calls.__setitem__(
+                            "is_ready", calls["is_ready"] + 1) or False,
+                        wake_if_dormant=lambda *a, **kw: calls.__setitem__(
+                            "wake_if_dormant", calls["wake_if_dormant"] + 1)):
+            with attr_patch(tmux,
+                            has_window=lambda *a, **kw: True,
+                            inject=lambda *a, **kw: calls.__setitem__(
+                                "inject", calls["inject"] + 1) or True):
+                with attr_patch(lifecycle, pane_env_prefix=lambda: "X=Y"):
+                    rc, out, _ = run_cli(
+                        ["send", "worker_fired", "manager", "hi"])
+        assert rc == 0
+        # inbox row still landed (recoverable via hire) — assert inside
+        # the isolated_env block so we read the same state dir send wrote to
+        rows = local_facts.list_messages("worker_fired")
+        assert len(rows) == 1 and rows[0]["content"] == "hi"
+        # pane untouched: no wake, no inject
+        assert calls["wake_if_dormant"] == 0
+        assert calls["inject"] == 0
+        assert "已停止 (fired)" in out
+
+
 def test_inbox_lists_unread_with_local_id_and_returns_zero():
     with isolated_env():
         run_cli(["send", "w", "m", "first"])

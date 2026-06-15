@@ -42,6 +42,7 @@ class DeliveryReport:
     written: list[str] = field(default_factory=list)        # inbox row landed
     injected: list[str] = field(default_factory=list)       # pane received text
     failed_inject: list[str] = field(default_factory=list)
+    retired: list[str] = field(default_factory=list)        # fired: inbox kept, pane not revived
     skipped: bool = False                                    # True iff decision was DROP
     slash_reply: str = ""                                    # set when action=SLASH
 
@@ -166,8 +167,14 @@ def _inject_to_pane(agent: str, decision: Decision,
     say` instead of answering in pane). `local_id` is appended to the
     hint so the agent knows which inbox row to mark read.
 
-    Returns a DeliveryReport field name: 'injected' / 'failed_inject'.
+    Returns a DeliveryReport field name: 'injected' / 'failed_inject' /
+    'retired'. A retired agent (status 已停止 — fired) keeps its inbox row
+    (written by the caller before this) so a future `hire` picks it up,
+    but its pane is NOT woken/injected — firing means stay down.
     """
+    if local_facts.is_retired(agent):
+        print(f"  ⏸️  {agent} 已停止 (fired); inbox row kept, pane not revived")
+        return "retired"
     target = tmux.Target(deps.session, agent)
     try:
         adapter = deps.adapter_for_agent(agent)
