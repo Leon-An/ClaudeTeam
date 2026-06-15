@@ -18,7 +18,9 @@ Supported commands (matches main's 10-command surface):
     /tmux [agent] [N]                  card with last N (default 10) pane lines
     /send <agent> <msg>                tmux send-keys + Enter into agent pane
     /compact [agent]                   inject /compact then schedule reidentify
-    /stop <agent>                      send Ctrl-C to agent pane
+    /stop [agent]                      interrupt agent's current action
+                                       (adapter interrupt key, default Esc);
+                                       no arg → stop every agent
     /clear <agent>                     /clear + re-init (rehire shape)
     /task [all]                        read-only kanban of the task store
                                        (grouped by status; intent back-link;
@@ -159,7 +161,7 @@ _HELP_TEXT = """🆘 ClaudeTeam 自定义斜杠命令（零 LLM，router/hook �
 /tmux [agent] [lines]    → capture-pane 窗口（默认 manager/10 行）
 /send <agent> <msg>      → 直接注入消息到 agent 窗口
 /compact [agent]         → 群聊无参=压缩 manager；带参压缩指定 agent
-/stop <agent>            → 送 C-c 到 agent 窗口（中断当前动作）
+/stop [agent]            → 中断 agent 当前动作（送 Esc）；无参=停全部 agent
 /clear <agent>           → 送 /clear + 重新入职 init_msg（相当于 rehire）
 /task [all]              → 任务看板：按状态分组（只读）；已完成/已取消
                            默认折叠为计数，加 all 展开明细
@@ -644,15 +646,44 @@ def _handle_compact(args: str, ctx: SlashContext) -> str:
             f"{int(_REIDENTIFY_DELAY_S)}s 后自动重注 identity")
 
 
+def _stop_one(agent: str, ctx: SlashContext) -> bool:
+    """Send `agent`'s CLI-specific interrupt sequence to its pane (default
+    Esc; see CliAdapter.interrupt_keys). Returns True iff the key send
+    succeeded. Adapter lookup is defensive — an unknown cli falls back to
+    Esc rather than skipping the stop."""
+    from claudeteam.agents import adapter_for_agent
+    try:
+        keys = adapter_for_agent(agent).interrupt_keys()
+    except Exception:
+        keys = ["Escape"]
+    return tmux.send_keys(tmux.Target(ctx.session, agent), *keys)
+
+
 def _handle_stop(args: str, ctx: SlashContext) -> str:
-    if not args.strip():
-        return "用法: /stop <agent>\n例: /stop worker_cc（送 C-c 中断当前动作）"
-    agent = args.strip().split()[0]
+    """`/stop [agent]` — interrupt an agent's current action by sending its
+    CLI's interrupt key (default Esc — see CliAdapter.interrupt_keys, which
+    unifies the behavior across claude-code / codex / gemini / qwen / kimi).
+
+    No argument → stop EVERY agent in the team (the `/stop all` default the
+    boss asked for): an emergency "everyone halt now" that fans the interrupt
+    out to each pane instead of erroring on a missing target."""
+    arg = args.strip()
+    if not arg:
+        names, _, _, _ = _live_agents()
+        if not names:
+            return "⚠️ 团队里没有 agent 可停止"
+        results = [(n, _stop_one(n, ctx)) for n in names]
+        ok_n = sum(1 for _, ok in results if ok)
+        lines = "\n".join(
+            f"{'✅' if ok else '❌'} {ctx.session}:{n}" for n, ok in results)
+        return (f"🛑 /stop 全员 · 已向 {len(results)} 个 agent 送中断键（Esc），"
+                f"{ok_n}/{len(results)} 成功\n{lines}")
+    agent = arg.split()[0]
     if (warn := _bad_agent(agent, ctx)):
         return warn
-    ok = tmux.send_keys(tmux.Target(ctx.session, agent), "C-c")
+    ok = _stop_one(agent, ctx)
     glyph = "✅" if ok else "❌"
-    return f"{glyph} /stop → {ctx.session}:{agent} · 已送 C-c"
+    return f"{glyph} /stop → {ctx.session}:{agent} · 已送中断键（Esc）"
 
 
 def _handle_clear(args: str, ctx: SlashContext) -> str:

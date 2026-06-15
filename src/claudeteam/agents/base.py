@@ -52,6 +52,23 @@ class CliAdapter(ABC):
         """
         return ["Enter", "C-m", "C-j"]
 
+    def interrupt_keys(self) -> list[str]:
+        """Tmux key(s) that interrupt the CLI's CURRENT action — what `/stop`
+        sends to halt an agent's in-flight turn WITHOUT killing its CLI.
+
+        Default `Escape`, uniform across every CLI we target. Verified on
+        live claude-code + codex panes (2026-06-15): both label Esc as the
+        interrupt in their own UI ("esc to interrupt") and Esc cleanly
+        cancels the turn (claude prints "Interrupted", codex "Model
+        interrupted"); the Ink-based TUIs (gemini / qwen / kimi) cancel the
+        running generation on Esc as well. Ctrl-C — the old `/stop` key —
+        was neither consistent nor safe: a 2nd Ctrl-C quits codex, Ink CLIs
+        treat it as EOF/exit, and on claude it only ambiguously interrupts
+        (it dumps the typed line back into the prompt). An adapter whose CLI
+        interrupts with a different key overrides this.
+        """
+        return ["Escape"]
+
     def display_model(self, model: str) -> str:
         """Human-facing model label for the agent's identity file.
 

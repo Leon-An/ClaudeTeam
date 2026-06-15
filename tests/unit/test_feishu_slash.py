@@ -829,7 +829,7 @@ def test_compact_detects_llm_rejection_marker_and_skips_reidentify():
 # ── /stop ────────────────────────────────────────────────────────
 
 
-def test_stop_sends_ctrl_c():
+def test_stop_sends_interrupt_key_escape_not_ctrl_c():
     captured = {}
 
     def fake_send_keys(target, *keys, **kw):
@@ -840,13 +840,40 @@ def test_stop_sends_ctrl_c():
     with _team_env(), tmux_patch(send_keys=fake_send_keys):
         reply = slash.dispatch("/stop worker_cc", _ctx())
     assert captured["target"] == "ClaudeTeam:worker_cc"
-    assert "C-c" in captured["keys"]
-    assert "C-c" in reply
+    assert "Escape" in captured["keys"]        # interrupt key is Esc now
+    assert "C-c" not in captured["keys"]        # NOT the old (unsafe) Ctrl-C
+    assert "Esc" in reply
 
 
-def test_stop_no_args_returns_usage():
-    reply = slash.dispatch("/stop", _ctx())
-    assert "用法:" in reply
+def test_stop_codex_also_uses_escape():
+    """All adapters unify on Esc — codex (which overrides submit_keys) still
+    interrupts with Esc, not a per-CLI special sequence."""
+    calls = []
+
+    def fake_send_keys(target, *keys, **kw):
+        calls.append((str(target), keys))
+        return True
+
+    with _team_env(), tmux_patch(send_keys=fake_send_keys):
+        slash.dispatch("/stop worker_codex", _ctx())
+    assert calls == [("ClaudeTeam:worker_codex", ("Escape",))]
+
+
+def test_stop_no_args_stops_all_agents():
+    """/stop with no arg fans the interrupt out to EVERY agent (the
+    `/stop all` default the boss asked for), not an error."""
+    targets = []
+
+    def fake_send_keys(target, *keys, **kw):
+        targets.append(str(target))
+        return True
+
+    with _team_env(), tmux_patch(send_keys=fake_send_keys):
+        reply = slash.dispatch("/stop", _ctx())
+    assert set(targets) == {
+        "ClaudeTeam:manager", "ClaudeTeam:worker_cc", "ClaudeTeam:worker_codex"}
+    assert "全员" in reply
+    assert "3/3" in reply
 
 
 # ── /clear ───────────────────────────────────────────────────────

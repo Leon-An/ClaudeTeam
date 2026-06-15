@@ -77,6 +77,15 @@ def test_default_submit_keys_are_enter_variants():
         assert "Enter" in keys
 
 
+def test_interrupt_keys_are_uniform_escape_across_every_cli():
+    """`/stop`'s interrupt must be CONSISTENT across all CLIs (boss
+    2026-06-15). Every registered adapter — claude-code / codex-cli /
+    gemini-cli / kimi-code / qwen-code (+ aliases) — interrupts with Esc,
+    not the old Ctrl-C. Verified live on claude + codex panes."""
+    for cli in known_clis():
+        assert get_adapter(cli).interrupt_keys() == ["Escape"], cli
+
+
 # ── per-adapter spawn shape ──────────────────────────────────────
 
 
