@@ -21,7 +21,8 @@ from __future__ import annotations
 from claudeteam.agents import adapter_for_agent, identity as _identity
 from claudeteam.runtime import config, lifecycle, tmux, wake
 from claudeteam.store import local_facts
-from claudeteam.util import pop_bool_flag, usage_error
+from claudeteam.util import (
+    maybe_print_help, pop_bool_flag, reject_flag_as_agent, usage_error)
 
 
 USAGE = (
@@ -31,12 +32,17 @@ USAGE = (
 
 
 def main(argv: list[str]) -> int:
+    if maybe_print_help(argv, USAGE):
+        return 0
     rest = list(argv)
     no_inject = pop_bool_flag(rest, "--no-inject")
     if len(rest) < 3:
         return usage_error(USAGE)
     to, frm, message = rest[0], rest[1], rest[2]
     priority = rest[3] if len(rest) > 3 else "中"
+    for name in (to, frm):
+        if (rc := reject_flag_as_agent(name, USAGE)) is not None:
+            return rc
     local_facts.touch_heartbeat(frm)
     local_id = local_facts.append_message(to, frm, message, priority=priority)
     print(f"📥 inbox: {to} ← {frm}  [local_id={local_id}]")

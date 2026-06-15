@@ -126,6 +126,25 @@ def test_touch_heartbeat_skips_blank_agent():
         assert local_facts.all_heartbeats() == {}
 
 
+def test_touch_heartbeat_skips_flag_shaped_agent():
+    """F-cli-help-phantom net: a '-'-prefixed name (misparsed option like
+    '--help') must never register as a phantom heartbeat, no matter which
+    command forgot its own help guard."""
+    with isolated_env():
+        for bad in ("--help", "-h", "--json"):
+            local_facts.touch_heartbeat(bad)
+        assert local_facts.all_heartbeats() == {}
+
+
+def test_upsert_status_skips_flag_shaped_agent():
+    """Same net for the status store — a flag-shaped token never becomes a
+    phantom status row that would pollute /team."""
+    with isolated_env():
+        local_facts.upsert_status("--help", "进行中", "x")
+        assert local_facts.get_status("--help") is None
+        assert local_facts.list_all_statuses() == []
+
+
 def test_all_heartbeats_returns_each_recorded_agent():
     with isolated_env():
         local_facts.touch_heartbeat("alice")

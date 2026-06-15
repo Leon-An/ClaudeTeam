@@ -88,6 +88,28 @@ def reject_extra_args(rest: list[str], usage: str) -> int | None:
     return error_exit(f"❌ unexpected args: {rest}\n{usage}")
 
 
+def reject_flag_as_agent(name: str, usage: str) -> int | None:
+    """Guard for subcommands that take an agent NAME as a positional arg.
+
+    A token starting with '-' is a misparsed option, never a real agent —
+    the classic `claudeteam inbox --help`, where '--help' would otherwise be
+    accepted as the agent and registered into facts (heartbeats / status),
+    spawning a phantom '--help' agent that pollutes `/team`
+    (F-cli-help-phantom). Callers run `maybe_print_help` first so real
+    -h/--help prints usage; this then rejects any *other* flag-shaped token.
+
+    Prints a usage error to stderr and returns 1, else None so the caller
+    continues. Caller form mirrors reject_extra_args:
+
+        if (rc := reject_flag_as_agent(agent, USAGE)) is not None:
+            return rc
+    """
+    if name.startswith("-"):
+        return usage_error(
+            f"❌ '{name}' 不是合法 agent 名（看起来是选项，不是 agent）\n{usage}")
+    return None
+
+
 def pop_flag(rest: list[str], flag: str) -> str | None:
     """Pop `flag <value>` out of `rest` and return value; or None if absent
     or value is missing. Mutates `rest`. Used by every command that does its

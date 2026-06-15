@@ -130,6 +130,11 @@ def is_retired(agent: str) -> bool:
 
 
 def upsert_status(agent: str, status: str, task: str, *, blocker: str = "") -> None:
+    # Defense-in-depth against F-cli-help-phantom: never let a flag-shaped
+    # token (e.g. a misparsed '--help') become a phantom agent row. Real
+    # agent names never start with '-'. Mirrors the touch_heartbeat guard.
+    if not agent or agent.startswith("-"):
+        return
     with _locked():
         path = _status_file()
         data = read_json(path, {"agents": {}})
@@ -167,8 +172,11 @@ def touch_heartbeat(agent: str) -> None:
     is auxiliary; killing `claudeteam send` or `claudeteam inbox`
     because we couldn't update a freshness timestamp would be an
     unhelpful trade-off.
+
+    A flag-shaped name (leading '-') is rejected too: a misparsed option
+    like '--help' must never register as a phantom agent (F-cli-help-phantom).
     """
-    if not agent:
+    if not agent or agent.startswith("-"):
         return
     try:
         with _locked():

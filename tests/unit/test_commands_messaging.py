@@ -47,6 +47,34 @@ def test_send_missing_args_returns_one_with_usage_to_stderr():
     assert "usage: claudeteam send" in err
 
 
+def test_inbox_help_shows_usage_and_no_phantom_agent():
+    """F-cli-help-phantom: `inbox --help` prints help, never registers
+    '--help' as a phantom heartbeat agent."""
+    with isolated_env():
+        rc, out, _ = run_cli(["inbox", "--help"])
+        assert rc == 0
+        assert "usage: claudeteam inbox" in out
+        assert local_facts.all_heartbeats() == {}
+
+
+def test_send_help_shows_usage_and_no_phantom_agent():
+    with isolated_env():
+        rc, out, _ = run_cli(["send", "--help"])
+        assert rc == 0
+        assert "usage: claudeteam send" in out
+        assert local_facts.all_heartbeats() == {}
+
+
+def test_send_flag_shaped_sender_rejected():
+    """A '-'-prefixed sender (the heartbeat-registered field) is rejected,
+    so it can't pollute heartbeats."""
+    with isolated_env():
+        rc, _, err = run_cli(["send", "worker", "--bogus", "msg"])
+        assert rc == 1
+        assert "agent" in err
+        assert local_facts.get_heartbeat("--bogus") is None
+
+
 def test_send_no_inject_flag_skips_pane_inject_after_R168():
     """R168: `--no-inject` opts out of the new auto-inject behaviour
     so audit-only writes (caller is parking context for later, not
