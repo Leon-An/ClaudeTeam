@@ -1,13 +1,68 @@
 """Moonshot Kimi Code adapter."""
 from __future__ import annotations
 
+import shlex
+import sys
+from pathlib import Path
+
+if sys.version_info >= (3, 11):
+    import tomllib  # type: ignore[import-not-found]
+else:  # pragma: no cover — project pins >=3.10 but stdlib tomllib is 3.11+
+    import tomli as tomllib  # type: ignore[no-redef]
+
 from .base import CliAdapter, MULTILINE_SUBMIT_KEYS, SPINNER_CHARS
+
+
+# Substrings that mark a model name as kimi/Moonshot-native (vs the team's
+# claude/gpt default alias, which kimi can't run). Used to decide whether a
+# team/argv `model` is safe to pass through to `kimi -m`.
+_KIMI_MODEL_HINTS = ("kimi", "moonshot", "k2")
+
+
+def _is_kimi_model(name: str) -> bool:
+    low = name.lower()
+    return any(h in low for h in _KIMI_MODEL_HINTS)
+
+
+def _kimi_config_path() -> Path:
+    """kimi-cli's config file (its `--config-file` default), under the pane's
+    HOME. kimi uses the ambient HOME (Plan B: no per-agent isolation), which
+    on the container is /root → /root/.kimi/config.toml. Its own module
+    function so tests can patch the location."""
+    return Path.home() / ".kimi" / "config.toml"
+
+
+def _kimi_default_model() -> str:
+    """Best-effort read of `default_model` from kimi's config.toml so spawn
+    can force-apply it via -m. Returns '' on any error (missing file / parse
+    failure / unset key) → caller then omits -m."""
+    try:
+        path = _kimi_config_path()
+        if not path.exists():
+            return ""
+        with open(path, "rb") as fh:
+            data = tomllib.load(fh)
+        val = data.get("default_model", "")
+        return val.strip() if isinstance(val, str) else ""
+    except Exception:
+        return ""
 
 
 class KimiCodeAdapter(CliAdapter):
     def spawn_cmd(self, agent: str, model: str) -> str:
-        # model is currently a no-op for kimi; CLI picks per its config
-        return f"DISABLE_UPDATE_CHECK=1 KIMI_AGENT={agent} kimi --yolo"
+        # F-kimi-hire-model-not-set (boss 2026-06-15): kimi-cli 1.47 does NOT
+        # re-apply config.toml `default_model` on a respawned / resumed
+        # session — first `up` works, but /restart & fire→hire land on
+        # "LLM not set, send /login" (the persisted ~/.kimi/sessions make
+        # kimi skip model bootstrap). So pass the model EXPLICITLY with -m
+        # rather than relying on kimi reading default_model itself.
+        # Precedence: a kimi-valid team/argv model wins; else the config's
+        # own default_model, force-applied; else omit -m (the old auto path —
+        # buggy on respawn but no worse than before).
+        chosen = model.strip() if (model and _is_kimi_model(model)) else _kimi_default_model()
+        model_arg = f" -m {shlex.quote(chosen)}" if chosen else ""
+        return (f"DISABLE_UPDATE_CHECK=1 KIMI_AGENT={shlex.quote(agent)} "
+                f"kimi --yolo{model_arg}")
 
     def display_model(self, model: str) -> str:
         # model is a no-op for kimi (see spawn_cmd) — it runs whatever its

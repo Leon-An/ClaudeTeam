@@ -182,6 +182,47 @@ def test_kimi_spawn_uses_yolo_flag_and_disable_update():
     assert "KIMI_AGENT=worker_kimi" in cmd
 
 
+# ── kimi model bootstrap (F-kimi-hire-model-not-set) ─────────────
+
+
+def test_kimi_passes_kimi_valid_team_model_via_dash_m():
+    """A kimi/Moonshot model from team config is passed explicitly with -m
+    (no longer dropped) so a respawned session can't land on 'LLM not set'."""
+    cmd = KimiCodeAdapter().spawn_cmd("worker_kimi", "kimi-for-coding")
+    assert "kimi --yolo -m kimi-for-coding" in cmd
+
+
+def test_kimi_drops_non_kimi_model_but_force_applies_config_default():
+    """A claude/gpt team alias isn't a kimi model → dropped; instead kimi's
+    own config default_model is force-applied with -m (defeats kimi-cli's
+    respawn quirk of not auto-loading it)."""
+    import os
+    import tempfile
+    from pathlib import Path
+    from claudeteam.agents import kimi_code
+    from helpers import attr_patch
+    with tempfile.TemporaryDirectory() as d:
+        cfg = Path(d) / "config.toml"
+        cfg.write_text('default_model = "kimi-code"\n')
+        with attr_patch(kimi_code, _kimi_config_path=lambda: cfg):
+            cmd = KimiCodeAdapter().spawn_cmd("worker_kimi", "claude-opus-4-8")
+    assert "claude-opus-4-8" not in cmd          # claude alias dropped
+    assert "kimi --yolo -m kimi-code" in cmd     # config default force-applied
+
+
+def test_kimi_omits_dash_m_when_no_model_and_no_config():
+    """No kimi-valid model + no readable config default → omit -m (graceful
+    fallback to kimi's own auto path; never emit a broken `-m`)."""
+    from pathlib import Path
+    from claudeteam.agents import kimi_code
+    from helpers import attr_patch
+    with attr_patch(kimi_code,
+                    _kimi_config_path=lambda: Path("/nonexistent/.kimi/config.toml")):
+        cmd = KimiCodeAdapter().spawn_cmd("worker_kimi", "")
+    assert " -m " not in cmd
+    assert "kimi --yolo" in cmd
+
+
 # ── markers ──────────────────────────────────────────────────────
 
 
