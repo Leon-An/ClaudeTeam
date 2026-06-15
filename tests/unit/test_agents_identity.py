@@ -128,6 +128,11 @@ def test_team_principles_baked_into_both_templates():
         # machine, and the resumed worker verifies it before acting
         assert "裁决了什么必须随 --note 走状态机" in text
         assert "绝不允许脑补" in text
+        # 原则簇 §1 (live-read tier C, 2026-06-14): sparse-memory CLIs must
+        # re-read the authoritative intent before answering verbatim
+        # constraints; nobody may invent constraints the boss never gave.
+        assert "记忆稀疏的 CLI" in text
+        assert "别脑补老板没说过的约束" in text
         # boss 2026-06-12: start-status before working (⑤ — kanban truth
         # and anchor coverage both depend on it)
         assert "领活开工先置状态" in text
@@ -138,6 +143,18 @@ def test_team_principles_baked_into_both_templates():
         assert "--to user" in text                # how to address the boss
         assert "收件人在前" in text                # send arg-order trap
         assert "claudeteam read <local_id>" in text
+
+
+def test_manager_body_carries_delegation_backlink_and_credit_principles():
+    """原则簇 §2/§3 (2026-06-14, manager-only): substantive delegation
+    carries a task back-link (tier B), and multi-person deliveries credit
+    every contributor (tier B). These live in _MANAGER_BODY, so a worker
+    render must NOT carry them."""
+    mtext = identity.render("manager", role="主管", cli="claude-code", model="m")
+    assert "委派实质活必挂 task 回链" in mtext        # §2 delegation back-link
+    assert "多人协作交付要列全贡献者" in mtext        # §3 contributor credit
+    wtext = identity.render("w", role="员工", cli="claude-code", model="m")
+    assert "委派实质活必挂 task 回链" not in wtext     # manager-only, not for workers
 
 
 def test_team_principles_survive_in_native_memory_projection():
