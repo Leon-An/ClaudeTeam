@@ -534,3 +534,30 @@ def test_say_no_override_falls_through_to_global():
         assert rc == 0
         assert len(send["calls"]) == 0
         assert "silenced" in out
+
+
+def test_color_for_distinct_per_nonmanager_agent_manager_blue():
+    """boss 2026-06-15: every agent's card is a DISTINCT color block.
+    manager = blue (fixed); non-manager agents — INCLUDING non-worker_*
+    names (dev/devops/expert/…) which previously all fell to the blue
+    fallback — cycle a blue-excluded palette so none collide."""
+    from claudeteam.commands import say
+    team = {"agents": {
+        "manager": {"role": "主管"},
+        "dev": {"role": "x"}, "devops": {"role": "x"}, "expert": {"role": "x"},
+        "qa": {"role": "x"}, "researcher": {"role": "x"}, "tester": {"role": "x"},
+    }}
+    with isolated_env(team=team):
+        assert say._color_for("manager") == "blue"
+        others = ["dev", "devops", "expert", "qa", "researcher", "tester"]
+        colors = [say._color_for(a) for a in others]
+        assert all(c != "blue" for c in colors)              # manager owns blue
+        assert len(set(colors)) == len(colors), \
+            f"non-manager colors collided: {dict(zip(others, colors))}"
+
+
+def test_color_for_explicit_cfg_color_wins_over_palette():
+    from claudeteam.commands import say
+    with isolated_env(team={"agents": {"manager": {}, "dev": {}}}):
+        assert say._color_for("dev", "red") == "red"          # explicit wins
+        assert say._color_for("dev") == say._AGENT_PALETTE[0]  # no cfg → palette
