@@ -112,6 +112,36 @@ def _fmt_task(t: dict) -> list[str]:
     return [head] + body
 
 
+def _auto_memory(agent: str, kind: str, content: str, *, ref: str = "") -> None:
+    """Auto-record a task-lifecycle event into the assignee's durable memory.
+
+    The highest-value memories (assigned / done / blocked) were the ones most
+    often MISSING, because memory.append's only writer is the manual
+    `claudeteam remember` — nothing wrote on task transitions, so capture was
+    left to the agent remembering to run the command (memory's core
+    unreliability, boss 2026-06-15). This records them by CODE instead.
+
+    Memory stays a best-effort *notepad* — the authoritative record is the
+    task/intent store, not this. To avoid flooding (memory caps at ~200), we
+    write ONE brief line per REAL state change only; content is title-capped.
+    Best-effort: a memory write must never fail the task command."""
+    if not agent:
+        return
+    try:
+        from claudeteam.store import memory
+        memory.append(agent, kind, content, ref=ref)
+    except Exception:
+        pass
+
+
+def _mem_title(t: dict | None) -> str:
+    """Short task label for a memory line (id + capped title)."""
+    if not t:
+        return ""
+    title = (t.get("title") or "")[:50]
+    return f"{t.get('id', '')} {title}".strip()
+
+
 def _cmd_create(rest: list[str]) -> int:
     by = pop_flag(rest, "--by") or ""
     desc = pop_flag(rest, "--desc") or ""
@@ -126,6 +156,8 @@ def _cmd_create(rest: list[str]) -> int:
     except ValueError as e:
         return error_exit(f"❌ {e}")
     _refresh_anchor(assignee)
+    intent_note = f" (intent {intent_id})" if intent_id else ""
+    _auto_memory(assignee, "task_assigned", f"{tid} {title[:50]}{intent_note}", ref=tid)
     print(f"✅ created {tid}: {title} → {assignee}")
     return 0
 
@@ -151,6 +183,12 @@ def _cmd_update(rest: list[str]) -> int:
     # moves it between two agents, so refresh both old and new owner.
     _refresh_anchor(before["assignee"] if before else "",
                     after["assignee"] if after else "")
+    # Auto-memory only on a REAL transition INTO 已完成 (covers `task done`);
+    # idempotent re-asserts (already 已完成) don't re-record.
+    if (after and after.get("status") == "已完成"
+            and (not before or before.get("status") != "已完成")):
+        _auto_memory(after.get("assignee", ""), "task_completed",
+                     f"{_mem_title(after)} 已完成", ref=tid)
     print(f"✅ updated {tid}")
     return 0
 
@@ -202,6 +240,9 @@ def _cmd_pause(rest: list[str]) -> int:
     local_facts.append_message(awaiting, by or t["assignee"],
                                note or f"{tid} 需审批", priority="高", task_id=tid)
     _refresh_anchor(t["assignee"])
+    _auto_memory(t.get("assignee", ""), "blocker",
+                 f"{_mem_title(t)} 需审批(await {awaiting})"
+                 + (f": {note}" if note else ""), ref=tid)
     print(f"⏸️  {tid} 需审批 — awaiting {awaiting}")
     return 0
 
@@ -226,6 +267,10 @@ def _cmd_approve(rest: list[str]) -> int:
                                f"{tid} 已批准{'并完成' if done else '·继续'}{suffix}",
                                task_id=tid)
     _refresh_anchor(t["assignee"])
+    # approve --done is a completion path → record it like `task done`.
+    if done and t.get("status") == "已完成":
+        _auto_memory(t.get("assignee", ""), "task_completed",
+                     f"{_mem_title(t)} 已批准完成", ref=tid)
     print(f"✅ approved {tid} → {t['status']}")
     return 0
 

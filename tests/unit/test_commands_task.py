@@ -527,3 +527,67 @@ def test_task_void_writes_audit_log():
         run_cli(["task", "void", "T-1", "--note", "作废"])
         kinds = [(l["type"], l["ref"]) for l in local_facts.list_logs("w")]
         assert ("task_transition", "T-1") in kinds
+
+
+# ── auto-memory on task lifecycle (boss 2026-06-15) ────────────────
+
+
+def test_create_auto_records_task_assigned_to_assignee():
+    from claudeteam.store import memory
+    with isolated_env():
+        run_cli(["task", "intent", "create", "老板原话"])          # I-1
+        run_cli(["task", "create", "worker_cc", "做 X", "--by", "manager", "--intent", "I-1"])
+        rows = memory.list_recent("worker_cc")
+    assert len(rows) == 1
+    assert rows[0]["kind"] == "task_assigned"
+    assert "T-1" in rows[0]["content"] and "做 X" in rows[0]["content"]
+    assert rows[0]["ref"] == "T-1"
+
+
+def test_done_auto_records_task_completed_once():
+    from claudeteam.store import memory
+    with isolated_env():
+        run_cli(["task", "create", "worker_cc", "活"])
+        run_cli(["task", "done", "T-1"])
+        run_cli(["task", "done", "T-1"])      # idempotent re-assert
+        rows = memory.list_recent("worker_cc")
+    completed = [r for r in rows if r["kind"] == "task_completed"]
+    assert len(completed) == 1               # NOT double-recorded
+    assert "已完成" in completed[0]["content"] and completed[0]["ref"] == "T-1"
+
+
+def test_pause_auto_records_blocker():
+    from claudeteam.store import memory
+    with isolated_env():
+        run_cli(["task", "create", "worker_cc", "活"])
+        run_cli(["task", "update", "T-1", "--status", "进行中"])
+        run_cli(["task", "pause", "T-1", "--note", "等老板拍板", "--to", "user"])
+        rows = memory.list_recent("worker_cc")
+    blockers = [r for r in rows if r["kind"] == "blocker"]
+    assert len(blockers) == 1
+    assert "需审批" in blockers[0]["content"] and "等老板拍板" in blockers[0]["content"]
+
+
+def test_approve_done_auto_records_task_completed():
+    from claudeteam.store import memory
+    with isolated_env():
+        run_cli(["task", "create", "worker_cc", "活"])
+        run_cli(["task", "update", "T-1", "--status", "进行中"])
+        run_cli(["task", "pause", "T-1", "--note", "q"])
+        run_cli(["task", "approve", "T-1", "--done", "--note", "ok"])
+        rows = memory.list_recent("worker_cc")
+    assert any(r["kind"] == "task_completed" and r["ref"] == "T-1" for r in rows)
+
+
+def test_auto_memory_is_best_effort_never_fails_command():
+    """A memory write blowing up must not fail the task command — _auto_memory
+    swallows. Force memory.append to raise and verify create still rc==0."""
+    from claudeteam.store import memory as memory_mod
+
+    def boom(*a, **k):
+        raise RuntimeError("disk full")
+    with isolated_env():
+        with attr_patch(memory_mod, append=boom):
+            rc, out, _ = run_cli(["task", "create", "worker_cc", "活"])
+        assert rc == 0 and "created T-1" in out
+        assert tasks.get("T-1") is not None        # task itself persisted
