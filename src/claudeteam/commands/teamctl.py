@@ -18,24 +18,54 @@ from __future__ import annotations
 
 from claudeteam.commands import down as _down, up as _up
 from claudeteam.feishu import cards
-from claudeteam.runtime import config, teamctl
-from claudeteam.util import maybe_print_help
+from claudeteam.runtime import config, teamctl, tmux
+from claudeteam.util import maybe_print_help, warn
+
+
+def _shutdown_agents() -> int:
+    """Tear down ONLY the agent tmux session (panes), deliberately leaving
+    the router + its feishu `+subscribe` chain + the watchdog ALIVE.
+
+    This is what makes /shutdown recoverable from chat. A full `down` also
+    kills the router (and the lark-cli subscription it owns), so afterwards
+    nothing is listening and `/restart` can never be received — recovery then
+    needs operator shell access (boss 2026-06-15). Killing only the tmux
+    session drops every agent pane (the actual "team offline" the operator
+    wants) while the router stays subscribed and can act on a later `/restart`
+    to re-wake the team. The watchdog is left up too, so if the router dies
+    while the team is dormant it gets respawned and `/restart` still works.
+
+    Best-effort like `down`: a not-running session is success (0); only a
+    kill that actually fails sets rc=1."""
+    session = config.session_name()
+    if not tmux.has_session(session):
+        print(f"⏭  tmux session {session} not running")
+        return 0
+    if tmux.kill_session(session):
+        print(f"🛑 tmux session {session} killed "
+              "(router / feishu subscription / watchdog kept alive)")
+        return 0
+    warn(f"⚠️  failed to kill tmux session {session}")
+    return 1
 
 
 def shutdown_main(argv: list[str]) -> int:
     if maybe_print_help(argv, "usage: claudeteam team-shutdown"):
         return 0
-    rc = _down.main([])
+    # NOT `down` — keep router + subscription + watchdog alive so a later
+    # `/restart` can be received and re-wake the team without shell access.
+    rc = _shutdown_agents()
     if rc == 0:
         teamctl.notify(cards.simple_card(
             "团队控制 · /shutdown",
-            f"🛑 团队已下线（session `{config.session_name()}`）。"
-            "需 `/restart` 或运维 `up` 才能恢复。",
+            f"🛑 团队已下线（session `{config.session_name()}` 的 agent pane 全部关闭）。\n"
+            "router + 飞书订阅 + watchdog 仍在线监听——直接 `/restart` 即可重新唤醒，"
+            "无需运维登服务器。",
             color="green"))
     else:
         teamctl.notify(cards.simple_card(
             "团队控制 · /shutdown",
-            "⚠️ 团队下线过程有告警（有东西没干净退出），请查看容器日志。",
+            "⚠️ 下线 agent 会话过程有告警（tmux 没干净退出），请查看容器日志。",
             color="red"))
     return rc
 

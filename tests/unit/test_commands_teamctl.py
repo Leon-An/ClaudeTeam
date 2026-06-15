@@ -26,19 +26,47 @@ def _card_text(card) -> str:
 # ── team-shutdown ──────────────────────────────────────────────────
 
 
-def test_shutdown_runs_down_and_posts_success_card():
+def _fake_tmux(*, has=True, kill=True):
+    """Stand-in for runtime.tmux: control whether the session exists and
+    whether kill_session succeeds."""
+    return type("T", (), {
+        "has_session": staticmethod(lambda s: has),
+        "kill_session": staticmethod(lambda s: kill),
+    })
+
+
+def test_shutdown_kills_panes_keeps_daemons_and_posts_success_card():
+    """/shutdown must drop the agent panes (tmux) but leave router +
+    subscription + watchdog alive — i.e. it must NOT run `down`."""
     cards, cap = _capture_notify()
-    with isolated_env(), attr_patch(tc, _down=_stub_main(0)), \
+    down_called = {"hit": False}
+    down = type("D", (), {"main": staticmethod(
+        lambda a: down_called.__setitem__("hit", True) or 0)})
+    with isolated_env(), \
+            attr_patch(tc, tmux=_fake_tmux(has=True, kill=True), _down=down), \
             attr_patch(rtc, notify=cap):
         rc = tc.shutdown_main([])
     assert rc == 0
+    assert down_called["hit"] is False        # router/subscription/watchdog untouched
     assert len(cards) == 1
+    txt = _card_text(cards[0])
+    assert "已下线" in txt
+    assert "订阅" in txt and "/restart" in txt  # advertises router/subscription kept
+
+
+def test_shutdown_no_session_is_success():
+    """No tmux session running → nothing to kill, still a clean shutdown."""
+    cards, cap = _capture_notify()
+    with isolated_env(), attr_patch(tc, tmux=_fake_tmux(has=False)), \
+            attr_patch(rtc, notify=cap):
+        rc = tc.shutdown_main([])
+    assert rc == 0
     assert "已下线" in _card_text(cards[0])
 
 
-def test_shutdown_warns_on_down_failure():
+def test_shutdown_warns_when_tmux_kill_fails():
     cards, cap = _capture_notify()
-    with isolated_env(), attr_patch(tc, _down=_stub_main(1)), \
+    with isolated_env(), attr_patch(tc, tmux=_fake_tmux(has=True, kill=False)), \
             attr_patch(rtc, notify=cap):
         rc = tc.shutdown_main([])
     assert rc == 1

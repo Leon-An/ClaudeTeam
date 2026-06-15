@@ -163,7 +163,7 @@ _HELP_TEXT = """🆘 ClaudeTeam 自定义斜杠命令（零 LLM，router/hook �
 /clear <agent>           → 送 /clear + 重新入职 init_msg（相当于 rehire）
 /task [all]              → 任务看板：按状态分组（只读）；已完成/已取消
                            默认折叠为计数，加 all 展开明细
-/shutdown [确认]         → 下线整队（≈down）；先回卡确认，/shutdown 确认 才真拆
+/shutdown [确认]         → 下线 agent panes（保留 router/订阅/watchdog，便于 /restart 唤醒）；先回卡确认
 /restart                 → 重启整队（≈down→up）；清残留后拉起，直接执行
 /login <cli> [agent]     → 触发某 CLI 重新认证，群里弹验证链接/设备码
                            （需 controls.allow_* 开关；默认关闭=安全）"""
@@ -783,11 +783,11 @@ _SHUTDOWN_CONFIRM = {"确认", "confirm", "yes", "y"}
 
 
 def _handle_shutdown(args: str, ctx: SlashContext) -> dict:
-    """`/shutdown` — tear the team down (≈ `claudeteam down`). Two-step:
-    a bare `/shutdown` shows what will be torn down; `/shutdown 确认`
-    actually does it via a DETACHED runner (so killing the router that's
-    handling this slash can't abort the teardown), which posts a
-    '已下线' card when finished."""
+    """`/shutdown` — take the team offline by killing the agent tmux panes,
+    but KEEP the router + its feishu subscription + the watchdog alive so a
+    later `/restart` can be received and re-wake the team (no shell access
+    needed). Two-step: a bare `/shutdown` previews; `/shutdown 确认` does it
+    via a DETACHED runner that posts a '已下线' card when finished."""
     if (gate := _lifecycle_gate()) is not None:
         return gate
     from claudeteam.runtime import teamctl
@@ -796,15 +796,16 @@ def _handle_shutdown(args: str, ctx: SlashContext) -> dict:
         return simple_card(
             "⚠️ 确认下线团队？",
             f"`/shutdown` 将下线本团队（session `{ctx.session}`）：\n"
-            f"• 停止 router / watchdog 守护进程\n"
-            f"• 杀掉 tmux 会话与全部 {len(names)} 个 agent pane\n\n"
-            f"团队会保持下线，需 `/restart` 或运维 `up` 才能恢复。\n"
+            f"• 杀掉 tmux 会话与全部 {len(names)} 个 agent pane\n"
+            f"• **保留 router + 飞书订阅 + watchdog 在线**（这样 `/restart` 仍能被收到）\n\n"
+            f"下线后直接 `/restart` 即可重新唤醒团队，无需运维登服务器。\n"
             f"**确认请回复 `/shutdown 确认`。**",
             color="yellow")
     teamctl.spawn_detached(["team-shutdown"])
     return simple_card(
         "🛑 团队下线中…",
-        f"已触发 down（detached, session `{ctx.session}`）。完成后补一张『已下线』卡。",
+        f"已触发 agent 下线（detached, session `{ctx.session}`）；router/订阅保留在线。"
+        "完成后补一张『已下线』卡。",
         color="yellow")
 
 
