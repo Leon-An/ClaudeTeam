@@ -26,6 +26,9 @@ _ALL_READY_MARKERS = (
     "OpenAI Codex\npermissions: YOLO\n"                # codex-cli
     "Welcome to Kimi Code CLI\nSend /help for help\n"  # kimi-code
     ">\nType your request\n"                            # gemini-cli / qwen-code
+    "⣾\n"  # a spinner (in every adapter's busy_markers) so provision's
+           # inject_and_confirm sees the agent go busy and returns at once
+           # (no settle sleep / re-nudge) — F-respawn-not-autosubmit
 )
 
 

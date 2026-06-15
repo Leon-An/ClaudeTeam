@@ -445,8 +445,11 @@ def provision_pane(agent: str, target: tmux.Target) -> str:
     from claudeteam.runtime import tunables
     ready_timeout = float(tunables.tunable("wake.ready_marker_timeout_s", 60.0))
     if wake.wait_until_ready(target, adapter, timeout_s=ready_timeout):
-        tmux.inject(target, identity.init_prompt(agent),
-                    submit_keys=adapter.submit_keys())
+        # inject_and_confirm, not a bare inject: a freshly-ready pane can
+        # drop the submit key on the fixed-settle paste, leaving the identity
+        # prompt sitting unsubmitted until a human Enter (F-respawn-not-
+        # autosubmit). It re-nudges submit until the agent goes busy.
+        wake.inject_and_confirm(target, adapter, identity.init_prompt(agent))
         outcome = READY
     else:
         outcome = READY_NO_INIT

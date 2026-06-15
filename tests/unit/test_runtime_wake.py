@@ -12,6 +12,9 @@ class _ClaudeFake:
     def busy_markers(self):
         return ["esc to interrupt", "⣾"]
 
+    def submit_keys(self):
+        return ["Enter", "C-m", "C-j"]
+
 
 def _capturer(text_per_call: list[str]):
     """Return a capture_pane fake that yields one text per call."""
@@ -53,6 +56,63 @@ def test_is_busy_false_at_quiet_ready_prompt():
     target = tmux.Target("S", "worker")
     capture = _capturer(["bypass permissions on\n>"])
     assert wake.is_busy(target, _ClaudeFake(), capture=capture) is False
+
+
+# ── inject_and_confirm (F-respawn-not-autosubmit) ────────────────
+
+
+def test_inject_and_confirm_returns_at_once_when_busy_no_renudge():
+    """If the inject already submitted (agent busy on first check), return
+    immediately — no settle sleep, no stray re-nudge keypress."""
+    target = tmux.Target("S", "w")
+    injects = []
+    sends = []
+    sleeps = []
+    ok = wake.inject_and_confirm(
+        target, _ClaudeFake(), "hello",
+        inject=lambda t, text, *, submit_keys=None: injects.append(text) or True,
+        send_keys=lambda t, *k: sends.append(k),
+        capture=_capturer(["thinking…\nesc to interrupt\n"]),  # busy at once
+        sleep=lambda s: sleeps.append(s),
+    )
+    assert ok is True
+    assert injects == ["hello"]   # injected once
+    assert sends == []            # never re-nudged
+    assert sleeps == []           # never slept
+
+
+def test_inject_and_confirm_renudges_then_succeeds():
+    """Submit dropped on the first inject (pane idle) → re-send the primary
+    submit key, then the agent goes busy = submitted."""
+    sends = []
+    sleeps = []
+    ok = wake.inject_and_confirm(
+        tmux.Target("S", "w"), _ClaudeFake(), "hi",
+        inject=lambda t, text, *, submit_keys=None: True,
+        send_keys=lambda t, *k: sends.append(k),
+        # 1st check: idle (unsubmitted); after nudge: busy
+        capture=_capturer(["bypass permissions on\n>", "esc to interrupt\n"]),
+        sleep=lambda s: sleeps.append(s),
+    )
+    assert ok is True
+    assert sends == [("Enter",)]   # nudged once with submit_keys[0]
+    assert len(sleeps) == 1
+
+
+def test_inject_and_confirm_gives_up_after_attempts():
+    """Never goes busy → re-nudge `attempts` times then return False (text
+    was still injected, so no worse than the old fixed-settle behavior)."""
+    sends = []
+    ok = wake.inject_and_confirm(
+        tmux.Target("S", "w"), _ClaudeFake(), "hi",
+        attempts=2,
+        inject=lambda t, text, *, submit_keys=None: True,
+        send_keys=lambda t, *k: sends.append(k),
+        capture=_capturer(["$ ", "$ ", "$ ", "$ "]),  # always idle
+        sleep=lambda s: None,
+    )
+    assert ok is False
+    assert len(sends) == 2   # nudged exactly `attempts` times
 
 
 # ── wake_if_dormant ──────────────────────────────────────────────

@@ -110,6 +110,52 @@ def wait_until_ready(target: tmux.Target, adapter: CliAdapter, *,
     )
 
 
+def inject_and_confirm(target: tmux.Target, adapter: CliAdapter, text: str, *,
+                       attempts: int = 3, settle_s: float = 1.0,
+                       inject: Callable | None = None,
+                       capture: Callable | None = None,
+                       send_keys: Callable | None = None,
+                       sleep: Callable | None = None) -> bool:
+    """Inject `text` into the pane and CONFIRM it actually submitted,
+    re-nudging the submit key if it didn't (F-respawn-not-autosubmit).
+
+    The respawn race: `tmux.inject` sends the submit key on a fixed ~200ms
+    settle after the paste, but a *freshly* spawned/ready pane may not have
+    ingested a large multi-line prompt yet, so the Enter / M-Enter is
+    dropped and the text sits in the input box unsubmitted until a human
+    presses Enter. This automates that nudge.
+
+    After the initial inject, poll for the agent going BUSY
+    (adapter.busy_markers = it accepted the input and started the turn).
+    If it's still idle after `settle_s`, re-send the primary submit key
+    (the text is already in the buffer — just push submit again) and poll
+    again, up to `attempts` times. Returns True once busy is observed, else
+    False — in which case the text was still injected, so the worst case is
+    no worse than the old fixed-settle behavior.
+
+    Used by the post-spawn identity-init inject in provision_pane and
+    wake_if_dormant; collaborators are injectable for tests.
+    """
+    inject = inject or tmux.inject
+    capture = capture or tmux.capture_pane
+    send_keys = send_keys or tmux.send_keys
+    sleep = sleep or time.sleep
+    submit_keys = adapter.submit_keys() or ["Enter"]
+
+    inject(target, text, submit_keys=submit_keys)
+    # Check-then-nudge: if the inject already submitted (agent busy), return
+    # immediately — no sleep, no stray keypress. Otherwise settle and re-send
+    # the primary submit key, up to `attempts` times.
+    for _ in range(max(1, attempts)):
+        if is_busy(target, adapter, capture=capture):
+            return True
+        sleep(settle_s)
+        # Buffer already holds the text; just push submit again (a stray
+        # submit on an already-empty prompt is a harmless blank line).
+        send_keys(target, submit_keys[0])
+    return is_busy(target, adapter, capture=capture)
+
+
 def _default_is_retired(target: tmux.Target) -> bool:
     """Module-default retirement check: consult the agent's status row.
     The agent name is the tmux window name. Imported lazily so wake.py
@@ -175,9 +221,12 @@ def wake_if_dormant(target: tmux.Target, adapter: CliAdapter, *,
         return False
 
     # CLI just came up. Feed it the identity init prompt before whatever
-    # real message follows, so the agent starts knowing who it is.
+    # real message follows, so the agent starts knowing who it is. Use
+    # inject_and_confirm so a freshly-ready pane that drops the submit key
+    # (F-respawn-not-autosubmit) gets re-nudged instead of sitting unsubmitted.
     if init_msg:
-        inject(target, init_msg, submit_keys=adapter.submit_keys())
+        inject_and_confirm(target, adapter, init_msg,
+                           inject=inject, capture=capture, sleep=sleep)
         sleep(poll_interval_s)
     if on_woken is not None:
         on_woken()
