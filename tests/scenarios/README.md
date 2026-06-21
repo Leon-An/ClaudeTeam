@@ -16,8 +16,8 @@
 1. 团队上线（`claudeteam up` + `health`）
 2. 用户 OAuth（设备授权流程，一次性）
 3. 9 条斜杠命令矩阵（含状态变更类）
-4. 普通文本路由（验证 R174「manager 是唯一接口」）
-5. Worker → manager 反向路由（R174 例外分支）
+4. 普通文本路由（验证「manager 是唯一接口」契约）
+5. Worker → manager 反向路由（例外分支）
 6. 路由器重启不丢消息（catchup）
 7. 懒启动 worker（lazy 标记 + 首消息触发起 CLI）
 8. 多部署冲突（同一 App 抢订阅锁的失败语义）
@@ -30,7 +30,7 @@
 | 文件 | 范围 | 何时跑 |
 |---|---|---|
 | [slash_matrix.md](slash_matrix.md) | 9 条斜杠 + 路由分类的详细 pass/fail 标准、color 期望、错误诊断 | host_smoke 某条出错时翻这一篇 |
-| [round_c_real_task.md](round_c_real_task.md) | 老板 → manager → workers → 汇总，30-60 分钟真任务派活 | 重大改动后或想压测协作时 |
+| [real_task_e2e.md](real_task_e2e.md) | 端到端真任务：老板 → manager → workers → 汇总，30-60 分钟真任务派活 | 重大改动后或想压测协作时 |
 | [reidentify.md](reidentify.md) | `claudeteam reidentify` 重新注入身份的几种触发情境 | post-compact 或 worker 记忆乱了 |
 | [compaction_survival.md](compaction_survival.md) | tasks 原话意图 `/compact` 后逐字幸存：真 agent + 真 /compact，三路 byte-exact 判据 + 反向对照 | 改 tasks 锚点/刷新接线后，或要对外展示抗压缩可验证性 |
 

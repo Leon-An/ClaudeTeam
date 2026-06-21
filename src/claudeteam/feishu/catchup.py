@@ -52,9 +52,9 @@ def write_cursor(message_id: str, create_time: str) -> None:
     Also stores `create_time_ms`, the epoch-ms reading of `create_time`
     taken NOW — i.e. while this process still shares env (TZ) with the
     lark-cli child that rendered the string. lark-cli renders
-    "YYYY-MM-DD HH:MM" in process-local time (verified 2026-06-11: the
-    same message lists as 03:55 under TZ=Asia/Shanghai and 19:55 under
-    TZ=UTC), so the string alone is ambiguous: parsing it at *catchup*
+    "YYYY-MM-DD HH:MM" in process-local time (the same message lists as
+    03:55 under TZ=Asia/Shanghai and 19:55 under TZ=UTC), so the string
+    alone is ambiguous: parsing it at *catchup*
     time under a different TZ (container UTC vs host +8, operator env
     change across a restart) shifts the cutoff by hours — silently
     dropping the whole gap or replaying hours of history. Epoch ms is
@@ -93,8 +93,7 @@ def _msg_to_event_line(fei_msg: dict) -> str:
     Carries sender.id_type into the event so subscribe._normalise can
     surface sender_type to classify_event — without it bot-self
     detection misses bot-sent cards on the catchup path and forwards
-    manager's own ack cards back into manager's inbox every restart
-    (host_smoke 2026-05-06: 7 loops in one session)."""
+    manager's own ack cards back into manager's inbox every restart."""
     sender = fei_msg.get("sender") or {}
     payload = {
         "event": {
@@ -197,7 +196,7 @@ def _newer_than(messages: Iterable[dict], cursor_create_time: str, *,
     # REST list_recent returns NEWEST-first, but create_time is minute
     # precision — so same-minute messages tie on the sort key, and a stable
     # sort would preserve REST's newest-first order = reversed WITHIN the
-    # minute (F-catchup-order: messages 1-9 replayed 4→3→2→1→9→8…). Reverse
+    # minute (messages 1-9 would replay 4→3→2→1→9→8…). Reverse
     # to oldest-first BEFORE the stable minute-sort so tied (same-minute)
     # rows replay oldest-first; cross-minute order still comes from the epoch
     # key. Minute precision means we can't truly order within a minute —
@@ -223,8 +222,8 @@ def pending_lines(chat_id: str, *,
     `meta` (optional out-dict) is populated with `dropped_stale` = how many
     over-cap stale messages were skipped, so the caller (router) can tell
     the routing-target agent it didn't get the whole backlog — otherwise a
-    silent cap makes the agent over-claim it received everything
-    (F-catchup-visibility). Absent when nothing was dropped.
+    silent cap makes the agent over-claim it received everything. Absent
+    when nothing was dropped.
     """
     cursor = read_cursor()
     cursor_ct = str(cursor.get("create_time") or "")
@@ -268,7 +267,7 @@ def pending_lines(chat_id: str, *,
         # Seed the cursor FORWARD to the newest kept row BEFORE replay, so
         # if the router dies mid-bring-up its respawn starts catchup from
         # here instead of re-fetching the same oversized backlog and
-        # re-choking (F-G2-restore crash-loop). Loud, never a silent cut.
+        # re-choking (a crash-loop). Loud, never a silent cut.
         newest = fresh[-1]
         write_cursor(newest.get("message_id", ""),
                      str(newest.get("create_time", "")))

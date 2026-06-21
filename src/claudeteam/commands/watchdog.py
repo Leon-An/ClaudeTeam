@@ -57,7 +57,7 @@ _CRED_PATH = Path.home() / ".claude" / ".credentials.json"
 # path the host-keychain bind-mount lands on — and to ~/.claude/... on host.
 # Hardcoding /root broke host non-root deploys: Path("/root/...").exists()
 # raised PermissionError (Linux /root is 700) instead of returning False
-# under Python 3.10–3.12, killing `claudeteam up`. Caught 2026-05-08.
+# under Python 3.10–3.12, killing `claudeteam up`.
 
 
 def _make_alert_fn():

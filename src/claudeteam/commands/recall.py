@@ -16,7 +16,7 @@ Use cases:
     a hint with the closest known kind.
 
 Default output is human-readable bullets; `--json` dumps the underlying
-records for piping to jq / smoke conductors.
+records for piping to jq / CI scripts.
 """
 from __future__ import annotations
 

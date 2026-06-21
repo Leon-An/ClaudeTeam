@@ -35,8 +35,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 # `procps` ships `ps` / `uptime` / `free`. Without it the slim image
 # has none of those binaries and `_agent_usage` (ps walk for per-agent
-# CPU+RSS) returns zero for every agent — boss saw "manager 0.0% / 0 B"
-# in /health card 2026-05-04 even though the panes were running.
+# CPU+RSS) returns zero for every agent — the /health card then reports
+# "0.0% / 0 B" for panes that are actually running.
 # /proc-direct fallbacks added for `_host_cpu` / `_host_mem`, but `ps`
 # is the cleanest path for per-pid CPU% (kernel-computed, no two-
 # snapshot delta required).

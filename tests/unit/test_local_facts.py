@@ -127,7 +127,7 @@ def test_touch_heartbeat_skips_blank_agent():
 
 
 def test_touch_heartbeat_skips_flag_shaped_agent():
-    """F-cli-help-phantom net: a '-'-prefixed name (misparsed option like
+    """Safety net: a '-'-prefixed name (misparsed option like
     '--help') must never register as a phantom heartbeat, no matter which
     command forgot its own help guard."""
     with isolated_env():

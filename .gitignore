@@ -19,8 +19,8 @@ dist/
 /state/
 # scripts/feishu_bot_creator/ is checked in (Playwright bot creator);
 # its own .gitignore handles node_modules + cookies. Allow this dir.
-# Watch git status when adding under scripts/ so legacy state files
-# from old main checkouts don't sneak in (caught round-79).
+# Watch git status when adding under scripts/ so stray local state
+# files don't sneak in.
 .claude/scheduled_tasks.lock
 # `claudeteam install-hooks` output — regenerated per deploy
 /.claude/commands/

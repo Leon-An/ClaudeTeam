@@ -143,13 +143,12 @@ def test_health_info_when_cursor_empty():
         assert "first inbound event" in out
 
 
-# ── memory section (round-132) ──────────────────────────────────
+# ── memory section ──────────────────────────────────────────────
 
 
 def test_health_memory_section_info_when_no_entries():
-    """Round-132: the memory section is informational. No agent has
-    written entries yet → an `ℹ️` line saying so. Section header
-    visible regardless."""
+    """The memory section is informational. No agent has written entries
+    yet → an `ℹ️` line saying so. Section header visible regardless."""
     team = {"session": "S", "agents": {"manager": {}}}
     with isolated_env(team=team, runtime_config={"chat_id": "oc_x"}), \
             _stub_tmux(session_alive=True, panes_with_cli=["manager"]):
@@ -267,7 +266,7 @@ def test_health_help():
 
 
 def test_health_json_emits_machine_readable_object():
-    """--json dumps {ok, bad, warn, lines} so smoke conductors can
+    """--json dumps {ok, bad, warn, lines} so CI scripts can
     branch on `ok` without grepping the formatted output."""
     import json as _json
     team = {"session": "S", "agents": {"manager": {"cli": "claude-code"}}}

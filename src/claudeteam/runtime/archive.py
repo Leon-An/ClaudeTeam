@@ -20,7 +20,7 @@ alongside two records written into the archive dir:
 
 Deliberately does NOT touch `<state_dir>/agent-home/<name>/` (the CLI's
 HOME — creds / cache): leaving it makes a rehire fast and matches the old
-behavior (boss decision, Plan A ⑦).
+behavior.
 """
 from __future__ import annotations
 

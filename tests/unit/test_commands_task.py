@@ -239,7 +239,7 @@ def test_task_approve_done():
 
 
 def test_task_approve_note_reaches_receipt_and_audit():
-    """A1: the verdict must ride the gated channel — assignee receipt and
+    """The verdict must ride the gated channel — assignee receipt and
     audit row both carry `--note`, and the task's approval_note holds it
     for the anchor to surface."""
     with isolated_env():
@@ -529,7 +529,7 @@ def test_task_void_writes_audit_log():
         assert ("task_transition", "T-1") in kinds
 
 
-# ── auto-memory on task lifecycle (boss 2026-06-15) ────────────────
+# ── auto-memory on task lifecycle ──────────────────────────────────
 
 
 def test_create_auto_records_task_assigned_to_assignee():

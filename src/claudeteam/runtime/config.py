@@ -161,7 +161,7 @@ def _toml_escape_str(s: str) -> str:
     escapes control chars — a multi-line value (embedded `\\n`) must NOT be
     emitted with a raw newline, which makes the whole file unparseable and
     silently drops the agent to config defaults on the next read (the
-    fire→hire roster-corruption bug devops caught for a kimi worker)."""
+    fire→hire roster-corruption bug seen with a kimi worker)."""
     s = s.replace("\\", "\\\\").replace('"', '\\"')
     s = s.replace("\n", "\\n").replace("\t", "\\t").replace("\r", "\\r")
     return "".join(c if ord(c) >= 0x20 else f"\\u{ord(c):04x}" for c in s)

@@ -24,8 +24,8 @@ def _rehire_from_archive(agent: str) -> tuple[dict | None, str]:
     restore (caller then reports 'unknown agent').
 
     Prefers the VERBATIM `_roster.toml` block (byte-faithful restore — keeps
-    alignment / in-block comments / multi-line values, immune to the
-    dict-reserialization corruption devops caught). Falls back to the
+    alignment / in-block comments / multi-line values, immune to
+    dict-reserialization corruption). Falls back to the
     `_roster.json` dict when there's no block stash (legacy archive, or a
     non-toml deployment)."""
     arc = archive.find_archived(agent)

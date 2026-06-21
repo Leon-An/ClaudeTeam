@@ -9,7 +9,7 @@ boss 刚改了 `team.json` 里它的 role/model。这个时候不需要重启 pa
 重新注入 pane，让 agent 从 `agents/<name>/identity.md` 重新读取、回 inbox、
 upsert status。
 
-姊妹用例：B.2 的 `/compact <agent>` 飞书斜杠命令在 router 层面调度 45s
+姊妹用例：`/compact <agent>` 飞书斜杠命令在 router 层面调度 45s
 后 inject 同一个 init prompt，自动化版本的 reidentify。
 
 ## 范围
@@ -33,7 +33,7 @@ upsert status。
 
 claudeteam reidentify worker_cc
 
-# 全员一起刷新（R91：替代 `for a in ...; do claudeteam reidentify $a; done`）。
+# 全员一起刷新（替代 `for a in ...; do claudeteam reidentify $a; done`）。
 # 跳过没活 pane 的（lazy / fired），逐 agent 打印一行结果，整体 rc=0
 # 当且仅当所有 agent 都成功；任何一个 skip 或 inject fail 时 rc=1。
 claudeteam reidentify --all

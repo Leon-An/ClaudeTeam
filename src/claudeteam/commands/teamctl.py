@@ -29,7 +29,7 @@ def _shutdown_agents() -> int:
     This is what makes /shutdown recoverable from chat. A full `down` also
     kills the router (and the lark-cli subscription it owns), so afterwards
     nothing is listening and `/restart` can never be received — recovery then
-    needs operator shell access (boss 2026-06-15). Killing only the tmux
+    needs operator shell access. Killing only the tmux
     session drops every agent pane (the actual "team offline" the operator
     wants) while the router stays subscribed and can act on a later `/restart`
     to re-wake the team. The watchdog is left up too, so if the router dies

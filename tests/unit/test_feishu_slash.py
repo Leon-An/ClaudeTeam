@@ -8,19 +8,19 @@ from claudeteam.runtime import teamctl as _teamctl
 
 
 def _elements(reply):
-    """R172: card-shape adapter. Both simple_card and rich_card now
-    return v2 (`body.elements`). Helper kept for legacy tests + future-
-    proofing if we ever flip a builder back to v1."""
+    """Card-shape adapter. Both simple_card and rich_card return v2
+    (`body.elements`). Helper kept for legacy tests + future-proofing if
+    we ever flip a builder back to v1."""
     if "elements" in reply:
         return reply["elements"]
     return reply.get("body", {}).get("elements", [])
 
 
 def _all_markdown(reply) -> str:
-    """Concatenate every `tag: markdown` element's content. R172.b:
-    column_set was dropped, so all card body content lives in plain
-    markdown elements — this helper lets tests assert on text
-    substrings without caring about element ordering or layout."""
+    """Concatenate every `tag: markdown` element's content. column_set
+    was dropped, so all card body content lives in plain markdown
+    elements — this helper lets tests assert on text substrings without
+    caring about element ordering or layout."""
     return "\n".join(e.get("content", "") for e in _elements(reply)
                      if e.get("tag") == "markdown")
 
@@ -65,9 +65,8 @@ def _team_env():
 
 
 def test_help_returns_card_listing_all_commands():
-    """R172.b: /help lists main's exact 9-command surface — `/recall`
-    and `/forget` were dropped per boss feedback (not in main, not
-    requested)."""
+    """/help lists the exact 9-command surface — `/recall` and `/forget`
+    were dropped."""
     reply = slash.dispatch("/help", _ctx())
     assert isinstance(reply, dict), f"/help should return a card dict, got {type(reply)}"
     assert reply["header"]["title"]["content"] == "🆘 ClaudeTeam 自定义斜杠命令"
@@ -85,7 +84,7 @@ def test_help_returns_card_listing_all_commands():
 
 def test_team_classifies_each_pane_state_with_emoji():
     """REGRESSION: /team groups each agent by pane-state emoji + brief.
-    Round-80: returns a Feishu card; check the body element for the
+    Returns a Feishu card; check the body element for the
     emoji+name+brief lines and the tally summary footer."""
     pane_buffers = {
         "manager": "...\n⏵⏵ bypass permissions on (shift+tab to cycle)\n",
@@ -117,8 +116,8 @@ def test_team_card_reflects_live_toml_after_adding_agent():
     """REGRESSION: previously /team handler used ctx.team_agents +
     ctx.lazy_agents pre-computed at router startup, so editing
     claudeteam.toml to add a new agent did NOT show up until restart.
-    Boss-flagged: a config file is meant to live-edit. Now /team
-    re-reads team config every call."""
+    A config file is meant to live-edit. Now /team re-reads team config
+    every call."""
     from helpers import isolated_env
     pane_buffers = {
         "manager":      "...\n⏵⏵ bypass permissions on\n",
@@ -298,9 +297,9 @@ def test_tmux_recognises_agent_added_to_toml_without_restart():
 
 
 def test_team_card_keeps_green_when_only_unhealthy_is_lazy():
-    """Round-129: an agent configured `lazy: true` showing 🛑 because
-    its CLI hasn't spawned yet is NOT a failure — flag it ⏸ and keep
-    the team header green. R128 smoke surfaced the false-positive."""
+    """An agent configured `lazy: true` showing 🛑 because its CLI hasn't
+    spawned yet is NOT a failure — flag it ⏸ and keep the team header
+    green (guards against that false-positive)."""
     from helpers import isolated_env
     pane_buffers = {
         "manager":     "...\n⏵⏵ bypass permissions on\n",
@@ -315,9 +314,9 @@ def test_team_card_keeps_green_when_only_unhealthy_is_lazy():
         "worker_lazy": {"cli": "kimi-code", "lazy": True},
     }}
     with isolated_env(team=team), tmux_patch(capture_pane=fake_capture):
-        # R158: lazy_agents now flows in via SlashContext (the closure
-        # in commands/router.py pre-computes the set at daemon startup
-        # so /team's hot path doesn't read team.json). Tests pass it
+        # lazy_agents flows in via SlashContext (the closure in
+        # commands/router.py pre-computes the set at daemon startup so
+        # /team's hot path doesn't read team.json). Tests pass it
         # explicitly to mirror that production wiring.
         reply = slash.dispatch("/team",
                                _ctx(agents=("manager", "worker_lazy"),
@@ -356,7 +355,7 @@ def test_team_card_still_yellow_for_truly_dead_pane():
 
 def test_team_card_color_yellow_when_any_agent_unhealthy():
     """Health colour shortcut: green when every agent is in a healthy
-    state (💤/🔄), yellow as soon as one shows ⚠️/🛑/❌. Lets boss
+    state (💤/🔄), yellow as soon as one shows ⚠️/🛑/❌. Lets the boss
     glance the chat without reading the body."""
     # one agent showing 🛑 (CLI not running)
     pane_buffers = {
@@ -367,13 +366,13 @@ def test_team_card_color_yellow_when_any_agent_unhealthy():
     def fake_capture(target, lines=80):
         return pane_buffers.get(target.window, "")
 
-    with tmux_patch(capture_pane=fake_capture):
+    with _team_env(), tmux_patch(capture_pane=fake_capture):
         reply = slash.dispatch("/team",
                                _ctx(agents=("manager", "worker_cc")))
     assert reply["header"]["template"] == "yellow"
 
 
-# ── /health (R166: server-load card with column_set 3 grid) ──────
+# ── /health (server-load card with column_set 3 grid) ────────────
 
 
 def _stub_server_load(monkey_data: dict):
@@ -388,11 +387,11 @@ def _stub_server_load(monkey_data: dict):
 
 
 def test_health_card_renders_host_section_with_cpu_mem_disk():
-    """R166/R172.b: /health card has 🖥️ 主机总览 with CPU + 内存 +
-    磁盘 metrics. Original R166 used `column_set 3`; R172.b dropped
-    column_set (Feishu's renderer collapsed it anyway) so cells now
-    render as paragraph-separated markdown — assertions look for the
-    label/value substrings rather than column structure."""
+    """/health card has 🖥️ 主机总览 with CPU + 内存 + 磁盘 metrics. An
+    earlier version used `column_set 3`; column_set was dropped (Feishu's
+    renderer collapsed it anyway) so cells now render as paragraph-
+    separated markdown — assertions look for the label/value substrings
+    rather than column structure."""
     data = {
         "host": {
             "cpu": {"load": (1.2, 0.8, 0.5), "cores": 8, "pct": 15},
@@ -454,8 +453,8 @@ def test_health_card_falls_back_to_no_data_cells_when_host_empty():
 def test_health_card_emits_grey_footer():
     """Footer line records collection time + data source list — useful
     for debug "is this card stale?" questions. We use a grey-font
-    markdown line as the footer (v1's `note` tag was dropped during
-    R159; we kept the grey-font shape across the R172 v1-revert)."""
+    markdown line as the footer (v1's `note` tag was dropped when the
+    card moved to v2; we kept the grey-font shape across the v1-revert)."""
     data = {"host": {"cpu": None, "mem": None, "disk": None},
             "containers": [], "agents": [], "alarms": []}
     with _stub_server_load(data):
@@ -468,7 +467,7 @@ def test_health_card_emits_grey_footer():
     assert "color='grey'" in last["content"]
 
 
-# ── /usage (R167: rich card with column_set 2 + ccusage summary) ─
+# ── /usage (rich card with column_set 2 + ccusage summary) ───────
 
 
 def _usage_run(json_payload: str):
@@ -478,7 +477,7 @@ def _usage_run(json_payload: str):
 
 
 def test_usage_no_view_shells_claudeteam_usage_json():
-    """R167: handler shells out with `--json` so the card builder gets
+    """Handler shells out with `--json` so the card builder gets
     structured data, not raw text."""
     captured = {}
     fake_run = lambda argv, **kw: (captured.setdefault("argv", list(argv))
@@ -499,8 +498,8 @@ def test_usage_view_threads_through_view_flag():
 
 
 def test_usage_card_emits_purple_header_when_cc_ok():
-    """R173: card branding stays purple when CC usage probe succeeds.
-    Header flips red on any per-CLI failure."""
+    """Card branding stays purple when CC usage probe succeeds. Header
+    flips red on any per-CLI failure."""
     payload = ('{"view":"daily","claude_code":{"ok":true,"metrics":['
                '{"label":"5-hour window","used_pct":40,"remaining_pct":60,'
                '"reset_iso":"2026-05-05T18:00:00Z"}]},'
@@ -513,9 +512,9 @@ def test_usage_card_emits_purple_header_when_cc_ok():
 
 
 def test_usage_card_renders_cc_metrics_with_traffic_light():
-    """R173: real per-window utilization replaces ccusage Total. Each
-    metric gets `**剩余 X%**` with traffic-light color (green > orange
-    > red as remaining drops)."""
+    """Real per-window utilization replaces ccusage Total. Each metric
+    gets `**剩余 X%**` with traffic-light color (green > orange > red as
+    remaining drops)."""
     payload = ('{"view":"daily","claude_code":{"ok":true,"metrics":['
                '{"label":"5-hour window","used_pct":40,"remaining_pct":60,'
                '"reset_iso":"2026-05-05T18:00:00Z"},'
@@ -533,7 +532,7 @@ def test_usage_card_renders_cc_metrics_with_traffic_light():
 
 
 def test_usage_card_renders_cc_extra_usage_dollar_block():
-    """R173: extra_usage block (non-Max paid burst) renders as
+    """The extra_usage block (non-Max paid burst) renders as
     `已用 X% · $used / $cap CCY` for Max-Pro pay-as-you-go visibility."""
     payload = ('{"view":"daily","claude_code":{"ok":true,"metrics":['
                '{"label":"Extra usage","used_pct":12,"remaining_pct":88,'
@@ -584,9 +583,9 @@ def test_usage_card_renders_no_data_when_both_sections_empty():
 
 
 def test_usage_card_renders_codex_section_with_metrics():
-    """R173: codex section now surfaces real % consumed per limit
-    window (5h / Weekly / etc) — not just plan + email. Boss flagged
-    the R170 plan-only output as useless ('登录账号有屁用啊')."""
+    """Codex section surfaces real % consumed per limit window
+    (5h / Weekly / etc) — not just plan + email, since plan-only output
+    isn't actionable."""
     payload = ('{"view":"daily","claude_code":null,'
                '"codex":{"ok":true,"plan":"ChatGPT Pro","metrics":['
                '{"label":"5h limit","used_pct":20,"remaining_pct":80,"reset":"4h"},'
@@ -606,8 +605,8 @@ def test_usage_card_renders_codex_section_with_metrics():
 
 
 def test_usage_card_renders_kimi_section_with_quota_metrics():
-    """R170: each kimi metric appears with a traffic-light
-    remaining-percent. R172.b: as one-line markdown rows."""
+    """Each kimi metric appears with a traffic-light remaining-percent,
+    as one-line markdown rows."""
     payload = ('{"view":"daily","claude_code":null,'
                '"kimi":{"ok":true,"metrics":[{'
                '"label":"Weekly limit","used":2,"limit":10,'
@@ -623,8 +622,8 @@ def test_usage_card_renders_kimi_section_with_quota_metrics():
 
 
 def test_usage_card_marks_header_red_when_codex_or_kimi_failed():
-    """R170: any of the per-CLI probes failing flips header to red so
-    the boss spots a broken cred from the chat title."""
+    """Any of the per-CLI probes failing flips header to red so the boss
+    spots a broken cred from the chat title."""
     payload = ('{"view":"daily","claude_code":null,'
                '"codex":{"ok":false,"note":"auth.json not found"},'
                '"kimi":null,"other_clis":[]}')
@@ -649,9 +648,9 @@ def test_usage_card_handles_invalid_json_gracefully():
 
 
 def test_tmux_captures_specified_pane():
-    """Round-116: /tmux returns a blue card with fenced pane body so
-    the monospace pane content (spinner / box drawing / banners)
-    renders aligned in Feishu."""
+    """/tmux returns a blue card with fenced pane body so the monospace
+    pane content (spinner / box drawing / banners) renders aligned in
+    Feishu."""
     captured = {"calls": []}
 
     def fake_capture(target, lines=80):
@@ -684,7 +683,7 @@ def test_tmux_default_agent_is_first_in_team():
         captured["target"] = str(target)
         return ""
 
-    with tmux_patch(capture_pane=fake_capture):
+    with _team_env(), tmux_patch(capture_pane=fake_capture):
         slash.dispatch("/tmux", _ctx(agents=("manager", "worker_cc")))
     assert captured["target"] == "ClaudeTeam:manager"
 
@@ -696,7 +695,7 @@ def test_tmux_clamps_lines_to_max():
         captured["lines"] = lines
         return ""
 
-    with tmux_patch(capture_pane=fake_capture):
+    with _team_env(), tmux_patch(capture_pane=fake_capture):
         slash.dispatch("/tmux manager 99999", _ctx())
     assert captured["lines"] == 2000  # _MAX_TMUX_LINES
 
@@ -753,9 +752,9 @@ def test_compact_injects_literal_compact_into_pane():
 
 
 def test_compact_schedules_background_reidentify_on_success():
-    """Round B.2: /compact should schedule a delayed re-injection of
-    the identity init prompt so the agent reloads identity.md after
-    its self-compact settles."""
+    """/compact should schedule a delayed re-injection of the identity
+    init prompt so the agent reloads identity.md after its self-compact
+    settles."""
     captured = []
     scheduled = []
 
@@ -802,8 +801,7 @@ def test_compact_detects_llm_rejection_marker_and_skips_reidentify():
     """Claude 2.x refuses programmatically-injected slash commands with
     'It can't be triggered from inside a response'. The handler should
     peek the pane after inject and surface that rejection instead of
-    optimistically claiming success + scheduling a useless reidentify.
-    Caught 2026-05-07 host smoke."""
+    optimistically claiming success + scheduling a useless reidentify."""
     scheduled = []
 
     def fake_inject(target, text, **kw):
@@ -913,14 +911,14 @@ def test_handler_exception_is_caught():
     to raise so we exercise the dispatch try/except."""
     def boom_capture(target, lines=80):
         raise RuntimeError("kaboom")
-    with tmux_patch(capture_pane=boom_capture):
+    with _team_env(), tmux_patch(capture_pane=boom_capture):
         reply = slash.dispatch("/team", _ctx())
     # /team's per-agent capture has its own try/except → falls back to
     # empty buffer → tally still works. Use /tmux to exercise the
     # outer dispatch error path instead, since it doesn't catch internally.
     # …actually /tmux's tmux.capture_pane call is unguarded; dispatch
     # outer catch should land it.
-    with tmux_patch(capture_pane=boom_capture):
+    with _team_env(), tmux_patch(capture_pane=boom_capture):
         reply = slash.dispatch("/tmux manager", _ctx())
     assert "slash handler error" in reply or "kaboom" in reply
 
@@ -1006,8 +1004,8 @@ def test_task_handler_never_writes_to_store():
 
 
 def test_task_kanban_folds_terminal_columns_by_default():
-    """Boss feedback: don't flood the kanban with finished entries. By
-    default 已完成/已取消 render header+count only (▸ 已折叠), their item
+    """Don't flood the kanban with finished entries. By default
+    已完成/已取消 render header+count only (▸ 已折叠), their item
     rows stay hidden, and a footer hint names `/task all` as the expand.
     Active columns keep full detail."""
     from helpers import isolated_env
@@ -1162,7 +1160,7 @@ def test_login_triggers_subprocess_immediate_ack_zero_llm():
         reply = slash.dispatch("/login codex",
                                _ctx(background=lambda fn: scheduled.append(fn)))
     md = _all_markdown(reply)
-    assert "不经 agent 大模型" in md           # boss命门 guarantee (body)
+    assert "不经 agent 大模型" in md           # zero-LLM guarantee (body)
     assert "codex login --device-auth" in md  # router runs it directly
     assert len(scheduled) == 1                # background subprocess scheduled
 
@@ -1183,7 +1181,7 @@ def test_login_interactive_cli_returns_pane_guidance_path_b():
 
 def test_login_run_subprocess_captures_stdout_surface():
     """The runner spawns the login command directly and scrapes its STDOUT
-    (no agent, no LLM) — codex device-auth shape (devops 2026-06-14)."""
+    (no agent, no LLM) — codex device-auth shape."""
     import os
     posted = []
     argv = ["sh", "-c",
@@ -1313,7 +1311,7 @@ def test_extract_login_surface_drops_url_with_token_query():
 
 
 def test_extract_login_surface_codex_device_auth_ignores_anchor():
-    """Regression (devops 2026-06-14): the persistent worker-pane anchor
+    """Regression: the persistent worker-pane anchor
     [QUICKSTART-0613-1913] (pure-digit dddd-dddd) was mis-surfaced as the
     codex device code, posting prematurely and missing the real one. Real
     codes have letters → anchor ignored, real MLGX-BJYY9 + URL surfaced."""
@@ -1328,7 +1326,7 @@ def test_extract_login_surface_codex_device_auth_ignores_anchor():
 
 
 def test_extract_login_surface_strips_ansi_color_codes():
-    """Regression (devops 2026-06-14): codex wraps the device code in ANSI
+    """Regression: codex wraps the device code in ANSI
     (\\x1b[94m...\\x1b[0m); without stripping, the code is missed and [0m
     residue leaks into the URL. Strip ANSI → clean URL + code."""
     pane = ("Open: \x1b[4mhttps://auth.openai.com/codex/device\x1b[0m\n"

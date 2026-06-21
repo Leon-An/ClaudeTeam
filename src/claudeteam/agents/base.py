@@ -56,12 +56,12 @@ class CliAdapter(ABC):
         """Tmux key(s) that interrupt the CLI's CURRENT action — what `/stop`
         sends to halt an agent's in-flight turn WITHOUT killing its CLI.
 
-        Default `Escape`, uniform across every CLI we target. Verified on
-        live claude-code + codex panes (2026-06-15): both label Esc as the
-        interrupt in their own UI ("esc to interrupt") and Esc cleanly
-        cancels the turn (claude prints "Interrupted", codex "Model
-        interrupted"); the Ink-based TUIs (gemini / qwen / kimi) cancel the
-        running generation on Esc as well. Ctrl-C — the old `/stop` key —
+        Default `Escape`, uniform across every CLI we target. Both
+        claude-code and codex label Esc as the interrupt in their own UI
+        ("esc to interrupt") and Esc cleanly cancels the turn (claude
+        prints "Interrupted", codex "Model interrupted"); the Ink-based
+        TUIs (gemini / qwen / kimi) cancel the running generation on Esc
+        as well. Ctrl-C — the old `/stop` key —
         was neither consistent nor safe: a 2nd Ctrl-C quits codex, Ink CLIs
         treat it as EOF/exit, and on claude it only ambiguously interrupts
         (it dumps the typed line back into the prompt). An adapter whose CLI
@@ -72,15 +72,15 @@ class CliAdapter(ABC):
     def resubmit_on_idle(self) -> bool:
         """Whether wake.inject_and_confirm may RE-SEND the submit key if the
         pane looks idle after the post-spawn identity inject (the autosubmit
-        re-nudge that fixes F-respawn-not-autosubmit).
+        re-nudge for a pane that didn't autosubmit on respawn).
 
-        Default True — verified safe on claude-code + codex (the re-nudge
-        only lands when the agent isn't busy, and a stray submit on an empty
-        prompt is a harmless blank line). kimi-cli overrides to False: its
-        TUI reads the re-sent submit key as an interrupt ("Interrupted by
-        user", container 2026-06-16), so for kimi inject_and_confirm does a
-        plain single inject (no re-nudge) until kimi's submit/interrupt
-        semantics are handled on the kimi track.
+        Default True — safe on claude-code + codex (the re-nudge only lands
+        when the agent isn't busy, and a stray submit on an empty prompt is
+        a harmless blank line). kimi-cli overrides to False: its TUI reads
+        the re-sent submit key as an interrupt ("Interrupted by user"), so
+        for kimi inject_and_confirm does a plain single inject (no re-nudge)
+        until kimi's submit/interrupt semantics are handled on the kimi
+        track.
         """
         return True
 

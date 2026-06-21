@@ -60,7 +60,7 @@ def test_status_zero_args_returns_one_with_usage():
 
 
 def test_status_help_shows_usage_and_creates_no_phantom_agent():
-    """F-cli-help-phantom: `status --help` must print help and NOT register
+    """`status --help` must print help and NOT register
     '--help' as an agent in heartbeats/status."""
     with isolated_env():
         rc, out, _ = run_cli(["status", "--help"])

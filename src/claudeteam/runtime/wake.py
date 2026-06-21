@@ -117,7 +117,7 @@ def inject_and_confirm(target: tmux.Target, adapter: CliAdapter, text: str, *,
                        send_keys: Callable | None = None,
                        sleep: Callable | None = None) -> bool:
     """Inject `text` into the pane and CONFIRM it actually submitted,
-    re-nudging the submit key if it didn't (F-respawn-not-autosubmit).
+    re-nudging the submit key if it didn't.
 
     The respawn race: `tmux.inject` sends the submit key on a fixed ~200ms
     settle after the paste, but a *freshly* spawned/ready pane may not have
@@ -228,7 +228,7 @@ def wake_if_dormant(target: tmux.Target, adapter: CliAdapter, *,
     # CLI just came up. Feed it the identity init prompt before whatever
     # real message follows, so the agent starts knowing who it is. Use
     # inject_and_confirm so a freshly-ready pane that drops the submit key
-    # (F-respawn-not-autosubmit) gets re-nudged instead of sitting unsubmitted.
+    # gets re-nudged instead of sitting unsubmitted.
     if init_msg:
         inject_and_confirm(target, adapter, init_msg,
                            inject=inject, capture=capture, sleep=sleep)

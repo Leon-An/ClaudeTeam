@@ -1,9 +1,8 @@
-# 斜杠命令矩阵（rebuild/minimal 分支）
+# 斜杠命令矩阵
 
-本分支冒烟测试的斜杠命令验收清单。命令面与主分支保持一致的 9 条
-（R172.b 之后老板要求去掉了 `/recall` 与 `/forget`），加上 rebuild
-专有的「按 CLI 分组」`/usage` 卡（R170）和不再用 column_set 的渲染
-（R172.b——飞书当前会把 column_set 折叠掉）。
+斜杠命令的冒烟测试验收清单。共 9 条命令（`/recall` 与 `/forget`
+已去掉），加上「按 CLI 分组」的 `/usage` 卡和不再用 column_set
+的渲染（飞书当前会把 column_set 折叠掉）。
 
 触发器一律是真实用户在绑定群里发消息——**斜杠必须出现在消息开头**。
 `@bot /team` 不会触发，单独的 `/team` 才会。在单元层面用
@@ -16,9 +15,9 @@
 | 命令 | 群里期望结果 | 通过标准 | 失败标准 |
 | --- | --- | --- | --- |
 | `/help` | 列出所有 `/<命令>` 的卡 | 列全 9 条：/help /team /health /usage /tmux /send /compact /stop /clear | 缺命令；返回的是纯文本而不是卡 |
-| `/team` | 卡片，每个 agent 一行 `<emoji> **<名字>**: <摘要>` + 汇总 | 每个团队成员渲染成（💤 空闲 / 🔄 工作中 / ⏸ 懒启动 / ⚠ 等权限 / 🛑 挂了 / 🔘 未知）之一。全健康时卡头绿色，含 ⚠/🛑/❌ 时黄色；懒启动 agent 显示 ⏸ 而非 🛑 | 漏 agent；会话名错；懒启动 agent 显示成 🛑（R129/R144 回归） |
+| `/team` | 卡片，每个 agent 一行 `<emoji> **<名字>**: <摘要>` + 汇总 | 每个团队成员渲染成（💤 空闲 / 🔄 工作中 / ⏸ 懒启动 / ⚠ 等权限 / 🛑 挂了 / 🔘 未知）之一。全健康时卡头绿色，含 ⚠/🛑/❌ 时黄色；懒启动 agent 显示 ⏸ 而非 🛑 | 漏 agent；会话名错；懒启动 agent 显示成 🛑（回归） |
 | `/health` | 富卡，含「🖥️ 主机总览」+「👤 员工细分」分段 | CPU / 内存 / 磁盘 行有数据（容器里走 procps，macOS 主机走 /proc 直读兜底）；逐个 agent 显示 CPU% 与 RSS（基于 pane PID 子树的 ps walk）。无告警时卡头紫色，有告警时黄色 | ps/uptime 都在却显示「无数据」（procps 缺失回归）；agent 的 CPU 显示 0/0（pane PID 解析坏了） |
-| `/usage [视图]` | 卡片，三段：Claude Code（ccusage）/ Codex（JWT）/ Kimi（api.kimi.com） | 每个指标渲染成 `**标签**：值` 单行 markdown（column_set 已坏，R172.b 删除）。Codex 段读 `~/.codex/auth.json` 里的 id_token；Kimi 段读 `~/.kimi/credentials/kimi-code.json` 并打 HTTPS | 段落缺失；标签和值上下堆叠对不齐（column_set 回归） |
+| `/usage [视图]` | 卡片，三段：Claude Code（ccusage）/ Codex（JWT）/ Kimi（api.kimi.com） | 每个指标渲染成 `**标签**：值` 单行 markdown（column_set 已坏，已删除）。Codex 段读 `~/.codex/auth.json` 里的 id_token；Kimi 段读 `~/.kimi/credentials/kimi-code.json` 并打 HTTPS | 段落缺失；标签和值上下堆叠对不齐（column_set 回归） |
 | `/tmux [agent] [N]` | 卡片，agent pane 最近 N 行（默认 10，最大 2000） | 内容是带围栏的代码块——等宽显示、缩进保留。无 agent 参数时默认 manager | 围栏被当作字面文本；选错 pane；超过 N 行被截断 |
 
 ## 状态变更类命令
@@ -40,9 +39,9 @@ pane 状态截下来对比。
 agent 之间的对话。下面这些用例证明 lark 长连接 → router → store/local_facts
 + runtime/tmux 的整链路是通的。
 
-### R174「manager 是唯一接口」契约
+### 「manager 是唯一接口」契约
 
-R174（提交 `9e43309`）改动了路由根本规则：**所有人话不论加不加 @ 都
+路由的根本规则（提交 `9e43309`）：**所有人话不论加不加 @ 都
 只路由到 manager**。`@worker_cc` 此时是 manager 看见的文本内容，不是
 路由指令；`@team` 与 `全体X` 也不再分流到多个 worker。
 
@@ -52,17 +51,17 @@ R174（提交 `9e43309`）改动了路由根本规则：**所有人话不论加�
 | # | 触发 | 期望 |
 | --- | --- | --- |
 | R1 | 老板在绑定群里说「开发一个登录页」（无 @ 也无 `[` 前缀） | manager 收件箱新增一行（sender=user，content=原文）；manager pane 经 `lifecycle.wake_if_dormant` 收到正文 + 回车；状态翻成「进行中」 |
-| R2 | 老板说 `[boss] /team`（manager 风格的发件人前缀） | router 先剥掉 `[boss]`，把 `/team` 当斜杠分发；机器人的回复卡落进群。**回归点**：`[boss] /team` 不能被当成普通话路由进 manager（A2/B1 round 的回归） |
+| R2 | 老板说 `[boss] /team`（manager 风格的发件人前缀） | router 先剥掉 `[boss]`，把 `/team` 当斜杠分发；机器人的回复卡落进群。**回归点**：`[boss] /team` 不能被当成普通话路由进 manager |
 | R3 | `@worker_cc 你看下 README` | manager 收件箱拿到这一行，文本带原始 `@worker_cc` 前缀；worker_cc 与 worker_codex 收件箱**不动** |
 | R4 | `@worker_cc @worker_codex 都过来` | 同 R3——manager 一行，worker 们不动 |
 | R5 | `@unknown_agent hi`（错拼名字） | manager 收一行；router 不解析未知 @，原样进 manager |
 | R6 | `@team 全员同步进度` | manager 收件箱多一条；router 日志显示 `action=route targets=[manager]`，不是 `BROADCAST` |
 | R7 | `全体注意，今晚 18:00 review` | 同 R6 |
-| R8 | 单纯 `@team` 无正文 | manager 收一行空内容；R174 之前会广播给所有 agent，现在不会 |
+| R8 | 单纯 `@team` 无正文 | manager 收一行空内容；此前会广播给所有 agent，现在不会 |
 
-### R174 的例外分支：worker → manager 反向路由
+### 例外分支：worker → manager 反向路由
 
-R174 还加了一条对称设计：worker 自己发的卡（机器人身份发出，但卡片头
+契约还有一条对称设计：worker 自己发的卡（机器人身份发出，但卡片头
 解析得到 worker 名字）会被 router 路回 manager 的收件箱。这样 manager
 能看到 worker 在群里说了什么并做汇总。manager 自己发的卡仍然会被
 DROP `bot_self`，避免回声循环。
@@ -97,11 +96,11 @@ DROP `bot_self`，避免回声循环。
 
 | # | 步骤 | 期望 |
 | --- | --- | --- |
-| I1 | 老板说 `@worker_cc test`；R174 后这条到 manager 收件箱。再让 manager 通过 `claudeteam send worker_cc manager test` 转给 worker_cc，然后在 worker_cc pane 里 `claudeteam inbox worker_cc` | 看得到 from=manager 的一行 test |
+| I1 | 老板说 `@worker_cc test`；这条到 manager 收件箱。再让 manager 通过 `claudeteam send worker_cc manager test` 转给 worker_cc，然后在 worker_cc pane 里 `claudeteam inbox worker_cc` | 看得到 from=manager 的一行 test |
 | I2 | worker_cc 跑 `claudeteam read <local_id>`，再 `claudeteam inbox worker_cc --unread` | 那一行从未读列表消失 |
 | I3 | 老板快速说 5 条话；看 manager 收件箱 | 5 行都在，按 created_at 排序；router.seen_msg_ids 是按 message_id 去重的，不会因为内容相同就丢 |
 
-## 容器部署的前置（R161）
+## 容器部署的前置
 
 容器里的 lark-cli 触不到 macOS keychain，bot 身份会失败 `[10003] invalid param`，
 除非容器（一般通过被 gitignore 的 `.env` + docker-compose）设了：
@@ -109,7 +108,7 @@ DROP `bot_self`，避免回声循环。
 - `FEISHU_APP_ID`（或 `LARKSUITE_CLI_APP_ID`）
 - `FEISHU_APP_SECRET`（或 `LARKSUITE_CLI_APP_SECRET`）
 
-R161 的 `feishu/lark.subprocess_env` 会用 app-id/secret 在第一次调用时
+`feishu/lark.subprocess_env` 会用 app-id/secret 在第一次调用时
 拉一份 tenant_access_token 缓存到 `/tmp/claudeteam_tenant_token.json`
 （约 77 分钟，到期前 60 秒自动续）。容器里不需要手动 `lark-cli auth login`。
 
@@ -118,7 +117,7 @@ R161 的 `feishu/lark.subprocess_env` 会用 app-id/secret 在第一次调用时
 
 ## 本机部署的前置（macOS）
 
-本机部署不走 R161 容器路径，而是依赖 macOS keychain。两套机制：
+本机部署不走容器路径，而是依赖 macOS keychain。两套机制：
 
 1. **bot 凭证**：keychain 里 service `lark-cli-credentials`，account `<app_id>`。
    首次部署 `lark-cli config init` 写入即可

@@ -224,7 +224,7 @@ docker compose exec claudeteam claudeteam health
 docker compose exec claudeteam tmux attach -t ClaudeTeam   # see panes; Ctrl+B d to leave
 ```
 
-> **macOS subscribe stalls (handled automatically since 2026-05-09):**
+> **macOS subscribe stalls (handled automatically):**
 > lark-cli 1.0.23 on macOS — both Docker Desktop (`network_mode: host`
 > partially emulated) and host-native — has a known WebSocket subscribe
 > silent-drop: the subscribe child stays alive but stops delivering
@@ -425,7 +425,7 @@ forward to "now" makes the next catchup skip everything older.
 
 Symptom: `claudeteam say` from your launching shell **works**, but the
 exact same call from inside an agent pane (manager / worker_*) returns
-the HTTP 400 above. Bringup B5 caught this: a pre-existing tmux
+the HTTP 400 above. The cause: a pre-existing tmux
 **server** started by an earlier `claudeteam up` (different checkout,
 or a session you forgot you had) holds onto its original global env.
 `tmux new-session` attaches to that server and inherits *its* env, not

@@ -68,7 +68,7 @@ def test_is_busy_false_at_quiet_ready_prompt():
     assert wake.is_busy(target, _ClaudeFake(), capture=capture) is False
 
 
-# ── inject_and_confirm (F-respawn-not-autosubmit) ────────────────
+# ── inject_and_confirm ────────────────
 
 
 def test_inject_and_confirm_returns_at_once_when_busy_no_renudge():

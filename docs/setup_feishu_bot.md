@@ -52,16 +52,16 @@ ClaudeTeam 部署需要一个飞书企业自建 App + 机器人能力 + 一组�
   写完 —— 中途任何一步失败，你都不知道是 X / Y / Z 中哪个变了；不
   如分 3 段，每段一截图
 - 把"理论上应该工作"的代码 commit 上去 —— 没真在当前 Feishu UI 上跑
-  通的代码就是死代码，下次别人 dryrun 还会撞同样问题
+  通的代码就是死代码，下次别人试跑还会撞同样问题
 
 **已知会需要 agent 介入的 stage**（遇到时直接进介入模式）：
 - **stage 3 import-scopes** —— Monaco editor 在 fresh bot 上 mount
-  时机敏感，已加 5s wait 缓解。如果在 freshtest 之外的 dev 机第一次
+  时机敏感，已加 5s wait 缓解。如果在其他开发机上第一次
   跑还撞 timeout，按上面流程 agent 介入 + 把 wait 再调 / 加 retry
 - **stage 7 publish** —— 表单里 "Bot — Configure" 子按钮可能要先
   点一下让 bot 内部 config 生成；Save 按钮在 config 完之前一直
   disabled。具体 click 顺序随 Feishu 版本变。这一 stage 几乎必然要
-  agent 介入（最近一次 2026-05-08 dryrun_docker_v2 撞过）
+  agent 介入（在 Docker 试跑中撞到过）
 
 ---
 

@@ -7,8 +7,8 @@ from claudeteam.store import memory
 
 def test_forget_without_yes_refuses_and_returns_error():
     """Operator must opt in with --yes; otherwise we refuse and tell
-    them to recall first. Round-96 added this guardrail; reset command
-    is the whole-state nuke. forget is the scalpel."""
+    them to recall first. The reset command is the whole-state nuke;
+    forget is the scalpel."""
     with isolated_env():
         memory.append("manager", "note", "important")
         rc, _, err = run_cli(["forget", "manager"])
@@ -74,7 +74,7 @@ def test_forget_registered_in_cli():
     assert "forget" in COMMANDS
 
 
-# ── Round-111: --kind scalpel ──────────────────────────────────
+# ── --kind scalpel ─────────────────────────────────────────────
 
 
 def test_forget_kind_drops_only_matching_entries():
@@ -131,7 +131,7 @@ def test_forget_kind_unknown_warns_but_proceeds():
 
 
 def test_forget_help_lists_known_kinds():
-    """Round-111 + R110 alignment: --help advertises KNOWN_KINDS."""
+    """--help advertises KNOWN_KINDS."""
     rc, out, _ = run_cli(["forget", "--help"])
     for k in memory.KNOWN_KINDS:
         assert k in out

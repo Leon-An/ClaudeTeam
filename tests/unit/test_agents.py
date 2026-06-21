@@ -14,9 +14,8 @@ from claudeteam.agents.qwen_code import QwenCodeAdapter
 
 
 def test_registry_lists_known_clis_plus_kimi_and_qwen_aliases():
-    """Round-85 added gemini-cli; round-101 added qwen-code (+qwen-cli
-    alias). kimi-cli + qwen-cli are aliases so both forms in team.json
-    work."""
+    """gemini-cli and qwen-code (+qwen-cli alias) are registered.
+    kimi-cli + qwen-cli are aliases so both forms in team.json work."""
     names = set(known_clis())
     assert names == {
         "claude-code", "codex-cli", "gemini-cli",
@@ -78,18 +77,18 @@ def test_default_submit_keys_are_enter_variants():
 
 
 def test_interrupt_keys_are_uniform_escape_across_every_cli():
-    """`/stop`'s interrupt must be CONSISTENT across all CLIs (boss
-    2026-06-15). Every registered adapter — claude-code / codex-cli /
-    gemini-cli / kimi-code / qwen-code (+ aliases) — interrupts with Esc,
-    not the old Ctrl-C. Verified live on claude + codex panes."""
+    """`/stop`'s interrupt must be CONSISTENT across all CLIs. Every
+    registered adapter — claude-code / codex-cli / gemini-cli /
+    kimi-code / qwen-code (+ aliases) — interrupts with Esc, not the
+    old Ctrl-C."""
     for cli in known_clis():
         assert get_adapter(cli).interrupt_keys() == ["Escape"], cli
 
 
 def test_resubmit_on_idle_true_except_kimi():
-    """Autosubmit re-nudge (F-respawn) is safe on claude/codex/gemini/qwen,
+    """Autosubmit re-nudge is safe on claude/codex/gemini/qwen,
     but kimi's TUI reads the re-sent submit key as an interrupt → kimi alone
-    opts out (container 2026-06-16)."""
+    opts out."""
     assert KimiCodeAdapter().resubmit_on_idle() is False
     for a in (ClaudeCodeAdapter(), CodexCliAdapter(),
               GeminiCliAdapter(), QwenCodeAdapter()):
@@ -192,7 +191,7 @@ def test_kimi_spawn_uses_yolo_flag_and_disable_update():
     assert "KIMI_AGENT=worker_kimi" in cmd
 
 
-# ── kimi model bootstrap (F-kimi-hire-model-not-set) ─────────────
+# ── kimi model bootstrap ─────────────
 
 
 def test_kimi_passes_kimi_valid_team_model_via_dash_m():

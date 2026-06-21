@@ -459,10 +459,10 @@ def _render_intent_anchor(agent: str) -> str:
 
     Each task also surfaces its `approval_note` when present: the pending
     question while suspended (需审批), the latest verdict after
-    approve --note / reject feedback (进行中). Regression smoke A1
-    (2026-06-11): a worker resumed from an anchor holding only its own
-    pending question and invented the answer the boss never gave — the
-    anchor must carry what was DECIDED, not just what was asked.
+    approve --note / reject feedback (进行中). Without the verdict, a worker
+    resumed from an anchor holding only its own pending question can invent
+    the answer the boss never gave — the anchor must carry what was DECIDED,
+    not just what was asked.
 
     Must never raise: this feeds the spawn / native-memory path, and a
     throw here would break the agent's whole wake. Any store hiccup → "".
@@ -551,10 +551,10 @@ def init_prompt(agent: str) -> str:
     freshly-spawned claude-code sits at an empty prompt and never knows
     it's "manager" or "worker_cc".
 
-    Round-84: append the agent's recent durable memory (if any) so a
-    pane that's been /clear-ed or restarted picks up where it left off
-    instead of losing all task continuity. Empty memory → no extra
-    section appears (avoid noise on a brand-new agent).
+    Appends the agent's recent durable memory (if any) so a pane that's
+    been /clear-ed or restarted picks up where it left off instead of
+    losing all task continuity. Empty memory → no extra section appears
+    (avoid noise on a brand-new agent).
 
     The prompt explicitly tells the agent to PROCESS unread inbox
     messages (post a chat reply, mark each read) rather than just
@@ -569,9 +569,8 @@ def init_prompt(agent: str) -> str:
     # only resolves from the agent pane's CWD — claude on host happens to
     # run from the project root where `state/agents/...` is a sibling, but
     # codex / kimi / docker spawns at `/app` (or wherever the spawn cmd
-    # runs from) and the relative path doesn't resolve there. Caught
-    # 2026-05-07 container smoke: codex pane logged "agents/worker_codex
-    # /identity.md was missing" at boot.
+    # runs from) and the relative path doesn't resolve there — the codex
+    # pane logs "agents/worker_codex/identity.md was missing" at boot.
     id_path = identity_path(agent)
     base = (
         f"You are {agent}. Read {id_path}, then run:\n"
@@ -596,10 +595,9 @@ def init_prompt(agent: str) -> str:
         # Hoist the manager red lines to the wake prompt so they're the
         # last thing the LLM reads before processing inbox. The full
         # rules also live at the top of identity.md but get buried under
-        # 200+ lines by the time the LLM is mid-task. Caught 2026-05-09
-        # — boss had to repeat "你不能自己干活" in chat after every fresh
-        # deploy because manager's first inbox item was an exec task
-        # and the natural impulse was "let me handle it".
+        # 200+ lines by the time the LLM is mid-task. Without the hoist,
+        # when manager's first inbox item is an exec task the natural
+        # impulse is "let me handle it" rather than dispatching to a worker.
         base += (
             "\n\n"
             "⚠️ Manager 红线 (处理 inbox 时严格遵守):\n"

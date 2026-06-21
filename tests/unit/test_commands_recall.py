@@ -56,7 +56,7 @@ def test_recall_respects_explicit_limit():
 
 
 def test_recall_json_dumps_records_machine_readable():
-    """--json emits the raw record list — for jq / smoke conductors."""
+    """--json emits the raw record list — for jq / scripts."""
     with isolated_env():
         memory.append("w", "learning", "auth uses bcrypt")
         rc, out, _ = run_cli(["recall", "w", "--json"])
@@ -73,12 +73,12 @@ def test_recall_invalid_limit_returns_error():
     assert "must be an integer" in err
 
 
-# ── --kind filter (round-107) ───────────────────────────────────
+# ── --kind filter ───────────────────────────────────────────────
 
 
 def test_recall_kind_filter_only_returns_matching_entries():
-    """Round-107: --kind narrows recall to one of memory.KNOWN_KINDS,
-    so boss can scan a slice (`--kind decision`) without grep."""
+    """--kind narrows recall to one of memory.KNOWN_KINDS, so the boss
+    can scan a slice (`--kind decision`) without grep."""
     with isolated_env():
         memory.append("manager", "decision", "use bcrypt")
         memory.append("manager", "learning", "auth path is /auth/v2")
@@ -160,8 +160,8 @@ def test_recall_help_flag():
 
 
 def test_recall_help_lists_known_kinds():
-    """Round-110: --help advertises memory.KNOWN_KINDS so operators
-    don't have to grep the source to learn the convention."""
+    """--help advertises memory.KNOWN_KINDS so operators don't have to
+    grep the source to learn the convention."""
     rc, out, _ = run_cli(["recall", "--help"])
     for k in memory.KNOWN_KINDS:
         assert k in out

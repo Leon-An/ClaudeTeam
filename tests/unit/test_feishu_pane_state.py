@@ -42,12 +42,12 @@ def test_idle_via_bypass_marker():
     assert pane_state.parse(buf) == ("💤", "idle")
 
 
-# ── new in round B: codex / kimi idle classification ──────────────
+# ── codex / kimi idle classification ──────────────────────────────
 
 
 def test_codex_idle_via_default_status_line():
-    """Round A2 B4: codex banner ends with 'gpt-5.5 default · ~/path' which
-    pane_state was missing → defaulted to 🔘. Now classifies as 💤."""
+    """Codex banner ends with 'gpt-5.5 default · ~/path' which pane_state
+    was missing → defaulted to 🔘. Now classifies as 💤."""
     buf = (
         "╭─────────────────────────────╮\n"
         "│ >_ OpenAI Codex (v0.128.0)  │\n"
@@ -67,8 +67,8 @@ def test_codex_idle_via_yolo_marker_alone():
 
 
 def test_kimi_idle_via_context_line():
-    """Round A2 B4: kimi shows 'context: 0.0% (0/262.1k)' when waiting at
-    prompt. Was 🔘; now 💤."""
+    """Kimi shows 'context: 0.0% (0/262.1k)' when waiting at prompt.
+    Was 🔘; now 💤."""
     buf = "Welcome to Kimi Code CLI\nSend /help for help information\ncontext: 0.0% (0/262.1k)"
     assert pane_state.parse(buf) == ("💤", "idle")
 

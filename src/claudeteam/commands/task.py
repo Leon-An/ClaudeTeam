@@ -119,7 +119,7 @@ def _auto_memory(agent: str, kind: str, content: str, *, ref: str = "") -> None:
     often MISSING, because memory.append's only writer is the manual
     `claudeteam remember` — nothing wrote on task transitions, so capture was
     left to the agent remembering to run the command (memory's core
-    unreliability, boss 2026-06-15). This records them by CODE instead.
+    unreliability). This records them by CODE instead.
 
     Memory stays a best-effort *notepad* — the authoritative record is the
     task/intent store, not this. To avoid flooding (memory caps at ~200), we
@@ -259,7 +259,7 @@ def _cmd_approve(rest: list[str]) -> int:
     # Thread the verdict into the audit row and the assignee receipt so
     # "what was decided" travels the same gated channel as "decided" —
     # not a free-text relay that can lose the race against a worker
-    # resuming from a question-only anchor (regression smoke A1).
+    # resuming from a question-only anchor.
     suffix = f": {note}" if note else ""
     local_facts.append_log(t["assignee"], "task_transition",
                            f"{tid} 需审批→{t['status']} (approved){suffix}", ref=tid)

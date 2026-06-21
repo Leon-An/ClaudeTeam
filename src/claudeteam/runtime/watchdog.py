@@ -198,9 +198,8 @@ def respawn(spec: ProcessSpec, *,
     # PYTHONUNBUFFERED forces line-buffer on the child's sys.stdout when
     # it's a regular file. Without it, daemon prints stay stuck in
     # Python's stdio block buffer and the operator sees an empty
-    # router.log even though the daemon is running fine. Round 2 host
-    # smoke caught this 2026-05-07: router PID alive, fd points at
-    # router.log, but file size 0 indefinitely.
+    # router.log even though the daemon is running fine — router PID
+    # alive, fd points at router.log, but file size 0 indefinitely.
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
     try:
@@ -234,7 +233,7 @@ def supervise(specs: list[ProcessSpec],
 
     Mutates `states` in place. Caller wraps this in their own loop.
 
-    Round-82: when a spec enters cooldown (max_retries respawns failed),
+    When a spec enters cooldown (max_retries respawns failed),
     invoke `alert_fn(spec_name, fail_count, cooldown_secs)` so callers
     can fan out to a Feishu chat / pager / log file. Default = None
     means no alert (preserves backward compat). The router daemon wires

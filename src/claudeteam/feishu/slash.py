@@ -6,7 +6,7 @@ emits `Decision(Action.SLASH, text=raw_text)`. `feishu/deliver.py` calls
 back to the chat — `str` via `chat.send_text`, `dict` (Feishu card
 schema) via `chat.send_card`. **No worker pane is touched, no LLM runs.**
 
-Supported commands (matches main's 10-command surface):
+Supported commands:
 
     /help                              card listing every command
     /team                              card with each agent's pane state
@@ -181,9 +181,9 @@ def _handle_help(args: str, ctx: SlashContext) -> dict:
 def _handle_team(args: str, ctx: SlashContext) -> dict:
     """Capture each agent's pane, classify state, return as Feishu card.
 
-    Round-80: was a plain-text table; now a card with header containing
-    the timestamp + session, body listing one `**emoji agent**: brief`
-    line per agent followed by a tally summary.
+    A card with header containing the timestamp + session, body listing
+    one `**emoji agent**: brief` line per agent followed by a tally
+    summary.
 
     Color is `green` when no agent is in a warning/down state, `yellow`
     when at least one is, so the boss can scan group chat at a glance.
@@ -202,7 +202,7 @@ def _handle_team(args: str, ctx: SlashContext) -> dict:
         # Fired agents (status="已停止" via `claudeteam fire`) have no pane;
         # without this branch /team showed them as "🛑 CLI down" — same
         # as a crashed agent — and operators couldn't tell intentional
-        # firing from a real failure. Caught 2026-05-09.
+        # firing from a real failure.
         status = local_facts.get_status(agent)
         if status and status.get("status") == "已停止":
             note = (status.get("task") or status.get("note")
@@ -384,7 +384,7 @@ def _handle_health(args: str, ctx: SlashContext) -> dict:
                       "content": (f"<font color='grey'>采集 {beijing_stamp(ctx.now)}"
                                    f" · 数据源 uptime/free/df/docker stats/ps"
                                    f"</font>")})
-    # Yellow when alarms exist, otherwise purple (matches main's branding).
+    # Yellow when alarms exist, otherwise purple.
     color = "yellow" if data.get("alarms") else "purple"
     return rich_card(
         f"🩺 /health — 服务器负载 [{ctx.session}] {beijing_stamp(ctx.now)}",
@@ -664,9 +664,9 @@ def _handle_stop(args: str, ctx: SlashContext) -> str:
     CLI's interrupt key (default Esc — see CliAdapter.interrupt_keys, which
     unifies the behavior across claude-code / codex / gemini / qwen / kimi).
 
-    No argument → stop EVERY agent in the team (the `/stop all` default the
-    boss asked for): an emergency "everyone halt now" that fans the interrupt
-    out to each pane instead of erroring on a missing target."""
+    No argument → stop EVERY agent in the team: an emergency "everyone halt
+    now" that fans the interrupt out to each pane instead of erroring on a
+    missing target."""
     arg = args.strip()
     if not arg:
         names, _, _, _ = _live_agents()
@@ -876,10 +876,10 @@ _LOGIN_CLI_ALIASES = {
 # the subprocess needs (so the token writes to the isolated /data home, not
 # the host); `cred_relpath` is under that home. `shared_home` flags CLIs
 # whose creds are NOT per-agent-isolated (kimi) — those are hard-refused by
-# the allowlist anyway. Verified zero-LLM: codex login --device-auth prints
-# URL+code to stdout (devops 2026-06-14: "one-time code: MMLU-W452Y"); claude
-# auth login is a real subcommand (flow being calibrated). gemini/qwen are
-# best-effort starting points (not in the default allowlist).
+# the allowlist anyway. Zero-LLM: codex login --device-auth prints URL+code
+# to stdout (e.g. "one-time code: MMLU-W452Y"); claude auth login is a real
+# subcommand. gemini/qwen are best-effort starting points (not in the
+# default allowlist).
 # `interactive` = the login waits for the user to paste a code back to STDIN
 # (claude `auth login`: prints URL → "Paste code here >"). A pure-chat relay
 # of that paste would have to survive the ~135s router respawn that the
@@ -935,8 +935,8 @@ _LOGIN_URL_RE = re.compile(
 #     long opaque token can never be mistaken for a pairing code.
 # A captured code must contain at least one LETTER: real device codes are
 # alphanumeric, whereas a pure-digit dddd-dddd is almost always a date /
-# anchor — the persistent [QUICKSTART-0613-1913] anchor in a worker pane was
-# being mis-surfaced as the codex device code (devops 2026-06-14).
+# anchor — a persistent [QUICKSTART-0613-1913]-style anchor in a worker pane
+# would otherwise be mis-surfaced as the codex device code.
 _LOGIN_CODE_PAIR_RE = re.compile(r"\b[A-Z0-9]{4,6}-[A-Z0-9]{4,6}\b")
 _LOGIN_CODE_LABELED_RE = re.compile(
     r"(?:code|码)[:：]\s*([A-Za-z0-9][A-Za-z0-9-]{3,11})\b", re.IGNORECASE)
@@ -946,7 +946,7 @@ _SECRET_HINT_RE = re.compile(
     r"bearer\s|secret|-----BEGIN", re.IGNORECASE)
 # CLI login output is colorized — codex wraps the device code in ANSI
 # (\x1b[94mMNOG-E7MBX\x1b[0m), which makes the bare-code regex miss it and
-# leaks [0m residue into the URL (devops 2026-06-14). Strip ANSI/CSI escape
+# leaks [0m residue into the URL. Strip ANSI/CSI escape
 # sequences before scraping so the URL + code come out clean.
 _ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
@@ -982,9 +982,9 @@ def _extract_login_surface(pane_text: str) -> dict:
 def _login_gate() -> dict | None:
     """Refusal card if chat-driven CLI re-auth isn't enabled. Separate from
     the lifecycle gate so /shutdown & /restart can be demoed while /login
-    stays inert until creds are isolated from the host (devops 2026-06-14:
-    container panes run HOME=/root with host-mounted cred files — a /login
-    write there would clobber the operator's personal credentials)."""
+    stays inert until creds are isolated from the host (container panes run
+    HOME=/root with host-mounted cred files — a /login write there would
+    clobber the operator's personal credentials)."""
     from claudeteam.runtime import teamctl
     if not teamctl.login_slash_enabled():
         return simple_card(
@@ -1023,14 +1023,13 @@ def _handle_login(args: str, ctx: SlashContext) -> dict:
     """`/login <cli> [agent]` — trigger a CLI's re-auth flow and surface the
     verification URL + pairing code to the operator. The CLI writes the new
     token back to its own cred file; it takes effect on the agent's next
-    call — we do NOT auto-restart (manager ruling 2026-06-14).
+    call — we do NOT auto-restart.
 
     Two safety layers: the master `allow_login_slash` gate, then a per-CLI
     isolation allowlist (`login_allowed_clis`). A CLI whose creds are NOT
     isolated from the host — kimi shares ~/.kimi, and any deployment whose
     panes run a host-mounted cred dir — is HARD-REFUSED, not merely warned:
-    a /login write there would clobber the operator's personal credentials
-    (devops 2026-06-14)."""
+    a /login write there would clobber the operator's personal credentials."""
     if (gate := _login_gate()) is not None:
         return gate
     parts = args.split()
@@ -1085,7 +1084,7 @@ def _handle_login(args: str, ctx: SlashContext) -> dict:
             f"（codex 这类非交互 CLI 走纯机械 /login，聊天里直接出码。）"
             + warn_line,
             color="yellow")
-    # Path A — fire-and-forget (ZERO-LLM, boss命门): the router runs the CLI's
+    # Path A — fire-and-forget (ZERO-LLM): the router runs the CLI's
     # login as a DIRECT subprocess (never injected into the agent pane), so it
     # works when the agent's model is down / token expired (401). Streams
     # stdout to a temp file, polls for the URL+code, posts a follow-up card.
@@ -1140,7 +1139,7 @@ def _login_run_subprocess(ctx: SlashContext, argv: list, env: dict,
     """ZERO-LLM login: run the CLI's login subprocess DIRECTLY (no agent pane,
     no agent LLM), stream its stdout to a temp file, poll the file for the
     verification URL+code, post a follow-up card. Works when the agent's model
-    is down / token is expired — the recovery scenario the boss requires.
+    is down / token is expired — the recovery scenario this exists for.
 
     The subprocess is detached (start_new_session) so it survives this poll
     thread / a router restart to complete the device auth + write the token.

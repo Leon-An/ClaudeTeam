@@ -6,8 +6,8 @@ pane so they know to read it.
 Previously inbox-only with the doc claim "only the Feishu
 router can do tmux inject". That broke peer messaging end-to-end —
 manager sending to worker_cc wrote a row, but worker_cc had no way
-to know unless it polled. Boss-flagged after the 全员报道 e2e where
-manager.send → worker_cc went into a dead drop.
+to know unless it polled: manager.send → worker_cc went into a
+dead drop.
 
 Now mirrors the router's apply pattern: append_message + tmux.inject
 into the recipient's pane. Recipient's claude (or other CLI) sees a
@@ -70,15 +70,15 @@ def main(argv: list[str]) -> int:
         # Lazy worker only: pane exists as placeholder shell, CLI hasn't
         # spawned yet. Without wake_if_dormant the inject below would land
         # in the shell, not the CLI — agent never sees the message.
-        # REGRESSION 2026-05-06 host_smoke §7: lazy worker_codex received
-        # a manager dispatch but pane stayed at a bare shell prompt.
+        # Without it, a lazy worker that received a manager dispatch
+        # would stay at a bare shell prompt.
         # Non-lazy agents (typically manager + active workers) are
         # ALREADY started by `claudeteam up`; injecting straight in is
-        # faster than the is_ready capture-pane round-trip and matches
-        # the boss preference 2026-05-06: "send 主管时不需要等待他空闲,
-        # 直接往 session 里面加告诉他就行了". Claude / Codex pane stash
-        # injected text into the input buffer if mid-thought; it's read
-        # on the next input-accept turn.
+        # faster than the is_ready capture-pane round-trip — there's no
+        # need to wait for the manager to be idle, just add to the
+        # session. Claude / Codex pane stash injected text into the
+        # input buffer if mid-thought; it's read on the next
+        # input-accept turn.
         cfg = config.agent_config(to) if to in config.agent_names() else {}
         if cfg.get("lazy") and not wake.is_ready(target, adapter):
             from claudeteam.runtime import tunables

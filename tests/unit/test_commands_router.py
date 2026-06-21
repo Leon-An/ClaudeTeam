@@ -43,11 +43,11 @@ def test_build_cmd_with_profile_inserts_profile_flag():
 
 
 def test_build_cmd_uses_lark_resolve_cli_prefix():
-    """REGRESSION (R139): subscribe argv must come from
+    """REGRESSION: subscribe argv must come from
     `lark.resolve_cli_prefix` (direct binary preferred). Hardcoded
     `npx @larksuite/cli` paid the package-lookup overhead on every
-    router restart for nothing — R86's direct-binary work had been
-    saving ~250-500 ms per one-shot call but missed this hot path."""
+    router restart for nothing — the direct-binary work that saved
+    ~250-500 ms per one-shot call had missed this hot path."""
     from claudeteam.feishu import lark
     cmd = _build_subscribe_cmd("")
     expected = lark.resolve_cli_prefix()
@@ -82,10 +82,10 @@ def test_build_cmd_uses_compact_quiet_bot_identity():
 
 
 def test_build_cmd_does_NOT_use_force_anymore():
-    """REGRESSION (round-57): --force is "UNSAFE: server randomly splits
-    events across connections, each instance only receives a subset"
-    per lark-cli 1.0.21 docs. Was almost certainly a contributor to
-    the silent event loss the catchup fix (round-56) papered over.
+    """REGRESSION: --force is "UNSAFE: server randomly splits events
+    across connections, each instance only receives a subset" per
+    lark-cli 1.0.21 docs. Was almost certainly a contributor to the
+    silent event loss the catchup fix papered over.
     The single-instance lock at ~/.lark-cli/locks/subscribe_<app>.lock
     is fcntl-advisory and auto-releases on process exit; claudeteam's
     own pidlock keeps us at one router at a time so collision is
@@ -149,9 +149,9 @@ def test_stale_threshold_default_linux_is_600s():
 
 
 def test_stale_threshold_default_darwin_is_120s():
-    """macOS lark-cli 1.0.23 WebSocket silently drops without reconnect
-    (verified 2026-05-09 host smoke). Tighter default lets self-restart
-    + catchup recover in ~2 min instead of ~10."""
+    """macOS lark-cli 1.0.23 WebSocket silently drops without reconnect.
+    Tighter default lets self-restart + catchup recover in ~2 min
+    instead of ~10."""
     with isolated_env(), env_patch(CLAUDETEAM_ROUTER_STALE_S=None), _patch_platform("Darwin"):
         assert _stale_event_threshold_s() == 120.0
 
@@ -201,9 +201,9 @@ def test_make_on_progress_refreshes_timestamp_on_each_event():
 
 def test_watch_subscribe_health_self_terminates_on_stale_events():
     """Subscribe child alive but no events for > threshold → SIGTERM
-    self. REGRESSION: 2026-05-06 host_smoke caught lark WebSocket
-    silently stalling, router process appeared healthy in `ps` but
-    user messages went unprocessed for 7+ min."""
+    self. REGRESSION: lark WebSocket silently stalling left the router
+    process looking healthy in `ps` while user messages went unprocessed
+    for 7+ min."""
     import threading, signal, os
     from claudeteam.commands import router as _r
 
@@ -238,8 +238,8 @@ def test_watch_subscribe_health_self_terminates_on_stale_events():
 
 def test_watch_subscribe_health_self_terminates_on_child_exit():
     """Subscribe child exits (non-stale-events path). Coverage for the
-    pre-existing fail mode (R52 / Round B Smoke regression): npm-exec
-    parent stays alive holding stdout open, lark-cli grandchild dies."""
+    pre-existing fail mode: npm-exec parent stays alive holding stdout
+    open, lark-cli grandchild dies."""
     import threading, signal, os, time
     from claudeteam.commands import router as _r
 
@@ -317,10 +317,10 @@ def test_load_seen_truncates_huge_file_to_recent_window():
 
 
 def test_on_progress_appends_msg_id_to_seen_file():
-    """REGRESSION: 2026-05-06 host_smoke caught manager's own /tmux
-    manager card forwarded into manager inbox every ~3.5min as router
-    self-restarted. Root cause: seen_msg_ids was an in-memory set, not
-    persisted, so catchup replay after restart re-applied messages.
+    """REGRESSION: manager's own /tmux manager card was forwarded into
+    manager inbox every ~3.5min as the router self-restarted. Root
+    cause: seen_msg_ids was an in-memory set, not persisted, so catchup
+    replay after restart re-applied messages.
     Now: each on_progress fires append-to-file."""
     from types import SimpleNamespace
     from claudeteam.runtime import paths
@@ -363,7 +363,7 @@ def test_seen_persists_across_simulated_restart():
         assert "om_X" in seen
 
 
-# ── F-catchup-visibility: post a skip-notice to the routing target ──
+# ── post a skip-notice to the routing target ──
 
 
 def test_notify_catchup_skips_posts_when_dropped_or_slash():

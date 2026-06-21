@@ -19,8 +19,8 @@ def _no_proxy_env():
 
 
 def test_run_builds_lark_cli_argv_with_profile():
-    """Round-86: argv prefix is whichever direct lark-cli we found
-    (or npx fallback). Either way, profile/positional args must be
+    """Argv prefix is whichever direct lark-cli we found (or npx
+    fallback). Either way, profile/positional args must be
     appended in order. Pin the prefix via env override so the test
     doesn't depend on whatever's installed locally."""
     rec = _Recorder(FakeProc(stdout='{"ok": true, "data": {"x": 1}}'))
@@ -48,7 +48,7 @@ def test_run_omits_profile_when_empty():
 
 
 def test_resolve_cli_prefix_uses_explicit_env_override():
-    """Round-86: CLAUDETEAM_LARK_CLI_BIN takes priority over auto-discovery."""
+    """CLAUDETEAM_LARK_CLI_BIN takes priority over auto-discovery."""
     import tempfile
     import os as _os
     with tempfile.TemporaryDirectory() as td:
@@ -110,9 +110,9 @@ def test_run_returns_none_on_nonzero_exit():
 
 
 def test_nonzero_exit_with_json_blob_extracts_real_message():
-    """Smoke v3 found: when claudeteam say targets an unjoinable chat,
-    lark-cli prints `{"ok":false,"msg":"invalid receive_id","code":230001}`
-    to stdout AND exits non-zero. Old code took stderr.splitlines()[-1]
+    """When claudeteam say targets an unjoinable chat, lark-cli prints
+    `{"ok":false,"msg":"invalid receive_id","code":230001}` to stdout
+    AND exits non-zero. Old code took stderr.splitlines()[-1]
     so operators saw `lark-cli failed (rc=1): }` — useless. Now we
     parse JSON first and route through _extract_error_message."""
     import io
@@ -136,8 +136,8 @@ def test_run_returns_none_when_api_says_ok_false():
 
 
 def test_api_error_extracts_message_from_nested_error_dict():
-    """REGRESSION (round-60): lark-cli sometimes returns a structured
-    error object: {"error": {"type": "...", "code": ..., "message": "..."}}
+    """REGRESSION: lark-cli sometimes returns a structured error object:
+    {"error": {"type": "...", "code": ..., "message": "..."}}
     instead of a plain "msg" field. Old code printed the dict's repr
     making the warning useless. Now extract error.message + type."""
     import io
@@ -158,8 +158,8 @@ def test_api_error_extracts_message_from_nested_error_dict():
 
 def test_api_error_extracts_message_from_validation_error():
     """Same shape, different type — `validation` errors from
-    `--image` flag rejection (round-58 saw this). Operator wants
-    the actual rejection reason, not a dict literal."""
+    `--image` flag rejection. Operator wants the actual rejection
+    reason, not a dict literal."""
     import io
     import contextlib
     payload = ('{"ok":false,"error":{"type":"validation",'
@@ -303,9 +303,9 @@ def test_run_keeps_proxy_env_when_no_proxy_unset():
 
 
 def test_subprocess_env_strips_proxy_when_no_proxy_set():
-    """REGRESSION: round 6 smoke proved the router daemon's Popen
-    inherits HTTPS_PROXY untouched and lark-cli +subscribe then fails
-    to deliver events. router now calls lark.subprocess_env() to get
+    """REGRESSION: the router daemon's Popen inherits HTTPS_PROXY
+    untouched and lark-cli +subscribe then fails to deliver events.
+    router now calls lark.subprocess_env() to get
     the same proxy-stripped env that lark.call uses."""
     with env_patch(LARK_CLI_NO_PROXY="1",
                    HTTPS_PROXY="http://proxy.example:7890",
@@ -381,8 +381,8 @@ def test_timeout_falls_back_to_90_when_env_is_garbage():
 
 
 def test_timeout_clamps_zero_or_negative_to_one():
-    """REGRESSION (round-64): CLAUDETEAM_LARK_TIMEOUT=0 used to be
-    passed through to subprocess.run, which insta-raises TimeoutExpired
+    """REGRESSION: CLAUDETEAM_LARK_TIMEOUT=0 used to be passed through
+    to subprocess.run, which insta-raises TimeoutExpired
     on every call → every lark op silently fails. -1 caused ValueError
     deeper in subprocess. Now clamped to min 1 second; operator gets
     a real timeout window even with a fat-fingered config."""
@@ -459,7 +459,7 @@ def test_run_logs_preview_when_stdout_is_not_json():
     assert "<html>" in log
 
 
-# ── R161: tenant_access_token bootstrap (container path) ─────────
+# ── tenant_access_token bootstrap (container path) ───────────────
 
 
 def _cache_path(tmp_dir):
@@ -626,7 +626,7 @@ def test_subprocess_env_pairs_token_with_app_id_and_secret():
     (`blocked by env ... LARKSUITE_CLI_APP_ID is missing`) and the
     persistent-connection SDK then refuses on token+id-only with `app_id
     or app_secret is null` because it re-auths off env-vars not the
-    cached token. 2026-05-07 host-smoke walked into both."""
+    cached token. Both failure modes are covered here."""
     import json
     import tempfile
     from helpers import attr_patch

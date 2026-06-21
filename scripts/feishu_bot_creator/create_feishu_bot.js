@@ -281,9 +281,8 @@ async function stage_create_app(page, _ctx, state) {
   // Client-side check: bot name must be ≤32 chars. Feishu form validates
   // this with a red "Enter up to 32 characters" notice and refuses to
   // navigate, but our pollForUrl just times out and we threw a useless
-  // "never navigated to capability page". Caught 2026-05-08 dryrun: agent
-  // wasted 3 retries before realizing the name was 35 chars. Throw
-  // upfront with the actual cause.
+  // "never navigated to capability page". Throw upfront with the actual
+  // cause instead.
   if (state.appName && state.appName.length > 32) {
     throw new Error(
       `app creation: appName "${state.appName}" is ${state.appName.length} ` +
@@ -336,9 +335,9 @@ async function stage_import_scopes(page, _ctx, state) {
   // Opens "Batch import/export scopes" → Monaco editor → paste full JSON →
   // "Next, Review New Scopes" → "Add".
   //
-  // The mechanism that actually works (2026-05-08 verified end-to-end:
-  // 232/234 tenant scopes + nearly all user scopes hit Monaco's model
-  // and reach the review dialog as "Newly added scopes (232)"):
+  // The mechanism that actually works (gets 232/234 tenant scopes +
+  // nearly all user scopes into Monaco's model and reaches the review
+  // dialog as "Newly added scopes (232)"):
   //
   //   1. CLICK `.view-lines` (the visible text layer) with `force: true`
   //      to bypass Playwright's aria-hidden actionability complaint.
@@ -373,11 +372,11 @@ async function stage_import_scopes(page, _ctx, state) {
   await gotoWithRetry(page, `https://open.feishu.cn/app/${state.appId}/auth`);
   // Wait long enough for Monaco to fully render — 2s isn't enough on a
   // freshly-created bot (the auth page boots a Monaco instance from
-  // scratch instead of restoring an already-warm one). 2026-05-08 dryrun
-  // V2 caught this: drive failed on `view-lines click` with "Element is
-  // not visible" even with force:true, because the .view-lines element
-  // hadn't reached its final DOM position yet (scrollIntoView fails on
-  // a still-mounting element). 5s clears it consistently.
+  // scratch instead of restoring an already-warm one). The symptom: a
+  // `view-lines click` fails with "Element is not visible" even with
+  // force:true, because the .view-lines element hadn't reached its final
+  // DOM position yet (scrollIntoView fails on a still-mounting element).
+  // 5s clears it consistently.
   await page.waitForTimeout(5000);
   await page.getByRole('button', { name: 'Batch import/export scopes' }).click();
   await page.waitForTimeout(2500);
@@ -434,7 +433,7 @@ async function stage_import_scopes(page, _ctx, state) {
   }
   const missing = [...expectedFlat].filter(s => !applied.has(s));
   log(`scope verification: ${applied.size} applied · ${missing.length} of ${expectedFlat.size} requested didn't activate`);
-  // Bringup B3 (2026-05-08): many tenants gate non-IM scopes (Calendar
+  // Many tenants gate non-IM scopes (Calendar
   // / Docs / Wiki / Base / Mail / Contact) behind admin approval. Calling
   // the "didn't activate" warning loud without context made operators
   // think the bot was unusable. Classify by IM-core vs advanced so the
@@ -558,8 +557,8 @@ async function stage_callbacks(page, _ctx, state) {
 async function stage_publish(page, _ctx, state) {
   // Version create → Save → Publish, with a data-range reconfigure
   // detour when the version's tenant scopes include any that need
-  // explicit data-range (any organization-level scope does). 2026-05-08
-  // dryrun_docker_v2 caught this — the page-level Save stays disabled
+  // explicit data-range (any organization-level scope does). The
+  // page-level Save stays disabled
   // until the operator clicks the "Configure" link next to the red
   // "Please request the required data permissions" notice, walks
   // through a side-drawer dialog (sidebar with red-dotted unconfigured
@@ -656,9 +655,9 @@ async function stage_publish(page, _ctx, state) {
   // *which row's copy icon* we click — find the table row whose
   // label cell text matches /App Secret/i and click the copy icon
   // INSIDE that row. Don't filter by `svg` alone (matches eye/refresh
-  // icons too — verified 2026-05-08 verify run captured the SCOPES_JSON
-  // from prior clipboard.writeText instead of secret because the
-  // wrong icon was clicked + the previous clipboard content lingered).
+  // icons too — the wrong icon would capture the SCOPES_JSON from a
+  // prior clipboard.writeText instead of the secret, because the wrong
+  // icon was clicked + the previous clipboard content lingered).
   //
   // Also clear OS clipboard with a noop write before clicking to
   // surface a real failure (if Feishu's copy doesn't fire we'd read
@@ -675,7 +674,7 @@ async function stage_publish(page, _ctx, state) {
     // Feishu's copy handler" cleanly. Without it, a failed click
     // silently leaves the previous clipboard content (e.g. the 14k
     // SCOPES_JSON paste from stage 3) and we'd shovel that into
-    // state.appSecret. The verify-v1 dryrun caught exactly this.
+    // state.appSecret.
     const SENTINEL = '__CT_SENTINEL__';
     try { await navigator.clipboard.writeText(SENTINEL); } catch (e) {}
     // Two paths to find the right copy button — both must agree:

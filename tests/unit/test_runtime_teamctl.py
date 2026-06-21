@@ -90,8 +90,8 @@ def test_notify_noops_without_chat_id():
 
 
 def test_login_allowed_clis_default_is_isolated_set():
-    """Default allowlist = the host-isolated CLIs devops verified
-    (claude-code, codex-cli). kimi (shared ~/.kimi) is NOT in it."""
+    """Default allowlist = the host-isolated CLIs (claude-code,
+    codex-cli). kimi (shared ~/.kimi) is NOT in it."""
     with isolated_env():
         allowed = teamctl.login_allowed_clis()
         assert "claude-code" in allowed

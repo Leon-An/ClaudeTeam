@@ -31,9 +31,9 @@ USAGE = (
 # Card colors per agent. manager → blue (fixed visual weight, "boss
 # answer" channel). EVERY OTHER agent auto-cycles through _AGENT_PALETTE in
 # team-config order so each agent's cards read as a DISTINCT color block in
-# chat (boss 2026-06-15: agents not named worker_* — dev/devops/expert/qa/
-# … — all fell to the "blue" fallback = indistinguishable from each other
-# and from manager). Palette deliberately excludes blue (manager's) and has
+# chat (agents not named worker_* — dev/devops/expert/qa/… — would
+# otherwise all fall to the "blue" fallback = indistinguishable from each
+# other and from manager). Palette deliberately excludes blue (manager's) and has
 # 7 distinct entries so a typical team gets a unique color each. Per-agent
 # `card_color` in claudeteam.toml still wins (override).
 _AGENT_CARD_COLORS = {
@@ -113,8 +113,8 @@ def _color_for(agent: str, cfg_color: str | None = None) -> str:
     in claudeteam.toml wins; else manager → blue (fixed, "boss answer"
     weight); else EVERY OTHER agent → a distinct color cycled from
     `_AGENT_PALETTE` by its position among non-manager agents in team-config
-    order, so each agent's cards are a different color block (boss
-    2026-06-15). Falls back to the first palette color on any config hiccup."""
+    order, so each agent's cards are a different color block. Falls back to
+    the first palette color on any config hiccup."""
     if cfg_color:
         return cfg_color
     if agent in _AGENT_CARD_COLORS:        # manager → blue
@@ -137,10 +137,8 @@ def _emoji_for(agent: str, cfg_emoji: str | None = None) -> str:
 
 
 def _agent_card_title(agent: str, cfg: dict) -> str:
-    """Card title format ported from `main`'s `_agent_card_title`:
-    `{emoji} {agent} · {role}` — English agent id + Chinese role at a
-    glance, no more bare `[agent]` brackets that boss flagged as too
-    bland."""
+    """Card title format `{emoji} {agent} · {role}` — English agent id +
+    Chinese role at a glance, instead of bare `[agent]` brackets."""
     emoji = _emoji_for(agent, cfg.get("emoji"))
     role = cfg.get("role") or "系统"
     return f"{emoji} {agent} · {role}"

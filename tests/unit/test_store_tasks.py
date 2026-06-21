@@ -282,10 +282,10 @@ def test_approve_done_marks_complete():
 
 def test_approve_note_carries_verdict():
     """approve(note=) must persist the VERDICT into approval_note —
-    symmetric with reject's feedback. Regression smoke A1: a worker
-    resumed from a question-only anchor and invented the answer the
-    boss never gave; the decision content must ride the state machine,
-    not a free-text relay."""
+    symmetric with reject's feedback. REGRESSION: a worker resumed from
+    a question-only anchor and invented the answer the boss never gave;
+    the decision content must ride the state machine, not a free-text
+    relay."""
     with isolated_env():
         tid = tasks.create("w", "t")
         tasks.update(tid, status="进行中")

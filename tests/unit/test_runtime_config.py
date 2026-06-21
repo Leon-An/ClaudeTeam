@@ -478,8 +478,8 @@ def test_toml_remove_block_absent_is_noop():
 
 
 def test_toml_remove_block_preserves_next_sections_comment():
-    """tester F-1: firing codex must NOT eat kimi's comment that sits under
-    codex's last key (between the block body and kimi's header)."""
+    """Firing codex must NOT eat kimi's comment that sits under codex's
+    last key (between the block body and kimi's header)."""
     text = (
         "[team.agents.codex]\n"
         "cli = \"codex-cli\"\n"
@@ -511,7 +511,7 @@ def test_toml_format_value_types():
 
 
 def test_toml_format_value_escapes_control_chars_to_valid_toml():
-    """devops regression root: a multi-line value must serialize to a VALID
+    """REGRESSION: a multi-line value must serialize to a VALID
     single-line basic string (escaped newline), not a raw newline that makes
     the whole file unparseable."""
     import tomllib
@@ -523,7 +523,7 @@ def test_toml_format_value_escapes_control_chars_to_valid_toml():
     assert parsed["v"] == "line1\nline2\twith tab\n"
 
 
-# ── verbatim block stash/restore (devops fire→hire fidelity bug) ─────
+# ── verbatim block stash/restore (fire→hire fidelity bug) ───────────
 
 
 _MULTILINE_TOML = '''[team]

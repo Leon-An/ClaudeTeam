@@ -225,7 +225,7 @@ def _check_cursor(rep: HealthReport) -> None:
 
 
 def _check_memory(rep: HealthReport) -> None:
-    """Round-132: list agents that have written memory entries. Empty
+    """List agents that have written memory entries. Empty
     is normal on a fresh deploy; informational only. Surfaces
     persisted state that would otherwise need a `find facts/ -name
     memory.jsonl` to discover."""
@@ -310,7 +310,7 @@ def _emit_text(rep: HealthReport) -> None:
 def _emit_json(rep: HealthReport) -> None:
     """Machine-readable shape:
         {"ok": bool, "bad": int, "warn": int, "lines": [str, ...]}
-    Smoke conductors / CI can branch on `ok` and inspect `lines` for
+    CI / scripts can branch on `ok` and inspect `lines` for
     the rendered glyphs (which still appear in `lines`, just packaged)."""
     print_json({
         "ok": rep.bad == 0,

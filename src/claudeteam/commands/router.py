@@ -135,8 +135,8 @@ def _make_apply_with_wake(*, session: str, chat_id: str, profile: str,
 def _terminate_subscribe_group(proc: subprocess.Popen) -> None:
     """Kill the entire subscribe process group (npx + node + lark-cli).
 
-    Round 7 D2: router's plain proc.terminate() only signaled npx; the
-    lark-cli grandchild lived on as an orphan after each up/down cycle.
+    A plain proc.terminate() only signals npx; the lark-cli grandchild
+    then lives on as an orphan after each up/down cycle.
     Putting the subprocess in its own session (start_new_session=True at
     Popen time) means we can take the whole group out with one killpg.
     """
@@ -191,8 +191,8 @@ def _make_on_progress(last_event_at: list[float]) -> Callable:
       survives across process restarts. Without this, router self-
       restarts (driven by stale-detect or watchdog) re-apply messages
       that catchup re-fetches because seen_msg_ids was an in-memory
-      set (host_smoke 2026-05-06: /tmux manager card forwarded into
-      manager inbox every ~3.5min on every restart cycle).
+      set (e.g. a /tmux manager card forwarded into the manager inbox
+      every ~3.5min on every restart cycle).
     """
     def _on_progress(decision, stats):
         catchup.record_decision(decision)
@@ -215,18 +215,17 @@ def _platform_default_stale_event_threshold_s() -> float:
     behaviour, not a single-knob tuning problem.
 
     macOS (Darwin) → 120s. lark-cli 1.0.23 WebSocket subscribe silently
-    drops on macOS without reconnecting (verified 2026-05-09 host smoke:
-    subscribe child stayed alive but stopped delivering events; only
-    self-SIGTERM + watchdog respawn + catchup recovers). A tighter
+    drops on macOS without reconnecting (the subscribe child stays
+    alive but stops delivering events; only self-SIGTERM + watchdog
+    respawn + catchup recovers). A tighter
     threshold lets recovery happen in ~2 min instead of ~10. Quiet-chat
     overhead is acceptable on a dev laptop.
 
     Linux (and everything else) → 600s. WebSocket is stable here; quiet
     chats shouldn't churn through respawns. History on this platform:
-    1200s → too lax (2026-05-06 caught manager not seeing user msg for
-    7+ min); 180s → too tight (2026-05-07 fresh-user smoke caught a
-    genuinely quiet chat respawning every ~3 min, churning router.log
-    into a wall of "no events for 180s; respawning"). 600s is the
+    1200s → too lax (manager not seeing a user msg for 7+ min); 180s →
+    too tight (a genuinely quiet chat respawned every ~3 min, churning
+    router.log into a wall of "no events for 180s; respawning"). 600s is the
     calibrated middle.
     """
     import platform
@@ -313,8 +312,8 @@ def _notify_catchup_skips(default_target: str, *, dropped_stale: int,
                           slash_skipped: int) -> None:
     """After catchup, tell the routing-target agent (default manager) if the
     replay skipped anything — over-cap stale messages or un-replayed control
-    commands — so it doesn't over-claim it received the whole backlog
-    (F-catchup-visibility). No-op when nothing was skipped. Best-effort: a
+    commands — so it doesn't over-claim it received the whole backlog.
+    No-op when nothing was skipped. Best-effort: a
     notice-write failure must never break bring-up."""
     if dropped_stale <= 0 and slash_skipped <= 0:
         return
@@ -356,10 +355,10 @@ def main(argv: list[str]) -> int:
     try:
         # Two precautions on the subscribe child:
         # - env=lark.subprocess_env() strips HTTPS_PROXY under LARK_CLI_NO_PROXY=1
-        #   (round 6 D-class bug — lark-cli long-poll dies behind a proxy).
+        #   (lark-cli long-poll dies behind a proxy).
         # - start_new_session=True puts the npx → node → lark-cli chain in its
         #   own process group so SIGTERMing the router can kill the whole tree
-        #   in one killpg call (round 7 D2 — orphaned grandchildren).
+        #   in one killpg call (otherwise grandchildren are orphaned).
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -419,7 +418,7 @@ def main(argv: list[str]) -> int:
 
         # Persisted dedup set — survives daemon restarts so catchup
         # replay after stale-detect / watchdog respawn doesn't re-apply
-        # already-handled messages (host_smoke 2026-05-06 caught it).
+        # already-handled messages.
         seen = _load_seen_msg_ids()
 
         def _bump_subscribe_alive():
@@ -453,7 +452,7 @@ def main(argv: list[str]) -> int:
             cstats = process_lines(iter(pending), suppress_slash=True,
                                    catchup_slash_fresh_ms=_catchup_slash_fresh_ms(),
                                    **loop_kwargs)
-            # F-catchup-visibility: tell the routing-target agent if the
+            # Tell the routing-target agent if the
             # replay skipped anything (over-cap stale / un-replayed control
             # commands) so it doesn't over-claim it got the whole backlog.
             _notify_catchup_skips(

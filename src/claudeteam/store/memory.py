@@ -62,7 +62,7 @@ def _max_per_agent() -> int:
 # accepts any string so future kinds can land without a code change —
 # but unknown kinds get a soft stderr warning so boss `recall` reading
 # doesn't get a long-tail of free-form labels (`fyi`, `important!!!`,
-# `mood-of-day`) that fragment the schema. Round-106 added the warn.
+# `mood-of-day`) that fragment the schema.
 KNOWN_KINDS: tuple[str, ...] = (
     "task_assigned",
     "task_completed",
@@ -75,15 +75,14 @@ KNOWN_KINDS: tuple[str, ...] = (
 
 def kinds_summary() -> str:
     """`' / '`-joined list of KNOWN_KINDS — used by `claudeteam remember /
-    recall / forget` USAGE strings. Round-119: extracted from the three
-    CLI commands so the separator (and any future kinds) flows from one
-    place."""
+    recall / forget` USAGE strings. Extracted from the three CLI commands
+    so the separator (and any future kinds) flows from one place."""
     return " / ".join(KNOWN_KINDS)
 
 
 def kinds_sorted() -> list[str]:
     """Sorted list of KNOWN_KINDS — used by slash card handlers
-    (`/recall`, `/forget`) for in-card display. Round-120: 4 sites in
+    (`/recall`, `/forget`) for in-card display. Several sites in
     `feishu/slash.py` previously called `sorted(memory.KNOWN_KINDS)`
     inline; centralising here keeps the alphabetical-display contract
     in one place (Feishu boss reading two cards expects the same
@@ -96,9 +95,9 @@ def warn_unknown_kind(kind: str) -> None:
     stderr nudge with the convention list. No-op for empty / known
     kinds.
 
-    Round-156: extracted from `commands/recall` + `commands/forget`,
-    which inlined the same `warn(f"⚠️ --kind {kind!r} not in known
-    kinds ({sorted(KNOWN_KINDS)}); proceeding anyway")` block. The
+    Extracted from `commands/recall` + `commands/forget`, which inlined
+    the same `warn(f"⚠️ --kind {kind!r} not in known kinds
+    ({sorted(KNOWN_KINDS)}); proceeding anyway")` block. The
     slash-card siblings (`feishu/slash._handle_recall/_handle_forget`)
     don't use this — they embed the warning into a card body string
     with different formatting per command, so they keep their
@@ -160,10 +159,10 @@ def append(agent: str, kind: str, content: str, *, ref: str = "") -> dict:
     message_id, task_id, etc.) when the memory is tied to an external
     artefact — it is rendered verbatim into the recall view, not parsed.
 
-    Round-106: when `kind` isn't in KNOWN_KINDS, print a one-line
-    stderr warning suggesting a known kind. Doesn't reject the write
-    (free-form is sometimes the right call), just nudges so recall
-    output stays scannable.
+    When `kind` isn't in KNOWN_KINDS, print a one-line stderr warning
+    suggesting a known kind. Doesn't reject the write (free-form is
+    sometimes the right call), just nudges so recall output stays
+    scannable.
     """
     if kind and kind not in KNOWN_KINDS:
         import sys
@@ -222,10 +221,10 @@ def list_recent_filtered(agent: str, *,
                          kind: str = "", limit: int = 20) -> list[dict]:
     """Return up to `limit` most recent entries, oldest-first.
 
-    Round-141: when `kind` is set, scans the FULL memory window for
-    matches and slices to `limit` afterwards — so a hot agent with many
-    unrelated notes still surfaces rare kinds (e.g. one resolved
-    blocker among 100 task_completed rows). When `kind` is empty,
+    When `kind` is set, scans the FULL memory window for matches and
+    slices to `limit` afterwards — so a hot agent with many unrelated
+    notes still surfaces rare kinds (e.g. one resolved blocker among
+    100 task_completed rows). When `kind` is empty,
     behaves identically to `list_recent` so callers can use this as
     the single entry point regardless of whether they filter.
 
@@ -259,8 +258,8 @@ def clear_kind(agent: str, kind: str) -> int:
     """Drop only entries with `kind == <kind>` from `agent`'s memory.
 
     Returns the number of dropped entries (0 if the file is missing or
-    no entries match). Round-111: scalpel inside the scalpel — `forget
-    --kind blocker` lets boss / manager wipe one slice (e.g. resolved
+    no entries match). Scalpel inside the scalpel — `forget --kind
+    blocker` lets boss / manager wipe one slice (e.g. resolved
     blockers) while keeping decisions / learnings intact.
 
     Reads + filters + atomic-rewrites under the same flock the append

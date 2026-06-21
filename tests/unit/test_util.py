@@ -291,7 +291,7 @@ def test_reject_extra_args_returns_one_and_prints_when_leftover():
     assert "usage: foo bar" in msg
 
 
-# ── reject_flag_as_agent (F-cli-help-phantom guard) ──────────────
+# ── reject_flag_as_agent (flag-as-agent guard) ──────────────
 
 
 def test_reject_flag_as_agent_passes_real_name():
@@ -322,8 +322,8 @@ def test_reject_flag_as_agent_rejects_dash_prefixed():
 
 
 def test_read_jsonl_returns_empty_when_missing(tmp_dir_path=None):
-    """Round-90: missing file is the common 'no records yet' case;
-    callers shouldn't have to special-case existence."""
+    """Missing file is the common 'no records yet' case; callers
+    shouldn't have to special-case existence."""
     import tempfile, os
     from pathlib import Path
     with tempfile.TemporaryDirectory() as td:
@@ -376,7 +376,7 @@ def test_read_jsonl_skips_corrupt_lines_silently():
 
 def test_print_json_uses_canonical_formatting():
     """ensure_ascii=False so Chinese stays readable; indent=2 so jq /
-    smoke conductors get diff-friendly multi-line output. The trailing
+    scripts get diff-friendly multi-line output. The trailing
     newline is print()'s default, not part of json.dumps."""
     out = io.StringIO()
     with contextlib.redirect_stdout(out):

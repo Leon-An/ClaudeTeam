@@ -19,7 +19,7 @@ def _isolated_team(team_data):
 # All ready-marker strings across every adapter. capture_pane returns this
 # blob so wake.wait_until_ready short-circuits on the first poll regardless
 # of which CLI the test team uses. Without it each spawn paid the 60s
-# wake timeout (R172.b raised it from 20s for fresh-launch dialog headroom),
+# wake timeout (raised from 20s for fresh-launch dialog headroom),
 # and a 3-agent test took 180s of pure idle sleep.
 _ALL_READY_MARKERS = (
     "bypass permissions on\n? for shortcuts\n"        # claude-code
@@ -28,7 +28,7 @@ _ALL_READY_MARKERS = (
     ">\nType your request\n"                            # gemini-cli / qwen-code
     "⣾\n"  # a spinner (in every adapter's busy_markers) so provision's
            # inject_and_confirm sees the agent go busy and returns at once
-           # (no settle sleep / re-nudge) — F-respawn-not-autosubmit
+           # (no settle sleep / re-nudge)
 )
 
 
@@ -167,10 +167,10 @@ def test_start_picks_correct_spawn_cmd_per_cli():
 
 
 def test_start_propagates_state_dir_into_pane_env():
-    """REGRESSION: round 4 smoke caught that worker_cc's \`claudeteam say\`
-    wrote to ~/.claudeteam/facts/logs.jsonl instead of the project state
-    dir, because tmux send-keys spawned the CLI in a fresh shell that
-    didn't inherit CLAUDETEAM_STATE_DIR. Spawn line must prepend it."""
+    """REGRESSION: worker_cc's \`claudeteam say\` wrote to
+    ~/.claudeteam/facts/logs.jsonl instead of the project state dir,
+    because tmux send-keys spawned the CLI in a fresh shell that didn't
+    inherit CLAUDETEAM_STATE_DIR. Spawn line must prepend it."""
     team = {"session": "T", "agents": {"w_cc": {"cli": "claude-code"}}}
     with _isolated_team(team) as tmp, _fake_tmux() as fake:
         run_cli(["start"])

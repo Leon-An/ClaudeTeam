@@ -18,9 +18,9 @@ def test_help_prints_usage():
 
 
 def test_help_groups_commands_by_category():
-    """Round-93: usage output renders commands grouped by `[group label]`
-    section instead of a flat alphabetical wall. New operators see
-    related commands together (`[team lifecycle]` has start/up/down,
+    """Usage output renders commands grouped by `[group label]` section
+    instead of a flat alphabetical wall. New operators see related
+    commands together (`[team lifecycle]` has start/up/down,
     `[durable agent memory]` has remember/recall, etc.)."""
     rc, out, _ = run_cli(["--help"])
     assert rc == 0

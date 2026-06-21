@@ -6,14 +6,14 @@ Returns the `data` field of lark-cli's JSON response on success, `{}` if
 stdout is empty, `None` on any failure.  Proxy bypass is automatic when
 `LARK_CLI_NO_PROXY=1` is set in the environment.
 
-Round-86 perf note: an earlier draft of this docstring claimed
-"lark-cli routinely takes ~73 seconds per call". That was npx's
-package-lookup overhead, not the API. `resolve_cli_prefix` now picks
-the direct binary when one is on disk (`lark-cli` on PATH or the npx
-cache binary at `~/.npm/_npx/<hash>/node_modules/.bin/lark-cli`), so
-real round-trip is ~0.6s on macOS host. Default timeout = 90s gives
+Performance: prefer the direct lark-cli binary over `npx`. Going
+through `npx` adds npm's package-lookup overhead (tens of seconds per
+call); `resolve_cli_prefix` picks the direct binary when one is on disk
+(`lark-cli` on PATH or the npx cache binary at
+`~/.npm/_npx/<hash>/node_modules/.bin/lark-cli`), keeping a real
+round-trip around ~0.6s on a macOS host. Default timeout = 90s gives
 plenty of margin; bump via `CLAUDETEAM_LARK_TIMEOUT` only if your
-network actually IS slow.
+network actually is slow.
 
 Tests inject a fake subprocess.run via the `run=` kwarg.
 """
@@ -24,6 +24,7 @@ import os
 import pwd
 import shutil
 import subprocess
+import tempfile
 import time
 from typing import Callable
 
@@ -42,7 +43,10 @@ _PROXY_KEYS = ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy")
 # without an entrypoint script.
 _TENANT_TOKEN_URL = (
     "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal")
-_TENANT_TOKEN_CACHE = "/tmp/claudeteam_tenant_token.json"
+# Per-uid path in the system temp dir; the file is written 0600 (it
+# holds a bearer token and must not be world-readable on a shared host).
+_TENANT_TOKEN_CACHE = os.path.join(
+    tempfile.gettempdir(), f"claudeteam_tenant_token_{os.getuid()}.json")
 _TENANT_TOKEN_REFRESH_BUFFER_S = 60   # refetch when within 60s of expiry
 
 
@@ -121,8 +125,16 @@ def _ensure_tenant_token(*, fetch: Callable | None = None,
     if not fresh or not fresh.get("token"):
         return None
     try:
-        with open(cache_path, "w", encoding="utf-8") as fh:
-            fh.write(_json.dumps(fresh))
+        # The token is a bearer credential — create the cache owner-only
+        # (0600) and refuse to follow a pre-planted symlink, so no other
+        # local user on a shared host can read it from the temp dir.
+        fd = os.open(cache_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+                     | os.O_NOFOLLOW, 0o600)
+        try:
+            os.write(fd, _json.dumps(fresh).encode("utf-8"))
+        finally:
+            os.close(fd)
+        os.chmod(cache_path, 0o600)  # tighten perms if the file pre-existed
     except OSError:
         pass  # cache write best-effort; the in-memory return is the load-bearing path
     return str(fresh["token"])
@@ -170,7 +182,7 @@ def subprocess_env() -> dict[str, str]:
         # but LARKSUITE_CLI_APP_ID is missing`; token+app_id-only fails
         # the WebSocket subscribe with `app_id or app_secret is null`
         # (lark-cli's persistent-connection SDK re-auths off env-vars,
-        # not just the cached token). Both caught 2026-05-07 host smoke.
+        # not just the cached token).
         # Propagate all three together; if app_id/secret aren't available
         # in env, skip injection and let lark-cli's profile/keychain
         # path take over.
@@ -232,10 +244,10 @@ def _resolve_timeout(explicit: int | None) -> int:
     """Resolve subprocess timeout in seconds. Caller arg wins; otherwise
     routes through tunables (env > claudeteam.toml > default 90).
 
-    Round-64: clamp the final value to >=1 — a garbage env like
-    CLAUDETEAM_LARK_TIMEOUT=0 used to make subprocess.run
-    insta-TimeoutExpired on every call. Legacy `CLAUDETEAM_LARK_TIMEOUT`
-    env var still honored as backwards-compat alias.
+    Clamp the final value to >=1 — a garbage env like
+    CLAUDETEAM_LARK_TIMEOUT=0 would otherwise make subprocess.run
+    insta-TimeoutExpired on every call. The legacy
+    `CLAUDETEAM_LARK_TIMEOUT` env var is still honored as an alias.
     """
     if explicit is not None:
         return max(1, int(explicit))
@@ -280,11 +292,12 @@ def call(args: list[str], *, profile: str = "", timeout: int | None = None,
         print(f"  ⚠️ lark-cli could not be launched: {e}")
         return None
     if r.returncode != 0:
-        # Smoke v3 caught: lark-cli sometimes prints structured JSON
+        # lark-cli sometimes prints structured JSON
         # ({"ok":false,"msg":"invalid receive_id","code":230001}) to
-        # stdout AND exits non-zero. Old `stderr.splitlines()[-1]` returned
-        # just the trailing `}` and lost the real cause. Try JSON first
-        # (stdout, then stderr); fall back to the first non-empty line.
+        # stdout AND exits non-zero. A naive `stderr.splitlines()[-1]`
+        # returns just the trailing `}` and loses the real cause. Try
+        # JSON first (stdout, then stderr); fall back to the first
+        # non-empty line.
         for blob in (r.stdout, r.stderr):
             blob = (blob or "").strip()
             if not blob:
@@ -335,11 +348,10 @@ def _extract_error_message(full: dict) -> str:
       {"ok": false, "error": {"type": "api_error", "code": 230002,
                               "message": "HTTP 400: Bot/User can NOT be out of the chat."}}
 
-    Round-58 smoke caught this: when error is a structured dict, the
-    old `or "?"` chain returned the dict and the warning line printed
-    `{'type': ..., 'message': '...'}` — useless to operators. Now we
-    extract `error.message` when error is a dict, falling back through
-    msg / code / "?" if nothing useful is present.
+    When error is a structured dict, a naive `or "?"` chain returns the
+    dict and the warning line prints `{'type': ..., 'message': '...'}` —
+    useless to operators. Extract `error.message` when error is a dict,
+    falling back through msg / code / "?" if nothing useful is present.
     """
     if msg := full.get("msg"):
         return str(msg)

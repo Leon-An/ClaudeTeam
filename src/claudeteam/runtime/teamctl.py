@@ -46,15 +46,15 @@ def login_slash_enabled() -> bool:
     re-auth (/login). Kept SEPARATE from the lifecycle flag so /shutdown &
     /restart can be enabled while /login stays inert until the container's
     credentials are isolated from the host — otherwise a /login write would
-    clobber the operator's personal host credentials (devops 2026-06-14)."""
+    clobber the operator's personal host credentials."""
     return bool(tunables.tunable(_LOGIN_FLAG, False))
 
 
 _LOGIN_ALLOWED_CLIS_FLAG = "controls.login_allowed_clis"
-# CLIs whose creds devops verified are isolated from the host (per-agent
-# HOME / dedicated cred file), so a /login re-auth there can't reach the
-# operator's personal credentials. kimi (shared ~/.kimi) and gemini/qwen
-# are intentionally absent → hard-refused until isolated + added here.
+# CLIs whose creds are isolated from the host (per-agent HOME / dedicated
+# cred file), so a /login re-auth there can't reach the operator's personal
+# credentials. kimi (shared ~/.kimi) and gemini/qwen are intentionally
+# absent → hard-refused until isolated + added here.
 _DEFAULT_LOGIN_CLIS = "claude-code,codex-cli"
 
 
@@ -64,7 +64,7 @@ def login_allowed_clis() -> frozenset:
     HARD-REFUSED (not just warned): a /login write to a host-mounted cred
     dir would clobber the operator's personal credentials. Tunable
     `controls.login_allowed_clis` (comma-separated); defaults to the set
-    devops verified isolated (claude-code, codex-cli)."""
+    known to be isolated (claude-code, codex-cli)."""
     val = tunables.tunable(_LOGIN_ALLOWED_CLIS_FLAG, _DEFAULT_LOGIN_CLIS)
     if isinstance(val, str):
         items = [s.strip() for s in val.split(",") if s.strip()]

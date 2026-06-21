@@ -26,7 +26,7 @@ def _is_kimi_model(name: str) -> bool:
 
 def _kimi_config_path() -> Path:
     """kimi-cli's config file (its `--config-file` default), under the pane's
-    HOME. kimi uses the ambient HOME (Plan B: no per-agent isolation), which
+    HOME. kimi uses the ambient HOME (no per-agent isolation), which
     on the container is /root → /root/.kimi/config.toml. Its own module
     function so tests can patch the location."""
     return Path.home() / ".kimi" / "config.toml"
@@ -50,12 +50,12 @@ def _kimi_default_model() -> str:
 
 class KimiCodeAdapter(CliAdapter):
     def spawn_cmd(self, agent: str, model: str) -> str:
-        # F-kimi-hire-model-not-set (boss 2026-06-15): kimi-cli 1.47 does NOT
-        # re-apply config.toml `default_model` on a respawned / resumed
-        # session — first `up` works, but /restart & fire→hire land on
-        # "LLM not set, send /login" (the persisted ~/.kimi/sessions make
-        # kimi skip model bootstrap). So pass the model EXPLICITLY with -m
-        # rather than relying on kimi reading default_model itself.
+        # kimi-cli 1.47 does NOT re-apply config.toml `default_model` on a
+        # respawned / resumed session — first `up` works, but /restart &
+        # fire→hire land on "LLM not set, send /login" (the persisted
+        # ~/.kimi/sessions make kimi skip model bootstrap). So pass the
+        # model EXPLICITLY with -m rather than relying on kimi reading
+        # default_model itself.
         # Precedence: a kimi-valid team/argv model wins; else the config's
         # own default_model, force-applied; else omit -m (the old auto path —
         # buggy on respawn but no worse than before).
@@ -66,11 +66,10 @@ class KimiCodeAdapter(CliAdapter):
 
     def resubmit_on_idle(self) -> bool:
         # kimi-cli's TUI reads inject_and_confirm's re-sent submit key as an
-        # interrupt ("Interrupted by user" + context 0.0%, container
-        # 2026-06-16) — unlike claude/codex where the re-nudge is clean. So
-        # kimi opts out of the autosubmit re-nudge and gets a plain single
-        # inject (no worse than pre-fix) until kimi's submit/interrupt key
-        # semantics are handled on the kimi track (F-kimi-* / managed-model).
+        # interrupt ("Interrupted by user" + context 0.0%) — unlike
+        # claude/codex where the re-nudge is clean. So kimi opts out of the
+        # autosubmit re-nudge and gets a plain single inject until kimi's
+        # submit/interrupt key semantics are handled on the kimi track.
         return False
 
     def display_model(self, model: str) -> str:

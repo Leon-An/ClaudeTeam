@@ -120,8 +120,8 @@ def test_respawn_returns_false_on_oserror():
 
 
 def test_respawn_uses_devnull_when_log_file_unset():
-    """Default behavior: no log_file → stdout/stderr both DEVNULL.
-    Mirrors pre-R178 contract for any spec that doesn't opt in."""
+    """Default behavior: no log_file → stdout/stderr both DEVNULL, for
+    any spec that doesn't opt in."""
     import subprocess
     spec = _spec()
     captured = {}
@@ -138,8 +138,8 @@ def test_respawn_appends_to_log_file_when_set():
     """When spec.log_file is set, both stdout and stderr go to that file
     in append mode. Without this, transient daemon failures (router
     silently drops a slash, watchdog hits a Popen error) leave no trace.
-    REGRESSION: 2026-05-06 /tmux worker_cc silent failures couldn't be
-    diagnosed because router stdout was DEVNULL."""
+    REGRESSION: /tmux worker_cc silent failures couldn't be diagnosed
+    because router stdout was DEVNULL."""
     import os, tempfile
     from pathlib import Path
     with tempfile.TemporaryDirectory() as tmp:
@@ -175,7 +175,7 @@ def test_respawn_falls_back_to_devnull_when_log_file_open_fails():
     assert "log_file open failed" in out.getvalue()
 
 
-# ── orphan reap (round-65) ───────────────────────────────────────
+# ── orphan reap ──────────────────────────────────────────────────
 
 
 _PS_HEADER = "  PID  PPID COMMAND\n"
@@ -362,7 +362,7 @@ def test_supervise_enters_cooldown_after_max_retries():
 
 
 def test_supervise_calls_alert_fn_when_entering_cooldown():
-    """Round-82: cooldown entry triggers alert_fn(name, failed_at, cooldown_secs)
+    """Cooldown entry triggers alert_fn(name, failed_at, cooldown_secs)
     so callers can fan out to Feishu / pager / log."""
     spec = _spec(max_retries=2, cooldown_secs=600)
     states = {"router": ProcessState("router", fail_count=1)}
@@ -465,9 +465,9 @@ def test_default_specs_includes_router_pointing_at_state_dir():
         router = next(s for s in specs if s.name == "router")
         assert str(router.pid_file).startswith(str(tmp))
         assert router.spawn_cmd == ["claudeteam", "router"]
-        # Round-65: router spec ships with orphan-reap markers so the
-        # watchdog reaps stale lark-cli +subscribe processes left by a
-        # SIGKILL'd predecessor before respawning.
+        # router spec ships with orphan-reap markers so the watchdog
+        # reaps stale lark-cli +subscribe processes left by a SIGKILL'd
+        # predecessor before respawning.
         assert "@larksuite/cli" in router.orphan_markers
         assert "+subscribe" in router.orphan_markers
 

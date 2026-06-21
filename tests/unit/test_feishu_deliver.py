@@ -304,10 +304,9 @@ def test_slash_logs_warning_when_chat_send_returns_none():
 
     decision = Decision(action=Action.SLASH, text="/help",
                         msg_id="om_slash_test", create_time="0")
-    # Round-79: /help now returns a card dict; it routes through
-    # chat_send_card, not chat_send. Capture both sites so the test still
-    # exercises the failure path regardless of which transport the handler
-    # picked.
+    # /help returns a card dict; it routes through chat_send_card, not
+    # chat_send. Capture both sites so the test still exercises the
+    # failure path regardless of which transport the handler picked.
     chat_send_card_calls = []
 
     def failing_chat_send_card(chat_id, card, **kw):
@@ -332,7 +331,7 @@ def test_slash_logs_warning_when_chat_send_returns_none():
     assert "chat reply for om_slash_test failed to post" in log
 
 
-# ── inject-text composer (R172.b/R173) ───────────────────────────
+# ── inject-text composer ─────────────────────────────────────────
 
 
 def _decision(text, *, sender=""):
@@ -376,7 +375,7 @@ def test_compose_inject_text_omits_read_hint_when_local_id_blank():
 
 
 def test_compose_inject_text_summary_cue_adds_send_to_manager_hint():
-    """R173: when boss message asks for a summary / 汇总 / report,
+    """When a boss message asks for a summary / 汇总 / report,
     non-manager agents get an extra hint to also `claudeteam send
     manager` so manager's inbox pings (manager pane is blind to chat)."""
     out = _compose_inject_text(

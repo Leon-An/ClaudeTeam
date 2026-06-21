@@ -22,7 +22,7 @@ from claudeteam.feishu.router import Action, classify_event
 # Destructive team-lifecycle slashes — never auto-replay these from the
 # catchup path at ANY age: a replayed /restart runs `down`, which kills the
 # router before it can persist cursor/seen, so the respawn re-fetches and
-# re-runs it = the F-G2-restore crash-loop. /shutdown 确认 likewise tears
+# re-runs it = a crash-loop. /shutdown 确认 likewise tears
 # the team down on every bring-up.
 _LIFECYCLE_SLASH = ("/shutdown", "/restart")
 # Default freshness window: a catchup slash newer than this is treated as a
@@ -74,9 +74,8 @@ def _normalise(raw: dict) -> dict:
       `{"text": "..."}`.
     * Legacy / non-compact: Feishu webhook shape wrapped in `{event: {...}}`
       with nested `message: {chat_id, content, ...}` and
-      `sender: {sender_id: {open_id: ...}}`. The original rebuild only
-      handled this; round 3 smoke proved live lark-cli has switched to
-      the flat shape.
+      `sender: {sender_id: {open_id: ...}}`. The original code only
+      handled this; live lark-cli has since switched to the flat shape.
 
     Handle both. For each field, prefer the legacy nested location
     if present (so old fixtures keep working) then fall back to the
@@ -105,8 +104,7 @@ def _normalise(raw: dict) -> dict:
     # `sender_type: "user" | "app"` flat at top; webhook-shape and
     # chat-messages-list both put it inside `sender.sender_type` /
     # `sender.id_type`. Needed for bot-self detection so manager's
-    # own cards don't loop back into manager's inbox via catchup
-    # (host_smoke 2026-05-06: 7 forward loops before this caught).
+    # own cards don't loop back into manager's inbox via catchup.
     sender_type = (sender.get("sender_type")
                    or sender.get("id_type")
                    or ev.get("sender_type", ""))
@@ -261,14 +259,14 @@ def process_lines(lines: Iterable[str], *,
     `seen_msg_ids` lets the caller seed the dedup set across calls /
     process restarts. Used by the router to persist seen ids to
     state/router.seen.json so catchup-after-restart doesn't re-apply
-    messages that were already handled before the restart (host_smoke
-    2026-05-06: same /tmux manager card forwarded into manager inbox
-    every ~3.5min as router self-restarted).
+    messages that were already handled before the restart (otherwise the
+    same /tmux manager card gets forwarded into manager inbox every time
+    the router self-restarts).
 
     `suppress_slash` is set on the catchup path. It does NOT blanket-drop
     every slash — catchup is also the WS-fallback delivery path, so a blanket
     drop silently eats the boss's *fresh* slashes when the WebSocket is down
-    (the reported "slash slow / no response"; F-G2 regression). Instead, only
+    (a "slash slow / no response" regression). Instead, only
     a genuine stale-replay or a destructive lifecycle command is dropped — see
     `_catchup_suppresses_slash`. Suppressed slashes still advance the cursor
     (via on_progress) so a respawn doesn't re-encounter them.
@@ -286,9 +284,9 @@ def process_lines(lines: Iterable[str], *,
         # before classification. Even DROPs (bot_self / dedup / bad_json)
         # prove the lark-cli WebSocket is still emitting; only by counting
         # raw lines, not 'successfully handled events', can the watchdog
-        # tell quiet-but-alive apart from silent-stall. Caught 2026-05-08
-        # host smoke: chats with mostly bot self-talk would trip the 600s
-        # stall threshold even though subscribe was healthy.
+        # tell quiet-but-alive apart from silent-stall. Without this, chats
+        # with mostly bot self-talk would trip the 600s stall threshold
+        # even though subscribe was healthy.
         if on_line_received is not None:
             try:
                 on_line_received()
@@ -342,11 +340,10 @@ def process_lines(lines: Iterable[str], *,
             print(f"  ⚠️ apply_fn raised on {decision.msg_id}: {e}")
             _record_drop(stats, "apply_error")
             continue
-        # Mark seen ONLY after successful apply. Round-63: previous order
-        # added to seen BEFORE apply, which meant a transient apply
-        # failure permanently dedup'd the message (no retry possible
-        # within the process_lines run). With the new order, retries
-        # from catchup/replay can re-process.
+        # Mark seen ONLY after successful apply. Adding to seen BEFORE
+        # apply meant a transient apply failure permanently dedup'd the
+        # message (no retry possible within the process_lines run). With
+        # this order, retries from catchup/replay can re-process.
         if decision.msg_id:
             stats.seen_msg_ids.add(decision.msg_id)
         stats.handled += 1

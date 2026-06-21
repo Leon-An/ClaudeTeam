@@ -244,10 +244,10 @@ def approve(task_id: str, *, done: bool = False, note: str = "") -> bool:
     `note` carries the VERDICT (what the boss actually decided), symmetric
     with reject's `feedback`. It replaces the pending question in
     `approval_note` so the resumed task records what was decided, not just
-    that a decision happened — regression smoke A1 (2026-06-11): boss
-    approved '鱼香肉丝' but the gate only relayed '已批准·继续'; the worker
-    resumed from an anchor holding the question alone and invented its own
-    answer. Empty note keeps the historical clear-on-approve behavior.
+    that a decision happened — e.g. the boss approves '鱼香肉丝' but the
+    gate only relays '已批准·继续'; the worker resumes from an anchor
+    holding the question alone and invents its own answer. Empty note
+    keeps the historical clear-on-approve behavior.
     """
     with _locked():
         data = _load()
@@ -279,9 +279,9 @@ def reject(task_id: str, *, feedback: str = "", cancel: bool = False) -> bool:
 def void(task_id: str, *, reason: str = "", voided_by: str = "") -> bool:
     """Tombstone a task → 已取消 from ANY state, including the frozen
     terminal 已完成. This is the ONLY path that can retire a
-    mistakenly-completed task (smoke 2026-06-14: a duplicate task was
-    `done` and then had no exit — reject is 需审批-only and the generic
-    update() path freezes terminals).
+    mistakenly-completed task (e.g. a duplicate task was `done` and then
+    had no exit — reject is 需审批-only and the generic update() path
+    freezes terminals).
 
     Why this is safe even though update() deliberately freezes terminals:
     that freeze stops a *stray* `task update --status` from resurrecting +

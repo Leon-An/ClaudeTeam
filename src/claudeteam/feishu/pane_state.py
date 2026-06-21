@@ -5,9 +5,9 @@ doing right now (not just whatever they upserted into status.json).
 The classifier is content-aware: looks at trailing prompts, working
 spinners, compacting markers, etc.
 
-Lifted from the old branch's `commands/slash/team.py:parse_state_fallback`
-— same emoji/brief vocabulary so operators see consistent state across
-old and new deployments.
+The emoji/brief vocabulary here is the single source of truth for pane
+state, so operators see a consistent label wherever a pane is surfaced
+(`/team`, `peek`, …).
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ _KIMI_IDLE_RE = re.compile(r"context:\s*[\d.]+%|── input|Send /help for help
 def parse(buf: str) -> tuple[str, str]:
     """Classify a tmux pane capture into (emoji, brief).
 
-    Returns the same vocabulary as the old branch:
+    Returns the shared pane-state vocabulary:
       ⬜ no window / empty buffer
       🛑 CLI not running (back to bash)
       ⚠️ awaiting permission prompt

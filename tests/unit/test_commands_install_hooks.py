@@ -18,9 +18,9 @@ def test_install_hooks_creates_md_per_command():
 
         cmds_dir = Path(tmp) / ".claude" / "commands"
         assert cmds_dir.exists()
-        # Round-94 added remember/recall, round-104 added peek to keep
-        # slash dispatch consistent with the manager identity v2's 巡视
-        # cadence (was hard-coded raw tmux capture-pane).
+        # remember/recall and peek keep slash dispatch consistent with
+        # the manager identity's 巡视 cadence (was hard-coded raw tmux
+        # capture-pane).
         for name in ("inbox", "team", "status", "say", "task", "health",
                      "remember", "recall", "peek"):
             assert (cmds_dir / f"{name}.md").exists(), f"missing {name}.md"
@@ -28,9 +28,9 @@ def test_install_hooks_creates_md_per_command():
 
 
 def test_install_hooks_peek_md_documents_5min_cadence():
-    """Round-104: /peek hook teaches `claudeteam peek <agent> [N]` as
-    the branded 5-min 巡视 path, replacing manager identity v2's
-    hard-coded raw `tmux capture-pane -t {session}:<agent>`."""
+    """The /peek hook teaches `claudeteam peek <agent> [N]` as the
+    branded 5-min 巡视 path, replacing the manager identity's hard-coded
+    raw `tmux capture-pane -t {session}:<agent>`."""
     with tempfile.TemporaryDirectory() as tmp:
         run_cli(["install-hooks", tmp])
         body = (Path(tmp) / ".claude" / "commands" / "peek.md").read_text(
@@ -58,8 +58,8 @@ def test_install_hooks_remember_md_documents_kind_vocabulary():
 
 
 def test_install_hooks_say_md_documents_card_only_after_R169():
-    """R169: removed --no-card escape hatch — every chat message is a
-    card. The hook doc no longer mentions any plain-text path so claude
+    """Removed --no-card escape hatch — every chat message is a card.
+    The hook doc no longer mentions any plain-text path so claude
     agents don't try to opt out."""
     with tempfile.TemporaryDirectory() as tmp:
         run_cli(["install-hooks", tmp])
@@ -67,7 +67,7 @@ def test_install_hooks_say_md_documents_card_only_after_R169():
             encoding="utf-8")
         # Card-only messaging surfaced
         assert "v2 card" in body
-        assert "--no-card" not in body  # R169: escape hatch gone
+        assert "--no-card" not in body  # escape hatch gone
         # Invocation form documented
         assert "claudeteam say <your-name>" in body
         # Threading caveat surfaced
@@ -133,14 +133,14 @@ def test_install_hooks_help():
     assert "usage: claudeteam install-hooks" in out
 
 
-# ── pane-staleness warning (round 5 G15b) ─────────────────────────
+# ── pane-staleness warning ────────────────────────────────────────
 
 
 def test_install_hooks_warns_when_session_already_running():
-    """REGRESSION: round 5 smoke G15b — running install-hooks AFTER
-    \`claudeteam up\` is the wrong order; existing claude-code panes
-    have already cached their slash commands and won't pick up the
-    new files. install-hooks should warn loudly."""
+    """REGRESSION: running install-hooks AFTER \`claudeteam up\` is the
+    wrong order; existing claude-code panes have already cached their
+    slash commands and won't pick up the new files. install-hooks should
+    warn loudly."""
     team = {"session": "ClaudeTeam", "agents": {"manager": {}}}
     with isolated_env(team=team) as tmp, \
             tmux_patch(has_session=lambda s: s == "ClaudeTeam"):
