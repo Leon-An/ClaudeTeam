@@ -20,7 +20,7 @@ records for piping to jq / CI scripts.
 """
 from __future__ import annotations
 
-from claudeteam.store import memory
+from claudeteam.store import memory, team_memory
 from claudeteam.util import (
     error_exit, fmt_time_ms, maybe_print_help, pop_bool_flag, pop_flag,
     print_json, usage_error,
@@ -29,8 +29,10 @@ from claudeteam.util import (
 
 USAGE = (
     "usage: claudeteam recall <agent> [--limit N] [--kind K] [--json]\n"
+    "       claudeteam recall --team [--limit N] [--json]\n"
     f"       known kinds: {memory.kinds_summary()}\n"
-    "       (--kind accepts any string; unknown kinds get a stderr nudge)"
+    "       --kind accepts any string; unknown kinds get a stderr nudge\n"
+    "       --team reads the shared team experience (no agent arg needed)"
 )
 
 _DEFAULT_LIMIT = 20
@@ -41,6 +43,7 @@ def main(argv: list[str]) -> int:
     if maybe_print_help(rest, USAGE):
         return 0
     as_json = pop_bool_flag(rest, "--json")
+    from_team = pop_bool_flag(rest, "--team")
     raw_limit = pop_flag(rest, "--limit")
     kind_filter = pop_flag(rest, "--kind") or ""
     try:
@@ -49,6 +52,29 @@ def main(argv: list[str]) -> int:
         return error_exit(f"❌ --limit must be an integer (got {raw_limit!r})")
     if limit < 1:
         return error_exit("❌ --limit must be >= 1")
+
+    if from_team:
+        rows = team_memory.list_recent(limit=limit)
+        if as_json:
+            print_json(rows)
+            return 0
+        if not rows:
+            print("🤝 team: no shared experience yet")
+            return 0
+        print(f"🤝 team shared experience: {len(rows)} "
+              f"entr{'ies' if len(rows) != 1 else 'y'} "
+              f"(oldest first, capped at {limit})")
+        for row in rows:
+            ts = fmt_time_ms(row.get("created_at", 0))
+            kind = row.get("kind", "?")
+            content = row.get("content", "")
+            by = row.get("by", "")
+            ref = row.get("ref", "")
+            by_suffix = f"  (@{by})" if by else ""
+            ref_suffix = f"  (ref={ref})" if ref else ""
+            print(f"  [{ts}] [{kind}] {content}{by_suffix}{ref_suffix}")
+        return 0
+
     if len(rest) < 1:
         return usage_error(USAGE)
     agent = rest[0]

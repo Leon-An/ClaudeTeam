@@ -172,3 +172,39 @@ def test_recall_help_lists_known_kinds():
 def test_recall_registered_in_cli():
     from claudeteam.cli import COMMANDS
     assert "recall" in COMMANDS
+
+
+# ── --team (shared experience) ───────────────────────────────────
+
+
+def test_recall_team_reads_shared_pool_without_agent_arg():
+    from claudeteam.store import team_memory
+    with isolated_env():
+        team_memory.append("用两步结账", kind="decision", by="manager")
+        rc, out, _ = run_cli(["recall", "--team"])
+        assert rc == 0
+        assert "team shared experience" in out
+        assert "用两步结账" in out
+        assert "@manager" in out
+
+
+def test_recall_team_empty_friendly_message():
+    with isolated_env():
+        rc, out, _ = run_cli(["recall", "--team"])
+        assert rc == 0
+        assert "no shared experience yet" in out
+
+
+def test_recall_team_json():
+    from claudeteam.store import team_memory
+    with isolated_env():
+        team_memory.append("x", by="a")
+        rc, out, _ = run_cli(["recall", "--team", "--json"])
+        assert rc == 0
+        rows = json.loads(out)
+        assert rows[0]["by"] == "a"
+
+
+def test_recall_help_mentions_team():
+    rc, out, _ = run_cli(["recall", "--help"])
+    assert "--team" in out

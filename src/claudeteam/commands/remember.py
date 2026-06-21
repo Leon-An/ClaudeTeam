@@ -14,14 +14,16 @@ Convention for `kind` (not enforced):
 """
 from __future__ import annotations
 
-from claudeteam.store import memory
-from claudeteam.util import maybe_print_help, pop_flag, usage_error
+from claudeteam.store import memory, team_memory
+from claudeteam.util import (
+    maybe_print_help, pop_bool_flag, pop_flag, usage_error,
+)
 
 
 USAGE = (
-    "usage: claudeteam remember <agent> <kind> <content> [--ref <ref>]\n"
+    "usage: claudeteam remember <agent> <kind> <content> [--ref <ref>] [--team]\n"
     f"       known kinds: {memory.kinds_summary()}\n"
-    "       (any string accepted; unknown kinds get a stderr nudge)"
+    "       --team writes to the shared team experience (every agent sees it)"
 )
 
 
@@ -29,6 +31,7 @@ def main(argv: list[str]) -> int:
     rest = list(argv)
     if maybe_print_help(rest, USAGE):
         return 0
+    to_team = pop_bool_flag(rest, "--team")
     ref = pop_flag(rest, "--ref") or ""
     if len(rest) < 3:
         return usage_error(USAGE)
@@ -37,6 +40,14 @@ def main(argv: list[str]) -> int:
     # Join everything after kind into a single content string (so callers
     # can pass an unquoted message without surprising arg-count errors).
     content = " ".join(rest[2:])
+    if to_team:
+        # Shared pool: the agent arg records *who* contributed (`by`); the
+        # entry lands in state/share and reaches every agent's wake prompt.
+        record = team_memory.append(content, kind=kind, by=agent, ref=ref)
+        suffix = f" (ref={ref})" if ref else ""
+        print(f"🤝 team experience: [{kind}] by {agent}{suffix}  "
+              f"[{record['created_at']}]")
+        return 0
     record = memory.append(agent, kind, content, ref=ref)
     suffix = f" (ref={ref})" if ref else ""
     print(f"🧠 remembered: {agent}/{kind}{suffix}  [{record['created_at']}]")

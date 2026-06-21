@@ -33,6 +33,7 @@
 | [real_task_e2e.md](real_task_e2e.md) | 端到端真任务：老板 → manager → workers → 汇总，30-60 分钟真任务派活 | 重大改动后或想压测协作时 |
 | [reidentify.md](reidentify.md) | `claudeteam reidentify` 重新注入身份的几种触发情境 | post-compact 或 worker 记忆乱了 |
 | [compaction_survival.md](compaction_survival.md) | tasks 原话意图 `/compact` 后逐字幸存：真 agent + 真 /compact，三路 byte-exact 判据 + 反向对照 | 改 tasks 锚点/刷新接线后，或要对外展示抗压缩可验证性 |
+| [shared_experience.md](shared_experience.md) | 团队共享经验库：`remember --team` / `recall --team`，且新 agent 唤醒时自动注入 | 改共享经验 store 或身份注入后 |
 
 ## 归档：`_archive/`
 

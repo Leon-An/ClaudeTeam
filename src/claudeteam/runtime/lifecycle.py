@@ -417,6 +417,10 @@ def provision_pane(agent: str, target: tmux.Target) -> str:
     # defaulting to `agent` matches render's own fallback so the
     # rendered file is byte-identical.
     identity.write(agent, role=cfg.get("role") or agent, cli=cli, model=model)
+    # Each agent owns a private scratch dir for long reports / drafts so
+    # output doesn't collide in the shared repo cwd (see the workspace
+    # section that identity.render injects).
+    paths.agent_workspace(agent).mkdir(parents=True, exist_ok=True)
     if cfg.get("lazy"):
         local_facts.upsert_status(agent, "待命", "lazy: CLI starts on first message")
         return LAZY

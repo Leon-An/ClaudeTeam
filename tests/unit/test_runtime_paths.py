@@ -32,11 +32,47 @@ def test_facts_dir_is_state_subdir():
 
 
 def test_agent_dir_is_state_agents_subdir():
-    """Per-agent business state (identity.md + memory.jsonl) lives under
-    agents/<name>/ — distinct from claude's agent-home/<name> HOME."""
+    """Per-agent state (identity.md + memory.jsonl, plus workspace/ and the
+    home/ subdir) lives under agents/<name>/."""
     with tempfile.TemporaryDirectory() as tmp:
         with _state_env(tmp):
             assert paths.agent_dir("worker_cc") == Path(tmp) / "agents" / "worker_cc"
+
+
+def test_agent_workspace_is_under_agent_dir():
+    """Each agent's private scratch area is workspace/ inside its own dir."""
+    with tempfile.TemporaryDirectory() as tmp:
+        with _state_env(tmp):
+            assert (paths.agent_workspace("worker_cc")
+                    == Path(tmp) / "agents" / "worker_cc" / "workspace")
+
+
+def test_share_dir_is_state_subdir():
+    """Team-shared knowledge space sits beside facts/, owned by no agent."""
+    with tempfile.TemporaryDirectory() as tmp:
+        with _state_env(tmp):
+            assert paths.share_dir() == Path(tmp) / "share"
+
+
+def test_agent_home_nests_under_agent_dir_by_default():
+    """Merged layout: the CLI HOME is the home/ subdir of the agent's own
+    dir, so everything for one agent lives in one tree."""
+    from claudeteam.agents import claude_code
+    with tempfile.TemporaryDirectory() as tmp:
+        with _state_env(tmp):
+            assert (claude_code.agent_home("worker_cc")
+                    == str(Path(tmp) / "agents" / "worker_cc" / "home"))
+
+
+def test_agent_home_root_env_overrides_nesting():
+    """CLAUDETEAM_AGENT_HOME_ROOT relocates homes onto a separate mount
+    (e.g. a Docker credential volume)."""
+    from claudeteam.agents import claude_code
+    with tempfile.TemporaryDirectory() as tmp, \
+            tempfile.TemporaryDirectory() as homes:
+        with _state_env(tmp), env_patch(CLAUDETEAM_AGENT_HOME_ROOT=homes):
+            assert (claude_code.agent_home("worker_cc")
+                    == str(Path(homes) / "worker_cc"))
 
 
 def test_state_file_returns_path_without_mkdir():

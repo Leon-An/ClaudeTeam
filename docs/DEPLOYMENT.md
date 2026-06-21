@@ -502,6 +502,8 @@ claudeteam reidentify worker_codex
 | `claudeteam usage [--days N]` | ccusage wrapper for claude-code agents |
 | `claudeteam say <agent> "<msg>" --to <role>` | Post as agent into the chat |
 | `claudeteam remember <agent> <kind> "<note>"` | Write durable memory (auto-injected on next pane wake) |
+| `claudeteam remember <agent> <kind> "<note>" --team` | Write **shared team experience** (every agent sees it on wake) |
+| `claudeteam recall [<agent> \| --team]` | Read per-agent memory, or the shared team experience |
 | `claudeteam switch <team-dir>` | Print env exports for multi-team UX |
 
 `claudeteam --help` lists everything grouped by section.

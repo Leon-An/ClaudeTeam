@@ -86,7 +86,7 @@ CLAUDE.md item 18 (Dockerfile + compose) 的最小可行实现：
    find-generic-password` on the host and mounts the resulting file
    read-write into the container. Each `make deploy` refreshes.
 
-3. **Per-agent HOME=/data/agent-home/<agent>** — multiple
+3. **Per-agent HOME=state/agents/<agent>/home** — multiple
    panes sharing one ~/.claude.json corrupted on concurrent writes.
    Each agent now owns its own copy, seeded once from the host's
    ~/.claude.json (mounted RO at /root/host-claude.json).

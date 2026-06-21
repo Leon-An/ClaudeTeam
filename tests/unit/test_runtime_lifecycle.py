@@ -377,7 +377,7 @@ def test_ensure_agent_home_creates_dir_for_non_claude_cli():
     the shared operator HOME across panes."""
     from claudeteam.agents import claude_code
     team = {"agents": {"worker_gem": {"cli": "gemini-cli"}}}
-    with isolated_env(team=team), attr_patch(claude_code, _DATA_WRITABLE=False):
+    with isolated_env(team=team):
         lifecycle._ensure_agent_home("worker_gem", "gemini-cli")
         home = Path(claude_code.agent_home("worker_gem"))
         assert home.is_dir(), "per-agent HOME not created for non-claude CLI"
@@ -451,8 +451,7 @@ def _operator_cred(tmp: Path, rel: str, body: str) -> Path:
 def test_seed_copies_codex_oauth_into_isolated_home():
     from claudeteam.agents import claude_code
     team = {"agents": {"worker_codex": {"cli": "codex-cli"}}}
-    with isolated_env(team=team) as tmp, \
-            attr_patch(claude_code, _DATA_WRITABLE=False):
+    with isolated_env(team=team) as tmp:
         oper = _operator_cred(tmp, ".codex/auth.json", '{"tokens":"oauth"}')
         with env_patch(HOME=str(oper)):
             lifecycle._seed_cli_credentials("worker_codex", "codex-cli")
@@ -465,8 +464,7 @@ def test_seed_resolves_package_name_alias():
     adapter's process_name so the alias maps to the same qwen entry."""
     from claudeteam.agents import claude_code
     team = {"agents": {"worker_qwen": {"cli": "qwen-cli"}}}
-    with isolated_env(team=team) as tmp, \
-            attr_patch(claude_code, _DATA_WRITABLE=False):
+    with isolated_env(team=team) as tmp:
         oper = _operator_cred(tmp, ".qwen/oauth_creds.json", '{"q":1}')
         with env_patch(HOME=str(oper), OPENAI_API_KEY=None):
             lifecycle._seed_cli_credentials("worker_qwen", "qwen-cli")
@@ -480,8 +478,7 @@ def test_seed_skips_kimi_not_home_isolated():
     nothing is copied into a (would-be) isolated home."""
     from claudeteam.agents import claude_code
     team = {"agents": {"worker_kimi": {"cli": "kimi-cli"}}}
-    with isolated_env(team=team) as tmp, \
-            attr_patch(claude_code, _DATA_WRITABLE=False):
+    with isolated_env(team=team) as tmp:
         oper = _operator_cred(tmp, ".kimi/config.toml", "token=x")
         with env_patch(HOME=str(oper)):
             lifecycle._seed_cli_credentials("worker_kimi", "kimi-cli")
@@ -493,8 +490,7 @@ def test_seed_skips_gemini_when_api_key_set():
     """An API key authenticates gemini directly → no OAuth file to seed."""
     from claudeteam.agents import claude_code
     team = {"agents": {"worker_gem": {"cli": "gemini-cli"}}}
-    with isolated_env(team=team) as tmp, \
-            attr_patch(claude_code, _DATA_WRITABLE=False):
+    with isolated_env(team=team) as tmp:
         oper = _operator_cred(tmp, ".gemini/oauth_creds.json", '{"g":1}')
         with env_patch(HOME=str(oper), GEMINI_API_KEY="ai-key"):
             lifecycle._seed_cli_credentials("worker_gem", "gemini-cli")
@@ -505,8 +501,7 @@ def test_seed_skips_gemini_when_api_key_set():
 def test_seed_gemini_copies_when_no_api_key():
     from claudeteam.agents import claude_code
     team = {"agents": {"worker_gem": {"cli": "gemini-cli"}}}
-    with isolated_env(team=team) as tmp, \
-            attr_patch(claude_code, _DATA_WRITABLE=False):
+    with isolated_env(team=team) as tmp:
         oper = _operator_cred(tmp, ".gemini/oauth_creds.json", '{"g":1}')
         with env_patch(HOME=str(oper), GEMINI_API_KEY=None):
             lifecycle._seed_cli_credentials("worker_gem", "gemini-cli")
@@ -518,8 +513,7 @@ def test_seed_silent_when_source_absent():
     """Operator never logged this CLI in → no source file → silent skip."""
     from claudeteam.agents import claude_code
     team = {"agents": {"worker_codex": {"cli": "codex-cli"}}}
-    with isolated_env(team=team) as tmp, \
-            attr_patch(claude_code, _DATA_WRITABLE=False):
+    with isolated_env(team=team) as tmp:
         with env_patch(HOME=str(tmp / "empty_home")):
             lifecycle._seed_cli_credentials("worker_codex", "codex-cli")  # no raise
         dst = Path(claude_code.agent_home("worker_codex")) / ".codex" / "auth.json"
@@ -531,8 +525,7 @@ def test_seed_does_not_clobber_existing_dst():
     (older) operator copy — never overwrite an existing dest."""
     from claudeteam.agents import claude_code
     team = {"agents": {"worker_codex": {"cli": "codex-cli"}}}
-    with isolated_env(team=team) as tmp, \
-            attr_patch(claude_code, _DATA_WRITABLE=False):
+    with isolated_env(team=team) as tmp:
         dst = Path(claude_code.agent_home("worker_codex")) / ".codex" / "auth.json"
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_text("REFRESHED")
@@ -548,8 +541,7 @@ def test_seed_codex_leaves_config_toml_untouched():
     from claudeteam.agents import claude_code
     from claudeteam.agents.codex_cli import codex_home
     team = {"agents": {"worker_codex": {"cli": "codex-cli"}}}
-    with isolated_env(team=team) as tmp, \
-            attr_patch(claude_code, _DATA_WRITABLE=False):
+    with isolated_env(team=team) as tmp:
         cdir = Path(codex_home("worker_codex"))
         cdir.mkdir(parents=True, exist_ok=True)
         (cdir / "config.toml").write_text('[projects."/x"]\n')
@@ -571,8 +563,7 @@ def test_ensure_agent_home_seeds_codex_oauth():
     the home dir AND seeds the credential."""
     from claudeteam.agents import claude_code
     team = {"agents": {"worker_codex": {"cli": "codex-cli"}}}
-    with isolated_env(team=team) as tmp, \
-            attr_patch(claude_code, _DATA_WRITABLE=False):
+    with isolated_env(team=team) as tmp:
         oper = _operator_cred(tmp, ".codex/auth.json", "AUTH")
         with env_patch(HOME=str(oper)):
             lifecycle._ensure_agent_home("worker_codex", "codex-cli")

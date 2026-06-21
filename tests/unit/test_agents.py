@@ -129,7 +129,7 @@ def test_codex_spawn_sets_per_agent_codex_home():
     from claudeteam.agents.codex_cli import codex_home
     cmd = CodexCliAdapter().spawn_cmd("worker_codex", "")
     assert f"CODEX_HOME={codex_home('worker_codex')}" in cmd
-    assert codex_home("worker_codex").endswith("/worker_codex/.codex")
+    assert codex_home("worker_codex").endswith("/worker_codex/home/.codex")
 
 
 def test_codex_native_memory_path_is_agents_md_under_codex_home():

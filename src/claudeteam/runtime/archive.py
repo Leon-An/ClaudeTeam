@@ -18,9 +18,8 @@ alongside two records written into the archive dir:
                     `claudeteam hire <name>` can re-add it to the roster
                     and resurrect the same agent.
 
-Deliberately does NOT touch `<state_dir>/agent-home/<name>/` (the CLI's
-HOME — creds / cache): leaving it makes a rehire fast and matches the old
-behavior.
+Leaves the agent's `home/` subdir (the CLI's HOME — creds / cache) in
+place: keeping it makes a rehire fast and needs no fresh login.
 """
 from __future__ import annotations
 
@@ -89,11 +88,20 @@ def archive_agent(agent: str, cfg: dict | None, *, block_text: str = "",
     if dst.exists():  # fired twice in one day — keep both
         dst = root / f"{agent}_{stamp:%Y%m%d_%H%M%S}"
     src = paths.agent_dir(agent)
-    root.mkdir(parents=True, exist_ok=True)
+    dst.mkdir(parents=True, exist_ok=True)
     if src.exists() and src.is_dir():
-        shutil.move(str(src), str(dst))  # dst must not pre-exist (checked above)
-    else:
-        dst.mkdir(parents=True, exist_ok=True)
+        # Move business state into the tombstone but leave the `home/`
+        # subdir (the CLI's dotfiles + cached credentials) in place so a
+        # later `hire` is fast and needs no fresh login. Drop the now-empty
+        # shell otherwise so it matches a never-provisioned agent.
+        for item in src.iterdir():
+            if item.name == "home":
+                continue
+            shutil.move(str(item), str(dst / item.name))
+        try:
+            src.rmdir()
+        except OSError:
+            pass  # `home/` (or other survivors) still inside — keep the dir
     if block_text:
         (dst / ROSTER_BLOCK).write_text(block_text, encoding="utf-8")
     if cfg:

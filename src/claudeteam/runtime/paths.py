@@ -7,8 +7,11 @@ not set, falls back to `~/.claudeteam`.
 Layout:
     $CLAUDETEAM_STATE_DIR/
         facts/             ← inbox.json, status.json, logs.jsonl, heartbeats.json
-        agents/<name>/     ← per-agent business state: identity.md + memory.jsonl
-        agent-home/<name>/ ← claude-code's per-agent HOME (adapter detail)
+        share/             ← team-shared experience (experience.jsonl)
+        agents/<name>/     ← one dir per agent:
+                               identity.md, memory.jsonl
+                               workspace/  ← private scratch / long reports
+                               home/       ← the CLI's HOME (.claude / .codex / ...)
         router.pid         ← daemon pid files
         watchdog.pid
         router.cursor      ← catchup replay state
@@ -31,15 +34,30 @@ def facts_dir() -> Path:
 
 
 def agent_dir(agent: str) -> Path:
-    """Per-agent business-state dir: identity.md + memory.jsonl.
+    """Root of one agent's own space.
 
-    CLI-agnostic — the same location for every agent regardless of which
-    CLI it runs under. Deliberately distinct from claude-code's per-agent
-    HOME (`agent-home/<name>`, an adapter runtime detail where claude
-    looks for ~/.claude): this is where ClaudeTeam's own durable per-agent
-    state lives, and the native CLAUDE.md under agent-home is a projection
-    of it."""
+    Holds `identity.md` + `memory.jsonl`, the `workspace/` scratch dir, and
+    the `home/` subdir (the CLI's HOME, where claude looks for ~/.claude —
+    see `agents/claude_code.agent_home`). CLI-agnostic: the same location
+    for every agent regardless of which CLI it runs under. The native
+    CLAUDE.md under `home/` is a projection of the identity/memory kept
+    here."""
     return state_dir() / "agents" / agent
+
+
+def agent_workspace(agent: str) -> Path:
+    """Per-agent private scratch area (drafts, long reports, temp files).
+
+    Agents collaborate in the shared project repo (the pane's cwd); this
+    is the one directory each agent owns, so long content / scratch doesn't
+    collide across panes in the repo root."""
+    return agent_dir(agent) / "workspace"
+
+
+def share_dir() -> Path:
+    """Team-shared knowledge space: durable experience the whole team reads
+    and writes (distinct from `facts/`, which is live coordination state)."""
+    return state_dir() / "share"
 
 
 def state_file(name: str) -> Path:

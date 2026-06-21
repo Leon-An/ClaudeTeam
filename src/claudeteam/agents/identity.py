@@ -30,7 +30,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from claudeteam.runtime import config, paths
-from claudeteam.store import memory
+from claudeteam.store import memory, team_memory
 from claudeteam.util import atomic_write_text
 
 
@@ -68,6 +68,10 @@ _MEMORY_POLICY = """\
 - **blocker**：碰到当下解决不了、需要下次或他人接手的阻塞。
 - **task_completed**：完成一项被派的任务。
 - **task_assigned**：（manager）派出一项任务时。
+
+**全队复用的教训**（不只你一个人需要）：用
+`claudeteam remember <你的名字> <kind> "<一句话>" --team` 写进**团队共享经验**，
+会注入每个员工的上下文——例如“本仓库测试用 `python3 tests/run.py`”这类全队通用事实。
 
 绝不要记（这些是 `claudeteam log` 的活，不是 remember）：
 - 每一步微操作、临时状态（“正在改 X 文件”）、长日志、密钥 / token。
@@ -429,6 +433,28 @@ def _render_notes_section(notes: str) -> str:
     return f"\n\n## 备注\n\n{notes}"
 
 
+def _render_workspace_section(agent: str) -> str:
+    """Per-agent private scratch area. Absolute path so it resolves from
+    any pane CWD (claude / codex / ... spawn from different dirs)."""
+    ws = paths.agent_workspace(agent)
+    return (
+        f"\n\n## 你的私有工作区\n\n"
+        f"`{ws}` 是你独占的目录。长报告 / 草稿 / 临时文件 / 大段日志写这里——"
+        f"**不要**堆在共享仓库根目录（会和其他员工互撞）。群里只发摘要 + 这里的路径。"
+    )
+
+
+def _render_skills_section() -> str:
+    """Pointer to the committed, reusable skills index. Static — the index
+    teaches *which* skill *when*; agents read the actual SKILL.md on demand."""
+    return (
+        "\n\n## 可复用技能库（skills/）\n\n"
+        "团队在仓库 `skills/` 维护可复用流程，一个 skill 一个目录。遇到匹配场景，"
+        "先读 `skills/README.md` 选用，再按对应 `SKILL.md` 的步骤做；"
+        "别从零摸索已经沉淀好的流程。"
+    )
+
+
 def _render_team_specialties_block() -> str:
     """For manager prompt: list each non-manager agent's specialty so
     manager can dispatch with awareness. Empty if no agent has specialty."""
@@ -539,6 +565,8 @@ def render(agent: str, *, role: str | None = None,
     rendered += _render_specialty_section(specialty)
     rendered += _render_tone_section(tone)
     rendered += _render_notes_section(notes)
+    rendered += _render_workspace_section(agent)
+    rendered += _render_skills_section()
     if agent == "manager":
         rendered += _render_team_specialties_block()
     return rendered
@@ -611,7 +639,8 @@ def init_prompt(agent: str) -> str:
         )
     anchor = _render_intent_anchor(agent)
     recall = memory.render_for_prompt(agent)
-    tail = "\n\n".join(p for p in (anchor, recall) if p)
+    team = team_memory.render_for_prompt()
+    tail = "\n\n".join(p for p in (anchor, recall, team) if p)
     if not tail:
         return base
     return f"{base}\n\n{tail}\n\n继续之前未完成的工作；如已完成则确认并待命。"
@@ -646,6 +675,9 @@ def native_memory_text(agent: str, *, role: str | None = None,
     recall = memory.render_for_prompt(agent)
     if recall:
         parts.append(recall)
+    team = team_memory.render_for_prompt()
+    if team:
+        parts.append(team)
     return "\n\n".join(parts)
 
 

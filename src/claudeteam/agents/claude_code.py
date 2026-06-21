@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import json
-import os
 import shlex
 from pathlib import Path
 
 from claudeteam.runtime import paths
+from claudeteam.util import env_str
 
 from .base import CliAdapter, SPINNER_CHARS
 
@@ -31,37 +31,21 @@ def _read_oauth_token(agent: str) -> str | None:
 
 
 def agent_home(agent: str) -> str:
-    """Per-agent HOME for an isolated ~/.claude.json.
+    """Per-agent HOME — the `home/` subdir of the agent's own state dir.
 
-    Container deploys (Dockerfile mounts /data writable) use
-    /data/agent-home/<agent>. Host deploys (macOS firmlink read-only;
-    Linux without that mount) fall back to <state_dir>/agent-home/<agent>.
+    Defaults to `<state_dir>/agents/<agent>/home`, so each agent's CLI
+    dotfiles (`.claude` / `.codex` / `.gemini` / ...) sit in the same tree
+    as its `identity.md` + `memory.jsonl` — one directory per agent.
 
-    Probe writability rather than just existence: a Linux server might
-    have /data as a read-only data disk mount where mkdir would fail,
-    and macOS Big Sur+ has /data as a firmlink that exists() reports
-    True for in some setups but rejects writes. Cache the probe result
-    so we don't pay an os.access call per spawn.
+    Set `CLAUDETEAM_AGENT_HOME_ROOT` to relocate the homes onto a separate
+    mount (e.g. a Docker volume that persists credentials across image
+    rebuilds, or a writable path on macOS where `~` is a read-only
+    firmlink); the home is then `<root>/<agent>`.
     """
-    if _data_writable():
-        return f"/data/agent-home/{agent}"
-    return str(paths.state_dir() / "agent-home" / agent)
-
-
-_DATA_WRITABLE: bool | None = None
-
-
-def _data_writable() -> bool:
-    """Cached probe of whether /data/agent-home is a real writable dir."""
-    global _DATA_WRITABLE
-    if _DATA_WRITABLE is None:
-        base = Path("/data/agent-home")
-        try:
-            base.mkdir(parents=True, exist_ok=True)
-            _DATA_WRITABLE = os.access(base, os.W_OK)
-        except OSError:
-            _DATA_WRITABLE = False
-    return _DATA_WRITABLE
+    root = env_str("CLAUDETEAM_AGENT_HOME_ROOT")
+    if root:
+        return str(Path(root) / agent)
+    return str(paths.agent_dir(agent) / "home")
 
 
 class ClaudeCodeAdapter(CliAdapter):

@@ -93,8 +93,12 @@ on the other end, not a bot wall.
   Silence noisy traffic without losing the audit log.
 - **Multi-CLI** — Claude Code, Codex CLI, Kimi Code, Gemini CLI,
   Qwen Code can all run in the same team.
-- **Durable memory** — agent memory survives `/clear` and pane respawn,
-  auto-injected into the wake prompt.
+- **Durable memory** — each agent's memory survives `/clear` and pane
+  respawn, auto-injected into the wake prompt.
+- **Per-agent space + shared brain** — every agent gets its own
+  `workspace/` scratch dir and isolated CLI home; the team also shares a
+  pooled experience log (`remember --team`) and a reusable `skills/`
+  library, both surfaced on wake.
 - **Watchdog** — crashed daemons respawn with cooldown + Feishu chat
   alert when cooldown trips.
 - **Slash commands from chat** — `/help /team /health /usage /tmux

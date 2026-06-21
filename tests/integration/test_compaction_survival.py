@@ -38,7 +38,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from helpers import attr_patch, isolated_env, run_cli
+from helpers import isolated_env, run_cli
 from claudeteam.agents import claude_code, identity
 from claudeteam.store import tasks
 
@@ -65,7 +65,7 @@ def test_verbatim_intent_survives_simulated_compaction():
     """Full Layer-A loop: an online worker on a long, drifting task; after we
     model the compaction (re-read durable channels only), all three objective
     judges hold byte-for-byte."""
-    with isolated_env(team=_TEAM), attr_patch(claude_code, _DATA_WRITABLE=False):
+    with isolated_env(team=_TEAM):
         # online worker (native CLAUDE.md provisioned)
         identity.write("worker_cc")
 
@@ -105,7 +105,7 @@ def test_negative_control_inactive_task_leaks_no_verbatim():
     """Discriminating power: a task left 待处理 (anchor not engaged) puts NO
     verbatim ask in the durable file. So the positive test passes *because of*
     the anchor, not because the string is lying around anyway."""
-    with isolated_env(team=_TEAM), attr_patch(claude_code, _DATA_WRITABLE=False):
+    with isolated_env(team=_TEAM):
         identity.write("worker_cc")
         run_cli(["task", "intent", "create", RAW])
         run_cli(["task", "create", "worker_cc", "重构", "--intent", "I-1"])
@@ -120,7 +120,7 @@ def test_completed_task_drops_verbatim_from_durable_file():
     once the task completes, the stale ask must vanish from the durable file so
     a post-compaction reread can't resurrect a finished intent — while the
     immutable store keeps it for history."""
-    with isolated_env(team=_TEAM), attr_patch(claude_code, _DATA_WRITABLE=False):
+    with isolated_env(team=_TEAM):
         identity.write("worker_cc")
         run_cli(["task", "intent", "create", RAW])
         run_cli(["task", "create", "worker_cc", "重构", "--intent", "I-1"])
@@ -139,7 +139,7 @@ def test_recovers_active_intent_not_stale_completed_sibling():
     post-compaction durable context anchors ONLY the active ask — the agent
     comes back to the right task, never a finished one."""
     other = "把首页改成深色模式 [ANCHOR-OTHER-9999]"
-    with isolated_env(team=_TEAM), attr_patch(claude_code, _DATA_WRITABLE=False):
+    with isolated_env(team=_TEAM):
         identity.write("worker_cc")
         # active one
         run_cli(["task", "intent", "create", RAW])               # I-1

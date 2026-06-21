@@ -70,3 +70,25 @@ def test_remember_registered_in_cli():
     command`."""
     from claudeteam.cli import COMMANDS
     assert "remember" in COMMANDS
+
+
+def test_remember_team_writes_to_shared_pool_not_per_agent():
+    """--team redirects the entry to the shared team experience, recording
+    the agent as the contributor (`by`) and leaving the per-agent store
+    untouched."""
+    from claudeteam.store import team_memory
+    with isolated_env():
+        rc, out, _ = run_cli(["remember", "worker_cc", "learning",
+                              "测试用 python3 tests/run.py", "--team"])
+        assert rc == 0
+        assert "🤝 team experience" in out
+        assert memory.list_recent("worker_cc") == []   # not in the per-agent store
+        rows = team_memory.list_recent()
+        assert len(rows) == 1
+        assert rows[0]["by"] == "worker_cc"
+        assert rows[0]["content"] == "测试用 python3 tests/run.py"
+
+
+def test_remember_help_mentions_team():
+    rc, out, _ = run_cli(["remember", "--help"])
+    assert "--team" in out

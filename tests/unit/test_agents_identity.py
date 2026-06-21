@@ -471,7 +471,7 @@ def test_claude_adapter_native_memory_path_is_in_agent_home():
     HOME — so each agent gets its own native file with no collision."""
     path = claude_code.ClaudeCodeAdapter().native_memory_path("worker_cc")
     assert path is not None
-    assert path.endswith("/worker_cc/.claude/CLAUDE.md")
+    assert path.endswith("/worker_cc/home/.claude/CLAUDE.md")
     # Same HOME root the spawn_cmd uses → claude actually reads it.
     assert path.startswith(claude_code.agent_home("worker_cc"))
 
@@ -636,7 +636,7 @@ def test_write_also_writes_claude_native_memory_file():
     HOME fallback so the file lands inside the test's tmp state dir."""
     team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
                                       "role": "员工"}}}
-    with isolated_env(team=team), attr_patch(claude_code, _DATA_WRITABLE=False):
+    with isolated_env(team=team):
         memory.append("worker_cc", "learning", "auth uses bcrypt")
         identity.write("worker_cc")
         native = Path(claude_code.agent_home("worker_cc")) / ".claude" / "CLAUDE.md"
@@ -661,7 +661,7 @@ def test_refresh_native_memory_rewrites_anchor_to_current():
     disappearing when it completes (the stale-anchor case)."""
     team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
                                       "role": "员工"}}}
-    with isolated_env(team=team), attr_patch(claude_code, _DATA_WRITABLE=False):
+    with isolated_env(team=team):
         # provisioned while idle: native file exists, no anchor
         identity.write("worker_cc")
         assert "老板原话锚点" not in _native_path("worker_cc").read_text("utf-8")
@@ -683,7 +683,7 @@ def test_refresh_native_memory_noop_when_unchanged():
     no write."""
     team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
                                       "role": "员工"}}}
-    with isolated_env(team=team), attr_patch(claude_code, _DATA_WRITABLE=False):
+    with isolated_env(team=team):
         iid = tasks.create_intent("稳定的原话")
         _suspend_free_in_progress("worker_cc", "t", iid)
         assert identity.refresh_native_memory("worker_cc") is True
@@ -710,7 +710,7 @@ def test_refresh_native_memory_writes_for_codex():
     task transition re-projects its anchor just like claude-code."""
     team = {"agents": {"worker_codex": {"cli": "codex-cli", "model": "gpt-5.5",
                                         "role": "数据"}}}
-    with isolated_env(team=team), attr_patch(claude_code, _DATA_WRITABLE=False):
+    with isolated_env(team=team):
         iid = tasks.create_intent("原话")
         _suspend_free_in_progress("worker_codex", "t", iid)
         assert identity.refresh_native_memory("worker_codex") is True
@@ -761,7 +761,7 @@ def test_write_native_memory_failure_warns_not_silent():
     def boom(path, text):
         raise OSError(28, "No space left on device")
 
-    with isolated_env(team=team), attr_patch(claude_code, _DATA_WRITABLE=False):
+    with isolated_env(team=team):
         with attr_patch(identity, atomic_write_text=boom):
             with captured_stderr() as err:
                 identity._write_native_memory("worker_cc")   # must not raise
@@ -781,7 +781,7 @@ def test_refresh_native_memory_failure_warns_and_returns_false():
     def boom(path, text):
         raise OSError(13, "Permission denied")
 
-    with isolated_env(team=team), attr_patch(claude_code, _DATA_WRITABLE=False):
+    with isolated_env(team=team):
         iid = tasks.create_intent("会刷不进盘的原话")
         _suspend_free_in_progress("worker_cc", "活", iid)
         with attr_patch(identity, atomic_write_text=boom):
@@ -809,7 +809,7 @@ def test_task_cli_transition_refreshes_on_disk_anchor():
     removes it — both via the CLI, no manual reidentify."""
     team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
                                       "role": "员工"}}}
-    with isolated_env(team=team), attr_patch(claude_code, _DATA_WRITABLE=False):
+    with isolated_env(team=team):
         identity.write("worker_cc")               # online worker, idle
         run_cli(["task", "intent", "create", "原话：CLI 触发刷新"])
         run_cli(["task", "create", "worker_cc", "干活", "--intent", "I-1"])
@@ -830,7 +830,7 @@ def test_task_cli_reassign_moves_on_disk_anchor_between_agents():
     team = {"agents": {
         "worker_a": {"cli": "claude-code", "model": "sonnet", "role": "x"},
         "worker_b": {"cli": "claude-code", "model": "sonnet", "role": "y"}}}
-    with isolated_env(team=team), attr_patch(claude_code, _DATA_WRITABLE=False):
+    with isolated_env(team=team):
         identity.write("worker_a")
         identity.write("worker_b")
         run_cli(["task", "intent", "create", "跟着任务走的原话"])
@@ -853,3 +853,46 @@ def test_write_skips_native_memory_for_non_claude_cli():
         assert (tmp / "state" / "agents" / "worker_codex" / "identity.md").exists()
         # No native memory file written anywhere under state.
         assert list((tmp / "state").rglob("CLAUDE.md")) == []
+
+
+# ── workspace + shared experience + skills wiring ────────────────
+
+
+def test_render_includes_workspace_and_skills_sections():
+    """Every agent's identity carries its private workspace path + a pointer
+    to the reusable skills index."""
+    from claudeteam.runtime import paths
+    team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
+                                     "role": "员工"}}}
+    with isolated_env(team=team):
+        text = identity.render("worker_cc")
+        assert "你的私有工作区" in text
+        assert str(paths.agent_workspace("worker_cc")) in text
+        assert "skills/" in text
+        assert "SKILL.md" in text
+
+
+def test_init_prompt_injects_shared_team_experience():
+    """Team experience reaches the wake prompt alongside per-agent memory."""
+    from claudeteam.store import team_memory
+    team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
+                                     "role": "员工"}}}
+    with isolated_env(team=team):
+        team_memory.append("测试用 python3 tests/run.py",
+                           kind="learning", by="manager")
+        prompt = identity.init_prompt("worker_cc")
+        assert "团队共享经验" in prompt
+        assert "测试用 python3 tests/run.py" in prompt
+
+
+def test_native_memory_text_includes_shared_team_experience():
+    """The always-loaded native file (claude's CLAUDE.md) also carries the
+    shared experience so it survives /compact."""
+    from claudeteam.store import team_memory
+    team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
+                                     "role": "员工"}}}
+    with isolated_env(team=team):
+        team_memory.append("用两步结账", kind="decision", by="manager")
+        text = identity.native_memory_text("worker_cc")
+        assert "团队共享经验" in text
+        assert "用两步结账" in text
