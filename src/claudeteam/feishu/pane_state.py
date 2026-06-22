@@ -23,6 +23,12 @@ _WORK_TIME_RE = re.compile(r"\((\d+m\s*\d+s|\d+s)(?:\s*·[^)]*)?\)")
 _CODEX_IDLE_RE = re.compile(r"\b(?:gpt-\d|o1|o3|o4|codex)\S*\s+default\b")
 # Kimi idle: ready markers from adapter — "context:" line or "── input"
 _KIMI_IDLE_RE = re.compile(r"context:\s*[\d.]+%|── input|Send /help for help")
+# Gemini / Qwen (Ink) idle: the ready cursor (`Gemini>` / `qwen>`) sits at the
+# tail when waiting for input; qwen's welcome banner shows "Type your request".
+# These mirror the gemini/qwen adapters' declared ready_markers — without them
+# a healthy idle gemini/qwen pane fell through to 🔘 and falsely painted the
+# /team card yellow.
+_GEMINI_QWEN_IDLE_RE = re.compile(r"(?i)(?:gemini|qwen)\s*>\s*$")
 
 
 def parse(buf: str) -> tuple[str, str]:
@@ -59,5 +65,7 @@ def parse(buf: str) -> tuple[str, str]:
     if "permissions: yolo" in low or _CODEX_IDLE_RE.search(buf):
         return ("💤", "idle")
     if _KIMI_IDLE_RE.search(buf):
+        return ("💤", "idle")
+    if _GEMINI_QWEN_IDLE_RE.search(tail) or "type your request" in low:
         return ("💤", "idle")
     return ("🔘", tail.strip()[:40])

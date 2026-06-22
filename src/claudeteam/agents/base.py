@@ -84,6 +84,20 @@ class CliAdapter(ABC):
         """
         return True
 
+    def clear_command(self) -> str | None:
+        """The CLI's in-REPL command to clear / reset the conversation
+        context. claude-code / codex / gemini / qwen / kimi all expose
+        `/clear`, so that's the default; override (or return None) if a CLI
+        names it differently or has none."""
+        return "/clear"
+
+    def compact_command(self) -> str | None:
+        """The CLI's in-REPL command to compact / summarise context into a
+        shorter form. claude-code / codex / kimi call it `/compact` (the
+        default); gemini / qwen call it `/compress` and override. None if the
+        CLI has no compaction command."""
+        return "/compact"
+
     def display_model(self, model: str) -> str:
         """Human-facing model label for the agent's identity file.
 

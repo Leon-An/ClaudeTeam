@@ -884,15 +884,70 @@ def test_clear_injects_clear_then_init_prompt():
         sequence.append((str(target), text))
         return True
 
-    with _team_env(), tmux_patch(inject=fake_inject):
+    with _team_env(), tmux_patch(
+            inject=fake_inject,
+            capture_pane=lambda t, lines=80: "Thinking\n"):  # claude busy → confirm
         reply = slash.dispatch("/clear worker_cc", _ctx())
     # First inject: literal /clear
     assert sequence[0] == ("ClaudeTeam:worker_cc", "/clear")
-    # Second inject: identity init prompt — must contain agent name
+    # Second inject (via inject_and_confirm): identity init prompt
     assert sequence[1][0] == "ClaudeTeam:worker_cc"
     assert "worker_cc" in sequence[1][1]
     assert "agents/worker_cc/identity.md" in sequence[1][1]
     assert "✅" in reply
+
+
+# ── /clear + /compact are CLI-aware (per-adapter command, not hardcoded) ──
+
+
+def test_clear_uses_clear_for_codex_too():
+    """Every CLI exposes /clear — codex must get it injected (the adapter
+    declares the command), not be punted to /restart."""
+    sequence = []
+
+    def fake_inject(target, text, **kw):
+        sequence.append((str(target), text))
+        return True
+
+    with _team_env(), tmux_patch(
+            inject=fake_inject,
+            capture_pane=lambda t, lines=80: "esc to interrupt\n"):
+        reply = slash.dispatch("/clear worker_codex", _ctx())
+    assert sequence[0] == ("ClaudeTeam:worker_codex", "/clear")
+    assert "✅" in reply
+
+
+def test_compact_uses_compact_for_codex():
+    """codex compacts with /compact (same as claude) — injected, not punted."""
+    captured = []
+
+    def fake_inject(target, text, **kw):
+        captured.append((str(target), text))
+        return True
+
+    with _team_env(), tmux_patch(inject=fake_inject):
+        reply = slash.dispatch("/compact worker_codex", _ctx())
+    assert ("ClaudeTeam:worker_codex", "/compact") in captured
+    assert "/compact" in reply
+
+
+def test_compact_uses_compress_for_gemini():
+    """gemini/qwen compact via /compress — the handler injects the adapter's
+    command, proving it's per-CLI rather than a hardcoded '/compact'."""
+    from helpers import isolated_env
+    captured = []
+
+    def fake_inject(target, text, **kw):
+        captured.append((str(target), text))
+        return True
+
+    team = {"session": "ClaudeTeam",
+            "agents": {"worker_gem": {"cli": "gemini-cli"}}}
+    with isolated_env(team=team), tmux_patch(inject=fake_inject):
+        reply = slash.dispatch("/compact worker_gem",
+                               _ctx(agents=("worker_gem",)))
+    assert ("ClaudeTeam:worker_gem", "/compress") in captured
+    assert "/compress" in reply
 
 
 # ── unknown / fallback ───────────────────────────────────────────

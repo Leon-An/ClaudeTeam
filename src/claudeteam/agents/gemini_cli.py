@@ -67,3 +67,7 @@ class GeminiCliAdapter(CliAdapter):
     def submit_keys(self) -> list[str]:
         # Ink-based UI, same submit pattern as Codex / Kimi
         return list(MULTILINE_SUBMIT_KEYS)
+
+    def compact_command(self) -> str:
+        # gemini-cli compacts context with /compress (not /compact).
+        return "/compress"

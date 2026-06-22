@@ -151,13 +151,18 @@ def inject_and_confirm(target: tmux.Target, adapter: CliAdapter, text: str, *,
     # Check-then-nudge: if the inject already submitted (agent busy), return
     # immediately — no sleep, no stray keypress. Otherwise settle and re-send
     # the primary submit key, up to `attempts` times.
-    for _ in range(max(1, attempts)):
+    for i in range(max(1, attempts)):
         if is_busy(target, adapter, capture=capture):
             return True
         sleep(settle_s)
-        # Buffer already holds the text; just push submit again (a stray
-        # submit on an already-empty prompt is a harmless blank line).
-        send_keys(target, submit_keys[0])
+        # Re-nudge the primary key first (a freshly-ready pane often just
+        # dropped the submit on a large multi-line paste), then ESCALATE
+        # through the remaining candidate keys — one keypress per attempt.
+        # The escalation is what recovers a CLI whose real submit key isn't
+        # the assumed primary (e.g. a codex TUI that commits on a different
+        # key than M-Enter): re-nudging the same dead key forever would just
+        # leave the text wedged in the composer.
+        send_keys(target, submit_keys[min(i, len(submit_keys) - 1)])
     return is_busy(target, adapter, capture=capture)
 
 

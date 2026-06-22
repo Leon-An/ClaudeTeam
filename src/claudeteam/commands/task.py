@@ -88,8 +88,11 @@ def _reidentify_stale_anchor(agent: str) -> None:
             return
         if not wake.is_ready(target, adapter) or wake.is_busy(target, adapter):
             return  # idle gate: only inject at a quiet ready prompt
-        tmux.inject(target, identity.init_prompt(agent),
-                    submit_keys=adapter.submit_keys())
+        # Verified inject (escalates the submit key + confirms the pane went
+        # busy) instead of a bare fire-and-forget: a dropped submit on these
+        # non-reload CLIs (codex/qwen/kimi) is exactly what leaves the big
+        # identity prompt wedged + piling up in the composer.
+        wake.inject_and_confirm(target, adapter, identity.init_prompt(agent))
     except Exception:
         pass
 

@@ -78,6 +78,17 @@ def test_kimi_idle_via_input_marker():
     assert pane_state.parse(buf) == ("💤", "idle")
 
 
+def test_gemini_idle_via_ready_prompt():
+    """Idle gemini shows its `Gemini>` ready cursor at the tail. Was 🔘 (not a
+    healthy glyph → falsely yellowed the /team card); now 💤."""
+    assert pane_state.parse("output\nGemini> ")[0] == "💤"
+
+
+def test_qwen_idle_via_ready_prompt_and_welcome():
+    assert pane_state.parse("output\nqwen> ")[0] == "💤"
+    assert pane_state.parse("Qwen Code\nType your request")[0] == "💤"
+
+
 # ── fallback ──────────────────────────────────────────────────────
 
 

@@ -59,3 +59,7 @@ class QwenCodeAdapter(CliAdapter):
     def submit_keys(self) -> list[str]:
         # Ink-based UI, same submit pattern as Codex / Kimi / Gemini
         return list(MULTILINE_SUBMIT_KEYS)
+
+    def compact_command(self) -> str:
+        # qwen-code (a gemini-cli fork) compacts context with /compress.
+        return "/compress"

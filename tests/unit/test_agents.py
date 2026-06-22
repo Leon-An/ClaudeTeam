@@ -295,3 +295,22 @@ def test_ensure_workdir_trusted_idempotent_when_entry_exists():
         ensure_workdir_trusted(Path("/already/here"), config_path=cfg)
         # File unchanged
         assert cfg.read_text(encoding="utf-8") == original
+
+
+def test_clear_and_compact_commands_are_per_cli():
+    """/clear is universal; /compact is claude/codex/kimi, /compress for the
+    gemini-style CLIs — declared on the adapter so the slash handler injects
+    each agent's OWN command instead of a hardcoded one."""
+    from claudeteam.agents.claude_code import ClaudeCodeAdapter
+    from claudeteam.agents.codex_cli import CodexCliAdapter
+    from claudeteam.agents.gemini_cli import GeminiCliAdapter
+    from claudeteam.agents.qwen_code import QwenCodeAdapter
+    from claudeteam.agents.kimi_code import KimiCodeAdapter
+    for adapter in (ClaudeCodeAdapter(), CodexCliAdapter(), GeminiCliAdapter(),
+                    QwenCodeAdapter(), KimiCodeAdapter()):
+        assert adapter.clear_command() == "/clear"
+    assert ClaudeCodeAdapter().compact_command() == "/compact"
+    assert CodexCliAdapter().compact_command() == "/compact"
+    assert KimiCodeAdapter().compact_command() == "/compact"
+    assert GeminiCliAdapter().compact_command() == "/compress"
+    assert QwenCodeAdapter().compact_command() == "/compress"

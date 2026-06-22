@@ -619,30 +619,43 @@ def _handle_compact(args: str, ctx: SlashContext) -> str:
     agent = (parts[0] if parts else _default_agent(ctx)).strip()
     if (warn := _bad_agent(agent, ctx)):
         return warn
+    # Per-CLI compaction command: claude/codex/kimi `/compact`, gemini/qwen
+    # `/compress` (CliAdapter.compact_command). Inject the agent's OWN command,
+    # not a hardcoded one.
+    from claudeteam.agents import adapter_for_agent
+    from claudeteam.runtime import wake
+    try:
+        adapter = adapter_for_agent(agent)
+    except Exception:
+        return f"⚠️ /compact → {ctx.session}:{agent} · 无法解析其 CLI 适配器"
+    compact_cmd = adapter.compact_command()
+    if not compact_cmd:
+        return (f"⚠️ {ctx.session}:{agent}（{adapter.process_name()}）没有上下文压缩命令；"
+                f"用 /clear 清空或 /restart 重启")
     target = tmux.Target(ctx.session, agent)
-    ok = tmux.inject(target, "/compact")
+    ok = tmux.inject(target, compact_cmd)
     glyph = "✅" if ok else "❌"
     if not ok:
-        return f"❌ /compact → {ctx.session}:{agent} · tmux inject 失败"
-    # Brief settle so claude has a chance to either start compacting
-    # (REPL slash route) or hand the message to the LLM (text route).
-    # 2s is enough to surface the rejection marker without blocking the
-    # chat reply long enough to time out.
+        return f"❌ {compact_cmd} → {ctx.session}:{agent} · tmux inject 失败"
+    # Brief settle so the CLI either starts compacting (REPL slash route) or
+    # hands the message to the LLM (text route). 2s is enough to surface the
+    # rejection marker without blocking the chat reply long enough to time out.
     ctx.sleep(2.0)
     pane = tmux.capture_pane(target, lines=20) or ""
     if _COMPACT_REJECT_MARKER in pane:
-        return (f"⚠️ /compact → {ctx.session}:{agent} · claude 把 /compact 当成"
-                f"消息文本回了（autoinjected 时常见，2.x 行为）。建议 /clear 替代。")
-    # Schedule the re-identify on a background thread so the bot reply
-    # comes back to chat immediately (no 45s block).
+        return (f"⚠️ {compact_cmd} → {ctx.session}:{agent} · CLI 把命令当成消息文本回了"
+                f"（claude 2.x autoinject 时常见）。建议 /clear 替代。")
+    # Schedule the re-identify on a background thread so the bot reply comes
+    # back immediately. Verified inject — the big identity prompt can be
+    # dropped on a codex/qwen/kimi composer if fired-and-forgotten.
     init_msg = identity.init_prompt(agent)
 
     def _reidentify_later():
         ctx.sleep(_REIDENTIFY_DELAY_S)
-        tmux.inject(target, init_msg)
+        wake.inject_and_confirm(target, adapter, init_msg)
 
     ctx.background(_reidentify_later)
-    return (f"{glyph} /compact → {ctx.session}:{agent} · 已让 agent 自压缩上下文 · "
+    return (f"{glyph} {compact_cmd} → {ctx.session}:{agent} · 已让 agent 自压缩上下文 · "
             f"{int(_REIDENTIFY_DELAY_S)}s 后自动重注 identity")
 
 
@@ -694,13 +707,27 @@ def _handle_clear(args: str, ctx: SlashContext) -> str:
     agent = args.strip().split()[0]
     if (warn := _bad_agent(agent, ctx)):
         return warn
+    # All five CLIs expose `/clear`, but get it from the adapter rather than
+    # hardcoding — so a CLI that names it differently stays correct.
+    from claudeteam.agents import adapter_for_agent
+    from claudeteam.runtime import wake
+    try:
+        adapter = adapter_for_agent(agent)
+    except Exception:
+        return f"⚠️ /clear → {ctx.session}:{agent} · 无法解析其 CLI 适配器"
+    clear_cmd = adapter.clear_command()
     target = tmux.Target(ctx.session, agent)
-    if not tmux.inject(target, "/clear"):
-        return f"❌ /clear → {ctx.session}:{agent} · 送 /clear 失败"
-    ctx.sleep(2.0)
-    if not tmux.inject(target, identity.init_prompt(agent)):
-        return f"⚠️ /clear → {ctx.session}:{agent} · /clear 已送但 init_msg 重注入失败"
-    return f"✅ /clear → {ctx.session}:{agent} · 已 /clear + 重新入职 init_msg"
+    if clear_cmd:
+        if not tmux.inject(target, clear_cmd):
+            return f"❌ {clear_cmd} → {ctx.session}:{agent} · 送清屏命令失败"
+        ctx.sleep(2.0)
+    # The agent just lost its context — re-inject identity. Verified submit:
+    # a big multi-line prompt can be dropped on a codex/qwen/kimi composer.
+    if not wake.inject_and_confirm(target, adapter, identity.init_prompt(agent)):
+        return (f"⚠️ /clear → {ctx.session}:{agent} · {clear_cmd or ''} 已送但 "
+                f"identity 重注入未确认")
+    return (f"✅ /clear → {ctx.session}:{agent} · 已 {clear_cmd or '(无清屏命令)'}"
+            f"（{adapter.process_name()}）+ 重新入职")
 
 
 # Kanban columns rendered in this fixed order; same status vocabulary as
