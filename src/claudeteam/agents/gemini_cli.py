@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import shlex
 
-from .base import CliAdapter, MULTILINE_SUBMIT_KEYS
+from .base import AuthSlots, CliAdapter, MULTILINE_SUBMIT_KEYS
 from .claude_code import agent_home
 
 
@@ -57,6 +57,14 @@ class GeminiCliAdapter(CliAdapter):
 
     def process_name(self) -> str:
         return "gemini"
+
+    def auth_slots(self) -> AuthSlots:
+        # No long-term-token mode — api key, or its own oauth_creds (login).
+        return AuthSlots(
+            token_env=None,
+            api_key_envs=("GEMINI_API_KEY",),
+            login_credfile=".gemini/oauth_creds.json",
+        )
 
     def submit_keys(self) -> list[str]:
         # Ink-based UI, same submit pattern as Codex / Kimi

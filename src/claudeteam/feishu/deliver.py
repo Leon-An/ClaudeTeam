@@ -87,8 +87,10 @@ def _build_wake_args(agent: str, adapter) -> dict:
     actual job (deliver text) and isolates the cross-module wiring
     (lifecycle.pane_env_prefix, identity.init_prompt, status upsert).
     """
-    from claudeteam.runtime import tunables
-    spawn_cmd = f"{pane_env_prefix()} {adapter.spawn_cmd(agent, config.agent_model(agent))}"
+    from claudeteam.runtime import tunables, agent_auth
+    spawn_cmd = (f"{agent_auth.spawn_env_prefix(agent, adapter)} "
+                 f"{pane_env_prefix()} "
+                 f"{adapter.spawn_cmd(agent, config.agent_model(agent))}")
     return {
         "spawn_cmd": spawn_cmd,
         "init_msg": _identity.init_prompt(agent),

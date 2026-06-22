@@ -438,7 +438,9 @@ def provision_pane(agent: str, target: tmux.Target) -> str:
         import sys
         print(f"  ⚠️ {agent}: {e}", file=sys.stderr)
         return CONFIG_ERROR
-    cmd = f"{pane_env_prefix()} {adapter.spawn_cmd(agent, model)}"
+    from claudeteam.runtime import agent_auth
+    cmd = (f"{agent_auth.spawn_env_prefix(agent, adapter)} "
+           f"{pane_env_prefix()} {adapter.spawn_cmd(agent, model)}")
     if not tmux.spawn_agent(target, cmd):
         return SPAWN_FAILED
     # 60s ready timeout (was 20s): fresh container claude panes go

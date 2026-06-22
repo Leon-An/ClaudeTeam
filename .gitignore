@@ -28,8 +28,12 @@ dist/
 team.json
 runtime_config.json
 
-# docker compose env (contains secrets)
+# docker compose env (contains secrets) + per-agent CLI credentials
+# (runtime/agent_auth.py reads $CLAUDETEAM_SECRETS_FILE, default <state>/.env).
+# NEVER commit any of these — they hold OAuth tokens / API keys.
 .env
+secrets.env
+*.secrets.env
 /team-data/
 /docker-compose.override.yml
 

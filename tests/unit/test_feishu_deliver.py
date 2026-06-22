@@ -20,6 +20,14 @@ class _FakeAdapter:
     def ready_markers(self):
         return ["fake-ready"]
 
+    def process_name(self):
+        return "fake"
+
+    def auth_slots(self):
+        # No managed auth → agent_auth resolves to mode "none" (empty prefix),
+        # keeping these wake/spawn tests independent of auth.
+        return None
+
 
 def _adapter_factory(_agent):
     return _FakeAdapter()
@@ -234,6 +242,45 @@ def test_wake_fn_called_per_target_with_spawn_cmd():
     assert wake_calls[0][0] == "S:worker_a"
     assert "worker_a" in wake_calls[0][1]
     assert "opus" in wake_calls[0][1]
+
+
+def test_spawn_cmd_carries_resolved_auth_on_every_wake():
+    """TRIGGER PROOF: a configured long-term token reaches the actual spawn
+    command (and blanks ANTHROPIC_API_KEY by priority) via agent_auth — i.e.
+    auth resolution really fires on the lazy-wake spawn path, not just in
+    agent_auth's own unit test."""
+    class _Claudeish:
+        def submit_keys(self): return ["Enter"]
+        def spawn_cmd(self, agent, model): return f"claude {agent} {model}"
+        def ready_markers(self): return ["ready"]
+        def process_name(self): return "claude"
+        def auth_slots(self):
+            from claudeteam.agents.base import AuthSlots
+            return AuthSlots("CLAUDE_CODE_OAUTH_TOKEN", ("ANTHROPIC_API_KEY",),
+                             ".claude/.credentials.json", "CLAUDE_CODE_OAUTH_TOKEN")
+
+    decision = Decision(action=Action.ROUTE, targets=["worker_a"], text="x", msg_id="om")
+    captured = []
+
+    def fake_wake(target, adapter, *, spawn_cmd, **_kw):
+        captured.append(spawn_cmd)
+        return True
+
+    with isolated_env(team=_WAKE_TEAM):
+        from claudeteam.runtime import paths
+        envp = paths.state_dir() / ".env"
+        envp.parent.mkdir(parents=True, exist_ok=True)
+        envp.write_text("CLAUDE_CODE_OAUTH_TOKEN=tok\n")
+        apply(
+            decision,
+            adapter_for_agent=lambda _a: _Claudeish(),
+            tmux_inject=lambda *a, **kw: True,
+            wake_fn=fake_wake,
+            session="S",
+        )
+    assert len(captured) == 1
+    assert "CLAUDE_CODE_OAUTH_TOKEN=tok" in captured[0]     # token reached spawn
+    assert "ANTHROPIC_API_KEY=" in captured[0]              # api key blanked (token wins)
 
 
 def test_wake_fn_returning_false_still_attempts_inject():

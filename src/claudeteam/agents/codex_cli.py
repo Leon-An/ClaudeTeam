@@ -9,7 +9,7 @@ from __future__ import annotations
 import shlex
 from pathlib import Path
 
-from .base import CliAdapter, MULTILINE_SUBMIT_KEYS
+from .base import AuthSlots, CliAdapter, MULTILINE_SUBMIT_KEYS
 from .claude_code import agent_home
 
 
@@ -75,6 +75,15 @@ class CodexCliAdapter(CliAdapter):
 
     def process_name(self) -> str:
         return "codex"
+
+    def auth_slots(self) -> AuthSlots:
+        # codex reads auth.json itself via CODEX_HOME (login = file present);
+        # a token / api key blanks it so neither overrides the file.
+        return AuthSlots(
+            token_env="CODEX_ACCESS_TOKEN",
+            api_key_envs=("OPENAI_API_KEY",),
+            login_credfile=".codex/auth.json",
+        )
 
     def submit_keys(self) -> list[str]:
         return list(MULTILINE_SUBMIT_KEYS)

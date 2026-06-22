@@ -13,12 +13,36 @@ concrete capability needs them, not before.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
 
 # Submit-key sequence for multi-line CLIs (Codex / Kimi use Ink + prompt_toolkit
 # style multi-line input where Enter inserts a newline, M-Enter commits the
 # buffer). Plain `Enter` is kept as a fallback for single-line edge cases.
 MULTILINE_SUBMIT_KEYS = ("M-Enter", "Enter", "C-m", "C-j")
+
+
+@dataclass(frozen=True)
+class AuthSlots:
+    """Where a CLI looks for its credential, by mode. `runtime.agent_auth`
+    reads this off the adapter and resolves which one to use, by priority
+    long-term token > login > api_key. Per-CLI *data* lives here on the
+    adapter (next to spawn_cmd / ready_markers); the *resolution* (priority,
+    secrets-file read, conflict-blanking) is the CLI-agnostic algorithm in
+    agent_auth.
+
+      token_env       — env var holding a long-term token, or None if the CLI
+                        has no such mode.
+      api_key_envs    — env var(s) holding an API key, in preference order.
+      login_credfile  — the CLI's own login creds file, relative to the agent
+                        HOME (present = "logged in"), or None.
+      login_token_env — if set, materialise the login file's token into this
+                        env on spawn (claude's keychain-avoidance trick).
+    """
+    token_env: str | None
+    api_key_envs: tuple[str, ...]
+    login_credfile: str | None
+    login_token_env: str | None = None
 
 
 class CliAdapter(ABC):
@@ -37,6 +61,14 @@ class CliAdapter(ABC):
     @abstractmethod
     def process_name(self) -> str:
         """/proc/<pid>/comm value; used to find the CLI process under a pane."""
+
+    def auth_slots(self) -> "AuthSlots | None":
+        """Where this CLI's credential lives, for runtime.agent_auth's
+        token > login > api_key resolution. Default None = "unmanaged": the
+        orchestrator places / blanks nothing (e.g. kimi, which shares the
+        operator's ~/.kimi with no per-agent isolation). CLIs with an
+        isolated per-agent HOME override to declare their slots."""
+        return None
 
     def submit_keys(self) -> list[str]:
         """Tmux keys to try in order to commit a line of input.
