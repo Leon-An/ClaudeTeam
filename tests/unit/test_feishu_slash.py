@@ -1295,8 +1295,32 @@ def test_login_cli_allowed_when_in_allowlist_tunable():
                 reply = slash.dispatch("/login kimi",
                                        _ctx(agents=("manager", "worker_kimi")))
     md = _all_markdown(reply)
-    assert "未启用" not in md                 # now allowed (not hard-refused)
-    assert "不经大模型" in md and "pane 里直接跑" in md   # interactive → path-B guidance
+    assert "未启用" not in md                 # allowlisted → not hard-refused
+    assert "自动补一张卡" in md                # kimi = device-code → Path A (pure-chat, fire-and-forget)
+    assert "pane 里直接跑" not in md           # NOT Path B (kimi isn't interactive paste-back)
+    assert "共享 HOME" in md                   # shared ~/.kimi warning still shown
+
+
+def test_login_no_subcommand_cli_routes_to_env_key_card():
+    """gemini/qwen have no scriptable re-auth subcommand → /login surfaces the
+    .env API-key route (agent_auth) instead of running a fake `auth login`."""
+    from helpers import env_patch
+    from claudeteam.runtime import tunables
+    team = {"session": "ClaudeTeam", "agents": {
+        "manager": {"cli": "claude-code"},
+        "worker_g": {"cli": "gemini-cli"}}}
+    with isolated_env(team=team) as tmp:
+        toml = tmp / "controls.toml"
+        toml.write_text("[controls]\nlogin_allowed_clis = \"claude-code,gemini-cli\"\n",
+                        encoding="utf-8")
+        with env_patch(CLAUDETEAM_CONFIG_FILE=str(toml)):
+            tunables.reset_cache()
+            with attr_patch(_teamctl, login_slash_enabled=lambda: True):
+                reply = slash.dispatch("/login gemini",
+                                       _ctx(agents=("manager", "worker_g")))
+    md = _all_markdown(reply)
+    assert "GEMINI_API_KEY" in md and ".env" in md   # routed to the .env-key card
+    assert "agent_auth" in md                         # points at the agent_auth route
 
 
 # ── security: the /login verification-surface scraper ──────────────

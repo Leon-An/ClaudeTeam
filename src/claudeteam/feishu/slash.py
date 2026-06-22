@@ -915,29 +915,45 @@ _LOGIN_CLI_ALIASES = {
 # whose creds are NOT per-agent-isolated (kimi) — those are hard-refused by
 # the allowlist anyway. Zero-LLM: codex login --device-auth prints URL+code
 # to stdout (e.g. "one-time code: MMLU-W452Y"); claude auth login is a real
-# subcommand. gemini/qwen are best-effort starting points (not in the
-# default allowlist).
-# `interactive` = the login waits for the user to paste a code back to STDIN
-# (claude `auth login`: prints URL → "Paste code here >"). A pure-chat relay
-# of that paste would have to survive the ~135s router respawn that the
-# get-URL→authorize→paste window inevitably spans (the OAuth URL is bound to
-# the live process, so the SAME process must both emit the URL and read the
-# code) — a detached-subprocess + persistent-FIFO + cross-restart registry
-# that's fragile enough to leave a half-login worse than none. So interactive
-# CLIs take path B: the router surfaces guidance to complete it in the pane
-# (still zero-LLM — `claude auth login` is a CLI auth command, not inference,
-# so it works at 401). codex is fire-and-forget (False) = full pure-chat.
+# subcommand. `env_key` is the secrets-.env var agent_auth would use instead
+# — the right path for the CLIs that can't be scripted (gemini/qwen).
+#
+# Verified mid-2026 against the installed CLIs + current source:
+#   claude `auth login`         — PASTE-BACK (prints URL, waits on stdin for
+#                                  the pasted code) → interactive, Path B.
+#   codex `login --device-auth` — DEVICE-CODE, self-polling, fire-and-forget
+#                                  (URL + code to stdout) → Path A, pure chat.
+#   kimi `login --json`         — device-code self-polling too, but shared
+#                                  ~/.kimi → allowlist hard-refuses it.
+#   gemini / qwen               — no re-auth subcommand at all → login_argv
+#                                  None → /login surfaces the .env-key card.
+# `interactive` True = paste-back (Path B: router can't relay the stdin paste
+# across the ~135s respawn the URL→authorize→paste window spans, so it guides
+# the operator to finish in the pane — still zero-LLM, works at 401). False =
+# device-code fire-and-forget (Path A, full pure-chat). claude is the only
+# interactive one.
 _LOGIN_SPEC = {
     "claude-code": {"login_argv": ["claude", "auth", "login"], "interactive": True,
-                    "env_var": "HOME",       "cred_relpath": ".claude/.credentials.json", "shared_home": False},
+                    "env_var": "HOME",       "cred_relpath": ".claude/.credentials.json",
+                    "shared_home": False, "env_key": "CLAUDE_CODE_OAUTH_TOKEN"},
     "codex-cli":   {"login_argv": ["codex", "login", "--device-auth"], "interactive": False,
-                    "env_var": "CODEX_HOME", "cred_relpath": ".codex/auth.json",          "shared_home": False},
-    "gemini-cli":  {"login_argv": ["gemini", "auth", "login"], "interactive": True,
-                    "env_var": "HOME",       "cred_relpath": ".gemini/oauth_creds.json",  "shared_home": False},
-    "qwen-code":   {"login_argv": ["qwen", "auth", "login"], "interactive": True,
-                    "env_var": "HOME",       "cred_relpath": ".qwen/oauth_creds.json",    "shared_home": False},
-    "kimi-code":   {"login_argv": ["kimi", "login"], "interactive": True,
-                    "env_var": "HOME",       "cred_relpath": ".kimi",                     "shared_home": True},
+                    "env_var": "CODEX_HOME", "cred_relpath": ".codex/auth.json",
+                    "shared_home": False, "env_key": "CODEX_ACCESS_TOKEN"},
+    # gemini/qwen have NO standalone re-auth subcommand (gemini never did;
+    # qwen's `auth` was removed 2026-06-22 + its free OAuth tier is gone) →
+    # login_argv=None routes /login to the "set an API key in .env" card.
+    "gemini-cli":  {"login_argv": None, "interactive": False,
+                    "env_var": "HOME",       "cred_relpath": ".gemini/oauth_creds.json",
+                    "shared_home": False, "env_key": "GEMINI_API_KEY"},
+    "qwen-code":   {"login_argv": None, "interactive": False,
+                    "env_var": "HOME",       "cred_relpath": ".qwen/oauth_creds.json",
+                    "shared_home": False, "env_key": "DASHSCOPE_API_KEY"},
+    # kimi login is device-code self-polling (NOT interactive paste-back) and
+    # --json gives clean events — but kimi shares ~/.kimi (shared_home) so the
+    # allowlist hard-refuses it regardless.
+    "kimi-code":   {"login_argv": ["kimi", "login", "--json"], "interactive": False,
+                    "env_var": "HOME",       "cred_relpath": ".kimi",
+                    "shared_home": True, "env_key": None},
 }
 
 
@@ -951,7 +967,10 @@ def _login_env(cli: str, agent: str) -> dict:
     env = dict(os.environ)
     spec = _LOGIN_SPEC[cli]
     if spec["env_var"] == "CODEX_HOME":
-        env["CODEX_HOME"] = f"{agent_home(agent)}/.codex"
+        codex_home = f"{agent_home(agent)}/.codex"
+        # codex hard-errors if CODEX_HOME is set but the dir is missing.
+        os.makedirs(codex_home, exist_ok=True)
+        env["CODEX_HOME"] = codex_home
     else:
         env["HOME"] = agent_home(agent)
     return env
@@ -1103,6 +1122,20 @@ def _handle_login(args: str, ctx: SlashContext) -> dict:
     warn_line = ""
     if spec["shared_home"]:
         warn_line = ("\n\n⚠️ **共享 HOME**：本次登录会影响**所有**该 CLI pane 的凭证。")
+
+    if spec["login_argv"] is None:
+        # No standalone re-auth subcommand for this CLI (gemini never had one;
+        # qwen's was removed) — point the operator at the .env credential route,
+        # which is the right path for these anyway.
+        ek = spec["env_key"] or "API key"
+        return simple_card(
+            f"🔑 /login {alias} → {agent} · 该 CLI 无可脚本化登录",
+            f"`{cli}` 没有可被 router 直接拉起的重登子命令"
+            f"（gemini 从来没有；qwen 的已于 2026-06-22 移除）。\n"
+            f"**正确做法**：在 secrets `.env`（默认 `<state>/.env`）配 `{ek}=<key>`"
+            f"（单独给本 agent 用 `<AGENT大写>_{ek}`）——`agent_auth` 会按 "
+            f"token>login>api_key 自动采用，下次该 agent 起 CLI 时生效。",
+            color="yellow")
 
     argv_str = " ".join(spec["login_argv"])
     if spec["interactive"]:
