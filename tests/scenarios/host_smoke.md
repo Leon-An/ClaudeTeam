@@ -368,7 +368,7 @@ claudeteam down
 ## 已知的本机特有怪现象
 
 1. **`/usage` 的 Claude Code 段会显示「读取失败」**——macOS 上 claude OAuth 存在 keychain，不在文件里。ccusage 找不到 `~/.claude/.credentials.json`。Codex 与 Kimi 段正常
-2. **重新部署后 worker pane 可能「Not logged in」**——claude 续期 token 时只更新 keychain，每个 agent home 下的 `state/agents/<agent>/home/.claude/.credentials.json` 是当时快照，过几天会过期。临时解：`claudeteam down && claudeteam up`，让 lifecycle 从 keychain 重新物化一遍
+2. **重新部署后 worker pane 可能「Not logged in」**——claude 的 login（订阅）凭证是物化进 `state/agents/<agent>/home/.claude/.credentials.json` 的快照，过几天会过期。临时解：`claudeteam down && claudeteam up` 从 keychain 重新物化一遍。**持久解**：在 secrets `.env`（`$CLAUDETEAM_SECRETS_FILE`，默认 `<state>/.env`，已 gitignore）里写 `CLAUDE_CODE_OAUTH_TOKEN=<claude setup-token>`（`claude setup-token` 生成的 ~1 年长期 token）——`agent_auth` 按 token>login>api_key 优先吃它，不再受快照过期影响；要单独给某个 agent 用 `<AGENT_大写>_CLAUDE_CODE_OAUTH_TOKEN`（如 `WORKER_CC_CLAUDE_CODE_OAUTH_TOKEN`）。同理 codex 用 `CODEX_ACCESS_TOKEN`、gemini/qwen 用 `GEMINI_API_KEY`/`DASHSCOPE_API_KEY`
 3. **codex 启动可能弹更新框**——挡住 ready marker 60 秒超时。手动 `tmux send-keys -t ClaudeTeam:worker_codex 3 Enter` 选 Skip-until-next，再 `claudeteam reidentify --all`
 4. **第一次 user OAuth 之后，每个新 shell 仍要 `export` 那 4 个环境变量**——没持久化的话 `claudeteam say` 偶尔会走 user 身份失败
 

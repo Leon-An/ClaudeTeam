@@ -15,7 +15,7 @@
 | 命令 | 群里期望结果 | 通过标准 | 失败标准 |
 | --- | --- | --- | --- |
 | `/help` | 列出所有 `/<命令>` 的卡 | 列全 9 条：/help /team /health /usage /tmux /send /compact /stop /clear | 缺命令；返回的是纯文本而不是卡 |
-| `/team` | 卡片，每个 agent 一行 `<emoji> **<名字>**: <摘要>` + 汇总 | 每个团队成员渲染成（💤 空闲 / 🔄 工作中 / ⏸ 懒启动 / ⚠ 等权限 / 🛑 挂了 / 🔘 未知）之一。全健康时卡头绿色，含 ⚠/🛑/❌ 时黄色；懒启动 agent 显示 ⏸ 而非 🛑 | 漏 agent；会话名错；懒启动 agent 显示成 🛑（回归） |
+| `/team` | 卡片，每个 agent 一行 `<emoji> **<名字>**: <摘要>` + 汇总 | 状态来自无 marker 探针（`pane_probe`：前台进程定死活、画面 diff 定忙闲），渲染成 💤 空闲 / 🔄 工作中 / 🛑 CLI 挂了 / ⬜ 无窗口 / ⏸ 懒启动 / 🚫 已停止 之一。全健康（💤/🔄/⏸/🚫）时卡头绿色，含 🛑/⬜ 时黄色；懒启动 agent 显示 ⏸ 而非 🛑。注意：agent「思考但没出字」的瞬间画面静止，探针可能短暂显示 💤，持续出字/转圈才稳定 🔄（motion 检测固有特性，非 bug） | 漏 agent；会话名错；懒启动 agent 显示成 🛑（回归）；**持续工作中**的 agent 一直显示 💤（探针采样窗口坏了） |
 | `/health` | 富卡，含「🖥️ 主机总览」+「👤 员工细分」分段 | CPU / 内存 / 磁盘 行有数据（容器里走 procps，macOS 主机走 /proc 直读兜底）；逐个 agent 显示 CPU% 与 RSS（基于 pane PID 子树的 ps walk）。无告警时卡头紫色，有告警时黄色 | ps/uptime 都在却显示「无数据」（procps 缺失回归）；agent 的 CPU 显示 0/0（pane PID 解析坏了） |
 | `/usage [视图]` | 卡片，三段：Claude Code（ccusage）/ Codex（JWT）/ Kimi（api.kimi.com） | 每个指标渲染成 `**标签**：值` 单行 markdown（column_set 已坏，已删除）。Codex 段读 `~/.codex/auth.json` 里的 id_token；Kimi 段读 `~/.kimi/credentials/kimi-code.json` 并打 HTTPS | 段落缺失；标签和值上下堆叠对不齐（column_set 回归） |
 | `/tmux [agent] [N]` | 卡片，agent pane 最近 N 行（默认 10，最大 2000） | 内容是带围栏的代码块——等宽显示、缩进保留。无 agent 参数时默认 manager | 围栏被当作字面文本；选错 pane；超过 N 行被截断 |
@@ -28,7 +28,7 @@ pane 状态截下来对比。
 | 命令 | 期望 | 风险 | 通过 |
 | --- | --- | --- | --- |
 | `/send <agent> <消息>` | 在 agent pane 上执行 `tmux send-keys` + 回车 | 跳过懒启动与收件箱，纯粹原始注入。只用一次性废文本测 | pane 收到一次、不重复、不污染 shell |
-| `/compact [agent]` | 注入 `/compact`，45 秒后再触发一次身份重新注入 | 目标 pane 会进入长时间的对话压缩 | 一次 compact 落地，settle 之后身份重读触发 |
+| `/compact [agent]` | 注入各 CLI 自己的压缩命令（走 `adapter.compact_command()`：claude/codex/kimi 是 `/compact`，gemini/qwen 是 `/compress`），45 秒后再触发一次身份重注入 | 目标 pane 会进入长时间的对话压缩 | 一次 compact 落地，settle 之后身份重读触发；gemini/qwen 上发的是 `/compress` 而非 `/compact` |
 | `/stop <agent>` | 给 agent pane 发 `C-c` | 打断在做的事 | 当前操作被打断，pane 仍可用 |
 | `/clear <agent>` | 注入 `/clear` 然后重新初始化（等价 hire 形态） | 丢掉 CLI 对话上下文 | 一次 /clear + 一次 init 消息，无 shell 污染 |
 
