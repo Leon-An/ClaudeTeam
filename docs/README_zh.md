@@ -79,7 +79,7 @@
 - **多 CLI 混编** — Claude Code / Codex CLI / Kimi Code / Gemini CLI / Qwen Code 可以同队混跑。
 - **持久 memory** — agent 记忆扛得住 `/clear` 和 pane 重启，wake prompt 自动注入。
 - **看门狗** — daemon 崩了自动重生，进 cooldown 时飞书发红卡片报警。
-- **群里斜杠命令** — `/help /team /health /usage /tmux /send /compact /clear /stop /peek /say /remember /recall`。
+- **群里斜杠命令** — `/help /team /health /usage /tmux /send /compact /stop /clear /task`，外加运维三条 `/restart /shutdown /login`。
 - **零 Python 依赖** — 全标准库；唯一外部 runtime 是 `lark-cli` (Node)。
 
 ---

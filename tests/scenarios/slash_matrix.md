@@ -1,7 +1,8 @@
 # 斜杠命令矩阵
 
-斜杠命令的冒烟测试验收清单。共 9 条命令（`/recall` 与 `/forget`
-已去掉），加上「按 CLI 分组」的 `/usage` 卡和不再用 column_set
+斜杠命令的冒烟测试验收清单。共 13 条命令（10 条日常 + 3 条运维
+`/shutdown` `/restart` `/login`；早期的 `/recall` / `/forget` 已去掉，
+`/task` 后加），加上「按 CLI 分组」的 `/usage` 卡和不再用 column_set
 的渲染（飞书当前会把 column_set 折叠掉）。
 
 触发器一律是真实用户在绑定群里发消息——**斜杠必须出现在消息开头**。
@@ -14,7 +15,7 @@
 
 | 命令 | 群里期望结果 | 通过标准 | 失败标准 |
 | --- | --- | --- | --- |
-| `/help` | 列出所有 `/<命令>` 的卡 | 列全 9 条：/help /team /health /usage /tmux /send /compact /stop /clear | 缺命令；返回的是纯文本而不是卡 |
+| `/help` | 列出所有 `/<命令>` 的卡 | 列全 13 条：/help /team /health /usage /tmux /send /compact /stop /clear /task /shutdown /restart /login | 缺命令；返回的是纯文本而不是卡 |
 | `/team` | 卡片，每个 agent 一行 `<emoji> **<名字>**: <摘要>` + 汇总 | 状态来自无 marker 探针（`pane_probe`：前台进程定死活、画面 diff 定忙闲），渲染成 💤 空闲 / 🔄 工作中 / 🛑 CLI 挂了 / ⬜ 无窗口 / ⏸ 懒启动 / 🚫 已停止 之一。全健康（💤/🔄/⏸/🚫）时卡头绿色，含 🛑/⬜ 时黄色；懒启动 agent 显示 ⏸ 而非 🛑。注意：agent「思考但没出字」的瞬间画面静止，探针可能短暂显示 💤，持续出字/转圈才稳定 🔄（motion 检测固有特性，非 bug） | 漏 agent；会话名错；懒启动 agent 显示成 🛑（回归）；**持续工作中**的 agent 一直显示 💤（探针采样窗口坏了） |
 | `/health` | 富卡，含「🖥️ 主机总览」+「👤 员工细分」分段 | CPU / 内存 / 磁盘 行有数据（容器里走 procps，macOS 主机走 /proc 直读兜底）；逐个 agent 显示 CPU% 与 RSS（基于 pane PID 子树的 ps walk）。无告警时卡头紫色，有告警时黄色 | ps/uptime 都在却显示「无数据」（procps 缺失回归）；agent 的 CPU 显示 0/0（pane PID 解析坏了） |
 | `/usage [视图]` | 卡片，三段：Claude Code（ccusage）/ Codex（JWT）/ Kimi（api.kimi.com） | 每个指标渲染成 `**标签**：值` 单行 markdown（column_set 已坏，已删除）。Codex 段读 `~/.codex/auth.json` 里的 id_token；Kimi 段读 `~/.kimi/credentials/kimi-code.json` 并打 HTTPS | 段落缺失；标签和值上下堆叠对不齐（column_set 回归） |

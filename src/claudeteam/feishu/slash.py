@@ -167,7 +167,7 @@ _HELP_TEXT = """🆘 ClaudeTeam 自定义斜杠命令（零 LLM，router/hook �
 
 /help                    → 本帮助
 /team                    → 所有员工实时 tmux 状态（卡片）
-/usage                   → claude-code 用量（ccusage 包装，卡片）
+/usage                   → 各 CLI 用量（claude ccusage / codex / kimi，卡片）
 /health                  → 主机 + 员工资源占用（卡片）
 /tmux [agent] [lines]    → capture-pane 窗口（默认 manager/10 行）
 /send <agent> <msg>      → 直接注入消息到 agent 窗口

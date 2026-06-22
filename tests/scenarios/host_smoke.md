@@ -6,11 +6,24 @@
 
 - 部署上线（venv 激活、`claudeteam up`、`claudeteam health`）
 - 用户 OAuth（设备授权流程，只跑一次终身有效）
-- 9 条斜杠命令全覆盖
+- 斜杠命令矩阵（/help 列 13 条，§3 抽样验证 + 边界）
 - 普通文本路由（验证「manager 是唯一接口」契约）
 - worker 反向路由（worker 卡片自动转回 manager 收件箱）
 
 不覆盖：容器部署（看 [docker_deploy.md](docker_deploy.md)）、端到端真任务协作（看 [real_task_e2e.md](real_task_e2e.md)）。
+
+> **给驱动这套测试的 agent**：这是最还原的端到端——你用 `--as user`（§2 起）往群里
+> 发消息，再用 `chat-messages-list` / `state/facts/inbox.json` / `tmux capture-pane`
+> 验响应；§3–§7 全是你能自己跑的具体命令。但有 **3 步你做不了、要交给你的人做一次**：
+>
+> 1. **建飞书自建 App + 机器人进群**——见 [`docs/DEPLOYMENT.md`](../../docs/DEPLOYMENT.md) +
+>    [`docs/setup_feishu_bot.md`](../../docs/setup_feishu_bot.md)（拿到 `App ID`/`Secret`/`chat_id`）。
+> 2. **用户 OAuth（§2）**——要在浏览器点「授权」，agent 代不了。
+> 3. **各 agent CLI 登录**——`claude` / `codex` 等要有登录好的账号（或按
+>    [agent_auth 的 `.env` 方案](slash_matrix.md) 配长期 token / api key）。
+>
+> 这 3 步真人做完一次后，下面整条龙你自己驱动。**完整旅程**：先按
+> [`docs/DEPLOYMENT.md`](../../docs/DEPLOYMENT.md) 装好 → 再从本篇 §0 起跑。
 
 ## 适用范围
 
@@ -71,7 +84,7 @@ LARK_CLI_NO_PROXY=1 lark-cli im +messages-send \
   --chat-id <你的 chat_id> --text "/team" --as user
 ```
 
-## 3. 斜杠命令矩阵（9 条 + 1 条边界用例）
+## 3. 斜杠命令矩阵（抽样几条 + 2 条边界用例）
 
 每条都用 `--as user` 触发，等 router 接收 → 看群里有没有期望的卡。
 

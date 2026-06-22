@@ -345,16 +345,19 @@ After `claudeteam install-hooks`, the manager pane recognises these:
 
 | Slash | What it does |
 | ----- | ------------ |
-| `/help`     | Print the slash matrix card |
-| `/team`     | All agents' status with ♥ heartbeat |
+| `/help`     | List all slash commands (card) |
+| `/team`     | All agents' live pane state (marker-free probe) |
 | `/health`   | Server CPU / memory / disk card |
-| `/usage`    | ccusage wrapper for claude-code agents |
+| `/usage`    | Token/credit usage (claude ccusage / codex / kimi) |
 | `/tmux [agent] [N]` | Capture last N lines of an agent's pane |
-| `/send <agent> <msg>` | Inject message into agent's pane |
-| `/compact <agent>`    | Trigger LLM compact + scheduled re-identify |
-| `/clear <agent>`      | Wipe pane history |
-| `/stop <agent>`       | Kill pane (re-spawn with `claudeteam hire <agent>`) |
-| `/peek <agent> [N]`   | Branded `tmux capture-pane` for the 5-min 巡视 cadence |
+| `/send <agent> <msg>` | Inject a message into the agent's pane |
+| `/compact [agent]`    | Compact the CLI's context (gemini/qwen send `/compress`) + scheduled re-identify |
+| `/stop [agent]`       | Interrupt the agent's current action (sends Esc; pane stays alive) |
+| `/clear <agent>`      | `/clear` the CLI + re-inject identity (rehire shape) |
+| `/task [all]`         | Read-only task kanban |
+| `/shutdown [confirm]` | Take agent panes offline, keep router/watchdog for `/restart` (two-step) |
+| `/restart`            | Restart the whole team (≈ down→up) |
+| `/login <cli> [agent]`| Trigger a CLI's re-auth; surfaces the verification URL/code (gated by `controls.allow_*`) |
 
 Boss can also send these from chat — they zero-LLM dispatch through
 the router, no manager round-trip.

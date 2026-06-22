@@ -102,7 +102,7 @@ on the other end, not a bot wall.
 - **Watchdog** — crashed daemons respawn with cooldown + Feishu chat
   alert when cooldown trips.
 - **Slash commands from chat** — `/help /team /health /usage /tmux
-  /send /compact /clear /stop /peek /say /remember /recall`.
+  /send /compact /stop /clear /task` + operational `/restart /shutdown /login`.
 - **Zero Python dependencies** — runs on the standard library only;
   the only external runtime is `lark-cli` (Node).
 

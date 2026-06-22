@@ -75,6 +75,14 @@ Stdlib-only runner (no pytest required).  Should report
 `python3` on your machine is older than 3.10, invoke an explicit
 interpreter, e.g. `python3.12 tests/run.py`.
 
+That gate (unit + in-process end-to-end) verifies a *code change* — no deploy
+needed; it's what an agent runs to check its own work.  To verify the
+*deployed product* end-to-end like a real user (send Feishu messages → watch
+agents respond), drive `tests/scenarios/host_smoke.md`: an agent runs the
+`lark-cli --as user` sends + verifies responses itself; only three one-time
+steps (Feishu app, user OAuth, CLI login) need a human.  Install first via
+`docs/DEPLOYMENT.md`.  The other `tests/scenarios/*.md` are the same shape.
+
 ## How modules cooperate (the message flow)
 
 ```
