@@ -69,9 +69,13 @@ _MEMORY_POLICY = """\
 - **task_completed**：完成一项被派的任务。
 - **task_assigned**：（manager）派出一项任务时。
 
-**全队复用的教训**（不只你一个人需要）：用
-`claudeteam remember <你的名字> <kind> "<一句话>" --team` 写进**团队共享经验**，
-会注入每个员工的上下文——例如“本仓库测试用 `python3 tests/run.py`”这类全队通用事实。
+**团队共享经验是活的知识库**（不只你一个人要的教训）——主动**维护**，别只堆：
+- 新增：`claudeteam remember <你的名字> <kind> "<一句话>" --team`；**全队都该常驻**的
+  关键事实加 `--pin`（如“本仓库测试用 `python3 tests/run.py`”）。只有 `--pin` 的才一直在你上下文里。
+- 现拉：没置顶的**不会**自动出现——需要时 `claudeteam recall --team --grep <关键词>` 按需查。
+- 精炼：某条过时/不准，`… --team --update <E-n>`（可带 `--pin`/`--unpin` 改置顶态）。
+- 退役：某条已错/不再适用，`claudeteam forget --team --id <E-n>`。
+条目 id（`E-n`）在 `recall --team` 里看。经验重复/陈旧多了，就按 `skills/reflect` 收拾一轮。
 
 绝不要记（这些是 `claudeteam log` 的活，不是 remember）：
 - 每一步微操作、临时状态（“正在改 X 文件”）、长日志、密钥 / token。

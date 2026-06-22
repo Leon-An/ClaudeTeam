@@ -208,3 +208,44 @@ def test_recall_team_json():
 def test_recall_help_mentions_team():
     rc, out, _ = run_cli(["recall", "--help"])
     assert "--team" in out
+
+
+def test_recall_team_shows_entry_ids():
+    """Ids are visible so an agent can target one for --update / forget --id."""
+    from claudeteam.store import team_memory
+    with isolated_env():
+        team_memory.append("用两步结账", kind="decision", by="manager")
+        rc, out, _ = run_cli(["recall", "--team"])
+        assert rc == 0
+        assert "E-1" in out
+
+
+def test_recall_team_grep_filters_to_matches():
+    """--grep is the dependency-free 'pull only what's relevant' path."""
+    from claudeteam.store import team_memory
+    with isolated_env():
+        team_memory.append("用两步结账", kind="decision", by="manager")
+        team_memory.append("测试用 python3", kind="learning", by="worker_cc")
+        rc, out, _ = run_cli(["recall", "--team", "--grep", "测试"])
+        assert rc == 0
+        assert "测试用 python3" in out
+        assert "用两步结账" not in out
+
+
+def test_recall_team_marks_pinned():
+    from claudeteam.store import team_memory
+    with isolated_env():
+        team_memory.append("置顶条", kind="learning", by="a", pin=True)
+        rc, out, _ = run_cli(["recall", "--team"])
+        assert rc == 0
+        assert "📌" in out
+
+
+def test_recall_agent_grep_filters():
+    with isolated_env():
+        memory.append("worker_cc", "learning", "auth uses bcrypt")
+        memory.append("worker_cc", "note", "standup at 10am")
+        rc, out, _ = run_cli(["recall", "worker_cc", "--grep", "bcrypt"])
+        assert rc == 0
+        assert "auth uses bcrypt" in out
+        assert "standup" not in out

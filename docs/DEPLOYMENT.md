@@ -504,6 +504,8 @@ claudeteam reidentify worker_codex
 | `claudeteam remember <agent> <kind> "<note>"` | Write durable memory (auto-injected on next pane wake) |
 | `claudeteam remember <agent> <kind> "<note>" --team` | Write **shared team experience** (every agent sees it on wake) |
 | `claudeteam recall [<agent> \| --team]` | Read per-agent memory, or the shared team experience |
+| `claudeteam remember <agent> <kind> "<note>" --team --update <E-n>` | Edit a shared experience entry in place |
+| `claudeteam forget --team [--id <E-n>]` | Retire one shared entry (or wipe the pool with `--yes`) |
 | `claudeteam switch <team-dir>` | Print env exports for multi-team UX |
 
 `claudeteam --help` lists everything grouped by section.

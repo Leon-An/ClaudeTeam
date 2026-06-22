@@ -879,7 +879,7 @@ def test_init_prompt_injects_shared_team_experience():
                                      "role": "员工"}}}
     with isolated_env(team=team):
         team_memory.append("测试用 python3 tests/run.py",
-                           kind="learning", by="manager")
+                           kind="learning", by="manager", pin=True)
         prompt = identity.init_prompt("worker_cc")
         assert "团队共享经验" in prompt
         assert "测试用 python3 tests/run.py" in prompt
@@ -892,7 +892,7 @@ def test_native_memory_text_includes_shared_team_experience():
     team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
                                      "role": "员工"}}}
     with isolated_env(team=team):
-        team_memory.append("用两步结账", kind="decision", by="manager")
+        team_memory.append("用两步结账", kind="decision", by="manager", pin=True)
         text = identity.native_memory_text("worker_cc")
         assert "团队共享经验" in text
         assert "用两步结账" in text

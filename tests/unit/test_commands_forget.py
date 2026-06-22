@@ -135,3 +135,44 @@ def test_forget_help_lists_known_kinds():
     rc, out, _ = run_cli(["forget", "--help"])
     for k in memory.KNOWN_KINDS:
         assert k in out
+
+
+# ── --team (shared experience) ───────────────────────────────────
+
+
+def test_forget_team_id_retires_one_entry():
+    """A targeted single-entry retire needs no --yes (it's surgical)."""
+    from claudeteam.store import team_memory
+    with isolated_env():
+        team_memory.append("keep", by="a")
+        b = team_memory.append("retire", by="b")
+        rc, out, _ = run_cli(["forget", "--team", "--id", b["id"]])
+        assert rc == 0
+        assert f"retired {b['id']}" in out
+        assert [r["content"] for r in team_memory.list_recent()] == ["keep"]
+
+
+def test_forget_team_wipe_requires_yes():
+    from claudeteam.store import team_memory
+    with isolated_env():
+        team_memory.append("x", by="a")
+        rc, _, err = run_cli(["forget", "--team"])
+        assert rc == 1
+        assert "--yes" in err
+        assert len(team_memory.list_recent()) == 1   # untouched
+
+
+def test_forget_team_wipe_with_yes():
+    from claudeteam.store import team_memory
+    with isolated_env():
+        team_memory.append("x", by="a")
+        team_memory.append("y", by="b")
+        rc, out, _ = run_cli(["forget", "--team", "--yes"])
+        assert rc == 0
+        assert "wiped 2" in out
+        assert team_memory.list_recent() == []
+
+
+def test_forget_help_mentions_team():
+    rc, out, _ = run_cli(["forget", "--help"])
+    assert "--team" in out
