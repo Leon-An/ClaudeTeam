@@ -10,7 +10,7 @@ if sys.version_info >= (3, 11):
 else:  # pragma: no cover — project pins >=3.10 but stdlib tomllib is 3.11+
     import tomli as tomllib  # type: ignore[no-redef]
 
-from .base import CliAdapter, MULTILINE_SUBMIT_KEYS, SPINNER_CHARS
+from .base import CliAdapter, MULTILINE_SUBMIT_KEYS
 
 
 # Substrings that mark a model name as kimi/Moonshot-native (vs the team's
@@ -102,9 +102,6 @@ class KimiCodeAdapter(CliAdapter):
             "── input",
             "context:",
         ]
-
-    def busy_markers(self) -> list[str]:
-        return [*SPINNER_CHARS, "Thinking", "Using Shell", "Booting"]
 
     def process_name(self) -> str:
         return "kimi"

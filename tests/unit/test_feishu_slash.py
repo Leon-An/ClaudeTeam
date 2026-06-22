@@ -4,7 +4,16 @@ from __future__ import annotations
 from helpers import attr_patch, isolated_env, tmux_patch
 from claudeteam.feishu import slash
 from claudeteam.runtime import tmux
+from claudeteam.runtime import pane_probe
 from claudeteam.runtime import teamctl as _teamctl
+
+
+def _probe_states(states=None, default=pane_probe.IDLE):
+    """Patch the marker-free `pane_probe.probe` (what /team now calls) to a
+    per-window state map. /team no longer scrapes pane text, so tests drive
+    the probe directly instead of faking capture buffers."""
+    states = states or {}
+    return attr_patch(pane_probe, probe=lambda t: states.get(t.window, default))
 
 
 def _elements(reply):
@@ -83,19 +92,15 @@ def test_help_returns_card_listing_all_commands():
 
 
 def test_team_classifies_each_pane_state_with_emoji():
-    """REGRESSION: /team groups each agent by pane-state emoji + brief.
-    Returns a Feishu card; check the body element for the
+    """REGRESSION: /team groups each agent by marker-free probe state +
+    brief. Returns a Feishu card; check the body element for the
     emoji+name+brief lines and the tally summary footer."""
-    pane_buffers = {
-        "manager": "...\n⏵⏵ bypass permissions on (shift+tab to cycle)\n",
-        "worker_cc": "...\nesc to interrupt (1m 12s · ↓ 99 tokens)\n",
-        "worker_codex": "(empty)",  # → 🔘
+    states = {
+        "manager": pane_probe.IDLE,       # → 💤 idle
+        "worker_cc": pane_probe.BUSY,     # → 🔄 working
+        "worker_codex": pane_probe.DEAD,  # → 🛑 CLI down
     }
-
-    def fake_capture(target, lines=80):
-        return pane_buffers.get(target.window, "")
-
-    with _team_env(), tmux_patch(capture_pane=fake_capture):
+    with _team_env(), _probe_states(states):
         reply = slash.dispatch("/team",
                                _ctx(agents=("manager", "worker_cc", "worker_codex")))
 
@@ -103,13 +108,10 @@ def test_team_classifies_each_pane_state_with_emoji():
     title = reply["header"]["title"]["content"]
     assert "/team" in title and "员工实时状态" in title
     body = reply["body"]["elements"][0]["content"]
-    assert "💤" in body and "manager" in body         # bypass marker → idle
-    assert "🔄" in body and "worker_cc" in body       # esc to interrupt → working
-    assert "🔘" in body and "worker_codex" in body    # tail-fallback
+    assert "💤" in body and "manager" in body         # idle (alive, settled)
+    assert "🔄" in body and "worker_cc" in body       # working (pane moving)
+    assert "🛑" in body and "worker_codex" in body    # CLI down (shell)
     assert "3 agents" in body
-
-
-_BASH_PROMPT = "root@abc123:/app# "  # matches pane_state._BASH_PROMPT_RE
 
 
 def test_team_card_reflects_live_toml_after_adding_agent():
@@ -119,20 +121,12 @@ def test_team_card_reflects_live_toml_after_adding_agent():
     A config file is meant to live-edit. Now /team re-reads team config
     every call."""
     from helpers import isolated_env
-    pane_buffers = {
-        "manager":      "...\n⏵⏵ bypass permissions on\n",
-        "worker_cc":    "...\n⏵⏵ bypass permissions on\n",
-        "worker_codex": "...\n⏵⏵ bypass permissions on\n",
-    }
-    def fake_capture(target, lines=80):
-        return pane_buffers.get(target.window, "")
-
     # Initial config: 2 agents
     team = {"session": "ClaudeTeam", "agents": {
         "manager":   {"cli": "claude-code"},
         "worker_cc": {"cli": "claude-code"},
     }}
-    with isolated_env(team=team), tmux_patch(capture_pane=fake_capture):
+    with isolated_env(team=team), _probe_states(default=pane_probe.IDLE):
         # ctx still has stale 2-agent list; but handler should ignore
         # ctx and re-read from disk → see exactly the 2 agents.
         reply1 = slash.dispatch("/team",
@@ -173,20 +167,12 @@ def test_team_card_drops_agent_removed_from_toml_live():
     from helpers import isolated_env
     from claudeteam.runtime import paths, tunables as _tun
 
-    pane_buffers = {
-        "manager":   "...\n⏵⏵ bypass permissions on\n",
-        "worker_cc": "...\n⏵⏵ bypass permissions on\n",
-        "worker_codex": "...\n⏵⏵ bypass permissions on\n",
-    }
-    def fake_capture(target, lines=80):
-        return pane_buffers.get(target.window, "")
-
     team = {"session": "ClaudeTeam", "agents": {
         "manager":      {"cli": "claude-code"},
         "worker_cc":    {"cli": "claude-code"},
         "worker_codex": {"cli": "codex-cli"},
     }}
-    with isolated_env(team=team), tmux_patch(capture_pane=fake_capture):
+    with isolated_env(team=team), _probe_states(default=pane_probe.IDLE):
         # 3 agents
         reply1 = slash.dispatch("/team",
                                 _ctx(agents=("manager", "worker_cc", "worker_codex")))
@@ -218,19 +204,15 @@ def test_team_card_reflects_lazy_flag_added_to_toml_live():
     from helpers import isolated_env
     from claudeteam.runtime import paths, tunables as _tun
 
-    pane_buffers = {
-        "manager":   "...\n⏵⏵ bypass permissions on\n",
-        "worker_cc": _BASH_PROMPT,  # bare shell → 🛑 unless lazy
-    }
-    def fake_capture(target, lines=80):
-        return pane_buffers.get(target.window, "")
+    # manager alive/idle; worker_cc dropped to a bare shell → probe DEAD
+    states = {"manager": pane_probe.IDLE, "worker_cc": pane_probe.DEAD}
 
     team = {"session": "ClaudeTeam", "agents": {
         "manager":   {"cli": "claude-code"},
         "worker_cc": {"cli": "claude-code"},
     }}
-    with isolated_env(team=team), tmux_patch(capture_pane=fake_capture):
-        # Before: worker_cc is not lazy, bash prompt → 🛑 → yellow team
+    with isolated_env(team=team), _probe_states(states):
+        # Before: worker_cc is not lazy, CLI down → 🛑 → yellow team
         reply1 = slash.dispatch("/team",
                                 _ctx(agents=("manager", "worker_cc")))
         assert reply1["header"]["template"] == "yellow"
@@ -301,19 +283,14 @@ def test_team_card_keeps_green_when_only_unhealthy_is_lazy():
     spawned yet is NOT a failure — flag it ⏸ and keep the team header
     green (guards against that false-positive)."""
     from helpers import isolated_env
-    pane_buffers = {
-        "manager":     "...\n⏵⏵ bypass permissions on\n",
-        "worker_lazy": _BASH_PROMPT,  # → 🛑 pane_state, but lazy = expected
-    }
-
-    def fake_capture(target, lines=80):
-        return pane_buffers.get(target.window, "")
+    # worker_lazy never woken → bare shell → probe DEAD, but lazy = expected
+    states = {"manager": pane_probe.IDLE, "worker_lazy": pane_probe.DEAD}
 
     team = {"session": "ClaudeTeam", "agents": {
         "manager": {"cli": "claude-code"},
         "worker_lazy": {"cli": "kimi-code", "lazy": True},
     }}
-    with isolated_env(team=team), tmux_patch(capture_pane=fake_capture):
+    with isolated_env(team=team), _probe_states(states):
         # lazy_agents flows in via SlashContext (the closure in
         # commands/router.py pre-computes the set at daemon startup so
         # /team's hot path doesn't read team.json). Tests pass it
@@ -333,19 +310,14 @@ def test_team_card_still_yellow_for_truly_dead_pane():
     """The lazy exception must NOT shadow real failures. A non-lazy
     agent whose CLI is actually dead (🛑) still flips to yellow."""
     from helpers import isolated_env
-    pane_buffers = {
-        "manager": "...\n⏵⏵ bypass permissions on\n",
-        "worker_cc": _BASH_PROMPT,  # NOT lazy in team.json → real failure
-    }
-
-    def fake_capture(target, lines=80):
-        return pane_buffers.get(target.window, "")
+    # worker_cc's CLI actually exited (probe DEAD) and it is NOT lazy.
+    states = {"manager": pane_probe.IDLE, "worker_cc": pane_probe.DEAD}
 
     team = {"session": "ClaudeTeam", "agents": {
         "manager": {"cli": "claude-code"},
         "worker_cc": {"cli": "claude-code"},  # no lazy
     }}
-    with isolated_env(team=team), tmux_patch(capture_pane=fake_capture):
+    with isolated_env(team=team), _probe_states(states):
         reply = slash.dispatch("/team",
                                _ctx(agents=("manager", "worker_cc")))
     assert reply["header"]["template"] == "yellow"
@@ -357,16 +329,9 @@ def test_team_card_color_yellow_when_any_agent_unhealthy():
     """Health colour shortcut: green when every agent is in a healthy
     state (💤/🔄), yellow as soon as one shows ⚠️/🛑/❌. Lets the boss
     glance the chat without reading the body."""
-    # one agent showing 🛑 (CLI not running)
-    pane_buffers = {
-        "manager": "...\n⏵⏵ bypass permissions on\n",
-        "worker_cc": "$ ",  # bash prompt → 🛑 CLI not running
-    }
-
-    def fake_capture(target, lines=80):
-        return pane_buffers.get(target.window, "")
-
-    with _team_env(), tmux_patch(capture_pane=fake_capture):
+    # one agent's CLI not running (probe DEAD → 🛑)
+    states = {"manager": pane_probe.IDLE, "worker_cc": pane_probe.DEAD}
+    with _team_env(), _probe_states(states):
         reply = slash.dispatch("/team",
                                _ctx(agents=("manager", "worker_cc")))
     assert reply["header"]["template"] == "yellow"
@@ -879,14 +844,17 @@ def test_stop_no_args_stops_all_agents():
 
 def test_clear_injects_clear_then_init_prompt():
     sequence = []
+    frames = {"n": 0}
 
     def fake_inject(target, text, **kw):
         sequence.append((str(target), text))
         return True
 
-    with _team_env(), tmux_patch(
-            inject=fake_inject,
-            capture_pane=lambda t, lines=80: "Thinking\n"):  # claude busy → confirm
+    def moving(target, lines=80):
+        frames["n"] += 1
+        return f"frame{frames['n']}"        # pane keeps moving → submit confirmed
+
+    with _team_env(), tmux_patch(inject=fake_inject, capture_pane=moving):
         reply = slash.dispatch("/clear worker_cc", _ctx())
     # First inject: literal /clear
     assert sequence[0] == ("ClaudeTeam:worker_cc", "/clear")
@@ -904,14 +872,17 @@ def test_clear_uses_clear_for_codex_too():
     """Every CLI exposes /clear — codex must get it injected (the adapter
     declares the command), not be punted to /restart."""
     sequence = []
+    frames = {"n": 0}
 
     def fake_inject(target, text, **kw):
         sequence.append((str(target), text))
         return True
 
-    with _team_env(), tmux_patch(
-            inject=fake_inject,
-            capture_pane=lambda t, lines=80: "esc to interrupt\n"):
+    def moving(target, lines=80):
+        frames["n"] += 1
+        return f"frame{frames['n']}"        # pane keeps moving → submit confirmed
+
+    with _team_env(), tmux_patch(inject=fake_inject, capture_pane=moving):
         reply = slash.dispatch("/clear worker_codex", _ctx())
     assert sequence[0] == ("ClaudeTeam:worker_codex", "/clear")
     assert "✅" in reply

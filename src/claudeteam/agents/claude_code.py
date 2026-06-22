@@ -8,7 +8,7 @@ from pathlib import Path
 from claudeteam.runtime import paths
 from claudeteam.util import env_str
 
-from .base import CliAdapter, SPINNER_CHARS
+from .base import CliAdapter
 
 
 def _read_oauth_token(agent: str) -> str | None:
@@ -81,13 +81,6 @@ class ClaudeCodeAdapter(CliAdapter):
 
     def ready_markers(self) -> list[str]:
         return ["bypass permissions on", "? for shortcuts"]
-
-    def busy_markers(self) -> list[str]:
-        return [
-            *SPINNER_CHARS,
-            "◐", "◑", "◒", "◓",
-            "Thinking", "Running tool",
-        ]
 
     def process_name(self) -> str:
         return "claude"

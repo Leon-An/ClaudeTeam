@@ -19,7 +19,7 @@ import time
 from typing import Callable
 
 from claudeteam.agents.base import CliAdapter
-from claudeteam.runtime import tmux
+from claudeteam.runtime import pane_probe, tmux
 
 
 def _has_marker(target: tmux.Target, markers: list[str],
@@ -36,17 +36,13 @@ def _has_marker(target: tmux.Target, markers: list[str],
 
 def is_ready(target: tmux.Target, adapter: CliAdapter, *,
              capture: Callable | None = None) -> bool:
-    """True if the pane already shows one of the adapter's ready markers."""
+    """True if the pane already shows one of the adapter's ready markers.
+
+    This is a *readiness* check (has the CLI booted to its prompt), used by
+    the spawn boot-wait and the deliver/send lazy-wake gate — not a busy
+    check. Busy/idle/dead now come from the marker-free `pane_probe`.
+    """
     return _has_marker(target, adapter.ready_markers(), capture)
-
-
-def is_busy(target: tmux.Target, adapter: CliAdapter, *,
-            capture: Callable | None = None) -> bool:
-    """True if the pane shows one of the adapter's busy markers (spinner,
-    "esc to interrupt", boot phase, …). Pairs with `is_ready` to detect an
-    *idle* pane (ready and not busy) for low-priority best-effort injects
-    that must not derail an agent mid-turn."""
-    return _has_marker(target, adapter.busy_markers(), capture)
 
 
 # Onboarding dialogs claude pops on fresh ~/.claude.json (ephemeral
@@ -125,13 +121,15 @@ def inject_and_confirm(target: tmux.Target, adapter: CliAdapter, text: str, *,
     dropped and the text sits in the input box unsubmitted until a human
     presses Enter. This automates that nudge.
 
-    After the initial inject, poll for the agent going BUSY
-    (adapter.busy_markers = it accepted the input and started the turn).
-    If it's still idle after `settle_s`, re-send the primary submit key
-    (the text is already in the buffer — just push submit again) and poll
-    again, up to `attempts` times. Returns True once busy is observed, else
-    False — in which case the text was still injected, so the worst case is
-    no worse than the old fixed-settle behavior.
+    Confirmation uses pane MOTION, never a busy-marker string: a submit that
+    LANDED makes the pane keep changing (the CLI streams its reply), while a
+    key that only inserted a newline into the composer leaves it static.
+    `pane_probe.changed` measures motion AFTER the key (the key's one-shot
+    effect is absorbed into its baseline), so it reads "is it processing".
+    While static, re-send the primary submit key then escalate through the
+    candidate keys, up to `attempts` times. Returns True once motion is
+    observed, else False — the text was still injected, so the worst case is
+    no worse than a plain inject.
 
     Used by the post-spawn identity-init inject in provision_pane and
     wake_if_dormant; collaborators are injectable for tests.
@@ -148,22 +146,18 @@ def inject_and_confirm(target: tmux.Target, adapter: CliAdapter, text: str, *,
     # pre-fix behavior). Only claude/codex-style CLIs get verify+renudge.
     if not adapter.resubmit_on_idle():
         return True
-    # Check-then-nudge: if the inject already submitted (agent busy), return
-    # immediately — no sleep, no stray keypress. Otherwise settle and re-send
-    # the primary submit key, up to `attempts` times.
+    # Settle, then check for ongoing motion (= it's processing = submitted).
+    # While static, re-nudge the primary key first (a freshly-ready pane often
+    # just dropped the submit on a large multi-line paste), then ESCALATE
+    # through the remaining candidate keys — one keypress per attempt. The
+    # escalation recovers a CLI whose real submit key isn't the assumed
+    # primary (e.g. a codex TUI that commits on a different key than M-Enter).
     for i in range(max(1, attempts)):
-        if is_busy(target, adapter, capture=capture):
-            return True
         sleep(settle_s)
-        # Re-nudge the primary key first (a freshly-ready pane often just
-        # dropped the submit on a large multi-line paste), then ESCALATE
-        # through the remaining candidate keys — one keypress per attempt.
-        # The escalation is what recovers a CLI whose real submit key isn't
-        # the assumed primary (e.g. a codex TUI that commits on a different
-        # key than M-Enter): re-nudging the same dead key forever would just
-        # leave the text wedged in the composer.
+        if pane_probe.changed(target, capture=capture, sleep=sleep):
+            return True
         send_keys(target, submit_keys[min(i, len(submit_keys) - 1)])
-    return is_busy(target, adapter, capture=capture)
+    return pane_probe.changed(target, capture=capture, sleep=sleep)
 
 
 def _default_is_retired(target: tmux.Target) -> bool:

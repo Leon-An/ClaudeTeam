@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import shlex
 
-from .base import CliAdapter, MULTILINE_SUBMIT_KEYS, SPINNER_CHARS
+from .base import CliAdapter, MULTILINE_SUBMIT_KEYS
 from .claude_code import agent_home
 
 
@@ -46,12 +46,6 @@ class QwenCodeAdapter(CliAdapter):
         # is the canonical input cursor. "Type your request" appears in
         # the welcome banner when first launched.
         return ["qwen>", "Type your request", "Qwen Code"]
-
-    def busy_markers(self) -> list[str]:
-        return [
-            *SPINNER_CHARS,
-            "Thinking", "Calling tool", "Running",
-        ]
 
     def process_name(self) -> str:
         return "qwen"

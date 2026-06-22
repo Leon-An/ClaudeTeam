@@ -15,12 +15,6 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 
-# Braille-pattern spinner glyphs that every Ink/Rich/Bubbletea-style CLI
-# uses for "I'm busy" indication. Concrete adapters splice this into their
-# own busy_markers() return.
-SPINNER_CHARS = ("⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷")
-
-
 # Submit-key sequence for multi-line CLIs (Codex / Kimi use Ink + prompt_toolkit
 # style multi-line input where Enter inserts a newline, M-Enter commits the
 # buffer). Plain `Enter` is kept as a fallback for single-line edge cases.
@@ -34,11 +28,11 @@ class CliAdapter(ABC):
 
     @abstractmethod
     def ready_markers(self) -> list[str]:
-        """If any string here appears in the pane, CLI UI is ready."""
+        """If any string here appears in the pane, the CLI UI has booted.
 
-    @abstractmethod
-    def busy_markers(self) -> list[str]:
-        """If any string here appears at the pane tail, the agent is busy."""
+        Readiness only (spawn boot-wait + lazy-wake gate). Busy / idle / dead
+        are detected without markers by `runtime.pane_probe`.
+        """
 
     @abstractmethod
     def process_name(self) -> str:

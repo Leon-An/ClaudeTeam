@@ -9,7 +9,7 @@ from __future__ import annotations
 import shlex
 from pathlib import Path
 
-from .base import CliAdapter, MULTILINE_SUBMIT_KEYS, SPINNER_CHARS
+from .base import CliAdapter, MULTILINE_SUBMIT_KEYS
 from .claude_code import agent_home
 
 
@@ -72,9 +72,6 @@ class CodexCliAdapter(CliAdapter):
         # Banner lines after CLI 0.124+ becomes interactive.  Avoids matching
         # the spawn-command echo that includes "gpt-5".
         return ["OpenAI Codex", "permissions: YOLO"]
-
-    def busy_markers(self) -> list[str]:
-        return ["esc to interrupt", "Booting MCP server", *SPINNER_CHARS]
 
     def process_name(self) -> str:
         return "codex"

@@ -78,6 +78,20 @@ def capture_pane(target: Target, *, lines: int = 80, run: Callable = _default_ru
     return r.stdout if r.returncode == 0 else ""
 
 
+def pane_command(target: Target, *, run: Callable = _default_run) -> str:
+    """The pane's foreground process name (tmux `#{pane_current_command}`).
+
+    This is what the kernel says is running in the pane — `node` (claude /
+    codex / gemini / qwen), `python` / `uv` (kimi), or a shell (`bash` /
+    `zsh` …) once the CLI has exited. It's a process fact, not pane content,
+    so it's the dependable signal for "is the CLI still up?" without scraping
+    the TUI. Returns '' if the pane / window / session doesn't exist.
+    """
+    r = run(["tmux", "display-message", "-p", "-t", str(target),
+             "#{pane_current_command}"])
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
 def new_session(session: str, *, window: str = "manager",
                 detached: bool = True, run: Callable = _default_run) -> bool:
     args = ["tmux", "new-session"] + (["-d"] if detached else []) + [

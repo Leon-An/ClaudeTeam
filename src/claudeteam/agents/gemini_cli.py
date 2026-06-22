@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import shlex
 
-from .base import CliAdapter, MULTILINE_SUBMIT_KEYS, SPINNER_CHARS
+from .base import CliAdapter, MULTILINE_SUBMIT_KEYS
 from .claude_code import agent_home
 
 
@@ -54,12 +54,6 @@ class GeminiCliAdapter(CliAdapter):
         # `>` after the banner is the canonical marker. Add the tagline so
         # the spawn-cmd echo doesn't accidentally match.
         return ["Gemini>", "Gemini CLI"]
-
-    def busy_markers(self) -> list[str]:
-        return [
-            *SPINNER_CHARS,
-            "Thinking", "Running tool", "Calling",
-        ]
 
     def process_name(self) -> str:
         return "gemini"

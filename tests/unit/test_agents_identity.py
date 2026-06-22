@@ -460,7 +460,6 @@ def test_adapter_native_memory_path_default_is_none():
     class _StubAdapter(base.CliAdapter):
         def spawn_cmd(self, agent, model): return ""
         def ready_markers(self): return []
-        def busy_markers(self): return []
         def process_name(self): return "stub"
 
     assert _StubAdapter().native_memory_path("worker_x") is None

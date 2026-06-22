@@ -49,7 +49,7 @@ from datetime import datetime
 from typing import Callable
 
 from claudeteam.agents import identity
-from claudeteam.feishu import pane_state
+from claudeteam.runtime import pane_probe
 from claudeteam.feishu.cards import (
     beijing_stamp, column_set_2, column_set_3, fenced_block, load_color,
     remaining_color, rich_card, simple_card,
@@ -57,6 +57,17 @@ from claudeteam.feishu.cards import (
 from claudeteam.runtime import tmux
 from claudeteam.store import local_facts, tasks
 from claudeteam.util import fmt_bytes
+
+
+# /team display: marker-free probe state → (emoji, brief). The probe reports
+# liveness from the pane's foreground process and busy/idle from pane motion,
+# so /team no longer scrapes TUI text to guess a state.
+_TEAM_STATE_GLYPH = {
+    pane_probe.IDLE: ("💤", "idle"),
+    pane_probe.BUSY: ("🔄", "working"),
+    pane_probe.DEAD: ("🛑", "CLI down"),
+    pane_probe.NO_WINDOW: ("⬜", "no window"),
+}
 
 
 def _spawn_daemon_thread(fn: Callable[[], None]) -> None:
@@ -212,15 +223,14 @@ def _handle_team(args: str, ctx: SlashContext) -> dict:
             continue
         target = tmux.Target(ctx.session, agent)
         try:
-            buf = tmux.capture_pane(target, lines=80)
+            state = pane_probe.probe(target)
         except Exception:
-            buf = ""
-        emoji, brief = pane_state.parse(buf)
-        # pane_state.parse returns 🛑 (Linux bash prompt) or 🔘 (tail
-        # fallback / macOS % prompt) for "no CLI" — both are normal
-        # for a lazy agent before its first message arrives. Flip to
-        # ⏸ so the team-color check below stays green.
-        if emoji in ("🛑", "🔘") and agent in lazy_agents:
+            state = pane_probe.NO_WINDOW
+        emoji, brief = _TEAM_STATE_GLYPH.get(state, ("🔘", state))
+        # A never-woken lazy agent is a shell placeholder (probe DEAD /
+        # NO_WINDOW) — normal before its first message arrives, so flip to
+        # ⏸ (keeps the team-color check below green) instead of 🛑 CLI down.
+        if state in (pane_probe.DEAD, pane_probe.NO_WINDOW) and agent in lazy_agents:
             emoji = "⏸"
             brief = "lazy (waiting for first message)"
         rows.append((agent, emoji, brief))

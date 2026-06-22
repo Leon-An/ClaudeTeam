@@ -41,14 +41,6 @@ def test_ready_markers_present():
     assert any("Gemini" in m for m in markers)
 
 
-def test_busy_markers_include_spinner_and_thinking():
-    adapter = GeminiCliAdapter()
-    busy = adapter.busy_markers()
-    assert "Thinking" in busy
-    # Braille spinner glyphs come through from SPINNER_CHARS
-    assert "⣾" in busy
-
-
 def test_process_name_is_gemini():
     """For /proc walkers and `pkill -f gemini` to work, process_name
     must match the binary's exec name."""

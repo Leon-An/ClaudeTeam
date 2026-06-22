@@ -37,12 +37,6 @@ def test_ready_markers_include_qwen_prompt():
     assert any("Qwen" in m for m in markers)
 
 
-def test_busy_markers_cover_thinking_and_spinner():
-    busy = QwenCodeAdapter().busy_markers()
-    assert "Thinking" in busy
-    assert "⣾" in busy  # braille spinner from SPINNER_CHARS
-
-
 def test_process_name_is_qwen():
     """For /proc walkers and `pkill -f qwen` to work, process_name must
     match the binary's exec name."""

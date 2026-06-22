@@ -6,6 +6,7 @@ import io
 from helpers import isolated_env, run_cli, attr_patch
 from claudeteam.commands import task as task_cmd
 from claudeteam.runtime import tmux as tmux_mod, wake as wake_mod
+from claudeteam.runtime import pane_probe as pp_mod
 from claudeteam.store import local_facts, tasks
 
 
@@ -408,8 +409,7 @@ def test_reidentify_stale_anchor_skips_reloading_cli():
         with attr_patch(tmux_mod, inject=fake_inject,
                         has_session=lambda s: True,
                         has_window=lambda t: True), \
-             attr_patch(wake_mod, is_ready=lambda t, a: True,
-                        is_busy=lambda t, a: False):
+             attr_patch(wake_mod, is_ready=lambda t, a: True):
             task_cmd._reidentify_stale_anchor("worker_cc")
         assert sink == []
 
@@ -422,8 +422,7 @@ def test_reidentify_stale_anchor_injects_into_idle_non_reloading_pane():
         with attr_patch(tmux_mod, inject=fake_inject,
                         has_session=lambda s: True,
                         has_window=lambda t: True), \
-             attr_patch(wake_mod, is_ready=lambda t, a: True,
-                        is_busy=lambda t, a: False):
+             attr_patch(pp_mod, probe=lambda t: pp_mod.IDLE):
             task_cmd._reidentify_stale_anchor("worker_codex")
         assert len(sink) == 1
         assert sink[0]["target"].window == "worker_codex"
@@ -438,21 +437,19 @@ def test_reidentify_stale_anchor_skips_busy_pane():
         with attr_patch(tmux_mod, inject=fake_inject,
                         has_session=lambda s: True,
                         has_window=lambda t: True), \
-             attr_patch(wake_mod, is_ready=lambda t, a: True,
-                        is_busy=lambda t, a: True):
+             attr_patch(pp_mod, probe=lambda t: pp_mod.BUSY):
             task_cmd._reidentify_stale_anchor("worker_codex")
         assert sink == []
 
 
 def test_reidentify_stale_anchor_skips_when_not_ready():
-    """No ready marker (dormant / dead pane) → nothing to inject into."""
+    """Dormant / dead pane (probe != IDLE) → nothing to inject into."""
     with isolated_env(team={"agents": {"worker_codex": {"cli": "codex-cli"}}}):
         sink, fake_inject = _capture_injects()
         with attr_patch(tmux_mod, inject=fake_inject,
                         has_session=lambda s: True,
                         has_window=lambda t: True), \
-             attr_patch(wake_mod, is_ready=lambda t, a: False,
-                        is_busy=lambda t, a: False):
+             attr_patch(pp_mod, probe=lambda t: pp_mod.DEAD):
             task_cmd._reidentify_stale_anchor("worker_codex")
         assert sink == []
 
@@ -464,8 +461,7 @@ def test_reidentify_stale_anchor_best_effort_when_no_session():
         with attr_patch(tmux_mod, inject=fake_inject,
                         has_session=lambda s: False,
                         has_window=lambda t: True), \
-             attr_patch(wake_mod, is_ready=lambda t, a: True,
-                        is_busy=lambda t, a: False):
+             attr_patch(wake_mod, is_ready=lambda t, a: True):
             task_cmd._reidentify_stale_anchor("worker_codex")
         assert sink == []
 

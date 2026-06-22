@@ -86,12 +86,13 @@ def _reidentify_stale_anchor(agent: str) -> None:
         target = tmux.Target(session, agent)
         if not tmux.has_session(session) or not tmux.has_window(target):
             return
-        if not wake.is_ready(target, adapter) or wake.is_busy(target, adapter):
-            return  # idle gate: only inject at a quiet ready prompt
-        # Verified inject (escalates the submit key + confirms the pane went
-        # busy) instead of a bare fire-and-forget: a dropped submit on these
-        # non-reload CLIs (codex/qwen/kimi) is exactly what leaves the big
-        # identity prompt wedged + piling up in the composer.
+        from claudeteam.runtime import pane_probe
+        if pane_probe.probe(target) != pane_probe.IDLE:
+            return  # only inject at a quiet, alive, idle pane (probe: no markers)
+        # Verified inject (escalates the submit key + confirms via pane motion)
+        # instead of a bare fire-and-forget: a dropped submit on these
+        # non-reload CLIs (codex/qwen/kimi) is what leaves the big identity
+        # prompt wedged + piling up in the composer.
         wake.inject_and_confirm(target, adapter, identity.init_prompt(agent))
     except Exception:
         pass

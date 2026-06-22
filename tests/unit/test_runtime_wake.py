@@ -9,9 +9,6 @@ class _ClaudeFake:
     def ready_markers(self):
         return ["bypass permissions on", "? for shortcuts"]
 
-    def busy_markers(self):
-        return ["esc to interrupt", "⣾"]
-
     def submit_keys(self):
         return ["Enter", "C-m", "C-j"]
 
@@ -53,73 +50,53 @@ def test_is_ready_false_when_pane_blank():
     assert wake.is_ready(target, _ClaudeFake(), capture=capture) is False
 
 
-# ── is_busy ──────────────────────────────────────────────────────
-
-
-def test_is_busy_true_when_pane_shows_busy_marker():
-    target = tmux.Target("S", "worker")
-    capture = _capturer(["thinking…\nesc to interrupt\n"])
-    assert wake.is_busy(target, _ClaudeFake(), capture=capture) is True
-
-
-def test_is_busy_false_at_quiet_ready_prompt():
-    target = tmux.Target("S", "worker")
-    capture = _capturer(["bypass permissions on\n>"])
-    assert wake.is_busy(target, _ClaudeFake(), capture=capture) is False
-
-
 # ── inject_and_confirm ────────────────
 
 
-def test_inject_and_confirm_returns_at_once_when_busy_no_renudge():
-    """If the inject already submitted (agent busy on first check), return
-    immediately — no settle sleep, no stray re-nudge keypress."""
-    target = tmux.Target("S", "w")
+def test_inject_and_confirm_returns_when_pane_is_moving():
+    """If the pane is MOVING after the inject (streaming a reply = submitted),
+    confirm without re-nudging. Motion, not a busy-marker string."""
     injects = []
     sends = []
-    sleeps = []
     ok = wake.inject_and_confirm(
-        target, _ClaudeFake(), "hello",
+        tmux.Target("S", "w"), _ClaudeFake(), "hello",
         inject=lambda t, text, *, submit_keys=None: injects.append(text) or True,
         send_keys=lambda t, *k: sends.append(k),
-        capture=_capturer(["thinking…\nesc to interrupt\n"]),  # busy at once
-        sleep=lambda s: sleeps.append(s),
+        capture=_capturer(["frame-a", "frame-b"]),   # changed → moving → submitted
+        sleep=lambda s: None,
     )
     assert ok is True
     assert injects == ["hello"]   # injected once
-    assert sends == []            # never re-nudged
-    assert sleeps == []           # never slept
+    assert sends == []            # confirmed by motion; never re-nudged
 
 
-def test_inject_and_confirm_renudges_then_succeeds():
-    """Submit dropped on the first inject (pane idle) → re-send the primary
-    submit key, then the agent goes busy = submitted."""
+def test_inject_and_confirm_renudges_then_confirms_motion():
+    """Static after the inject (submit dropped) → re-send the primary key,
+    then the pane starts moving = submitted."""
     sends = []
-    sleeps = []
     ok = wake.inject_and_confirm(
         tmux.Target("S", "w"), _ClaudeFake(), "hi",
         inject=lambda t, text, *, submit_keys=None: True,
         send_keys=lambda t, *k: sends.append(k),
-        # 1st check: idle (unsubmitted); after nudge: busy
-        capture=_capturer(["bypass permissions on\n>", "esc to interrupt\n"]),
-        sleep=lambda s: sleeps.append(s),
+        # 1st check: static (unsubmitted); after re-nudge: moving
+        capture=_capturer(["idle", "idle", "resp-1", "resp-2"]),
+        sleep=lambda s: None,
     )
     assert ok is True
-    assert sends == [("Enter",)]   # nudged once with submit_keys[0]
-    assert len(sleeps) == 1
+    assert sends == [("Enter",)]   # re-nudged once with submit_keys[0]
 
 
 def test_inject_and_confirm_optout_adapter_injects_once_no_renudge():
     """A CLI that opts out (resubmit_on_idle False, e.g. kimi) gets a plain
-    single inject — never a re-nudge keypress — even when the pane looks idle
-    (so the re-sent submit key can't be misread as an interrupt)."""
+    single inject — never a re-nudge keypress (the re-sent key would be
+    misread as an interrupt)."""
     injects = []
     sends = []
     ok = wake.inject_and_confirm(
         tmux.Target("S", "w"), _NoRenudgeFake(), "hi",
         inject=lambda t, text, *, submit_keys=None: injects.append(text) or True,
         send_keys=lambda t, *k: sends.append(k),
-        capture=_capturer(["$ ", "$ ", "$ "]),  # idle — would normally nudge
+        capture=_capturer(["x", "x"]),
         sleep=lambda s: None,
     )
     assert ok is True
@@ -128,19 +105,20 @@ def test_inject_and_confirm_optout_adapter_injects_once_no_renudge():
 
 
 def test_inject_and_confirm_gives_up_after_attempts():
-    """Never goes busy → re-nudge `attempts` times then return False (text
-    was still injected, so no worse than the old fixed-settle behavior)."""
+    """Pane never moves (nothing submitted) → escalate `attempts` times then
+    return False. The text was still injected, so no worse than a plain
+    inject."""
     sends = []
     ok = wake.inject_and_confirm(
         tmux.Target("S", "w"), _ClaudeFake(), "hi",
         attempts=2,
         inject=lambda t, text, *, submit_keys=None: True,
         send_keys=lambda t, *k: sends.append(k),
-        capture=_capturer(["$ ", "$ ", "$ ", "$ "]),  # always idle
+        capture=_capturer(["static"] * 8),   # never moves → never confirms
         sleep=lambda s: None,
     )
     assert ok is False
-    assert len(sends) == 2   # nudged exactly `attempts` times
+    assert len(sends) == 2   # escalated exactly `attempts` times
 
 
 # ── wake_if_dormant ──────────────────────────────────────────────

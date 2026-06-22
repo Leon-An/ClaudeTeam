@@ -60,8 +60,6 @@ def test_every_adapter_implements_required_methods():
         assert isinstance(cmd, str) and cmd.strip()
         ready = adapter.ready_markers()
         assert ready and isinstance(ready, list)
-        busy = adapter.busy_markers()
-        assert busy and isinstance(busy, list)
         assert adapter.process_name()
         assert adapter.submit_keys()
 
@@ -233,17 +231,6 @@ def test_kimi_omits_dash_m_when_no_model_and_no_config():
 
 
 # ── markers ──────────────────────────────────────────────────────
-
-
-def test_codex_busy_markers_include_boot_phase():
-    """R-busy fix carries over: Booting MCP server must be a busy marker so
-    inject_when_idle waits past the boot race."""
-    assert "Booting MCP server" in CodexCliAdapter().busy_markers()
-
-
-def test_kimi_busy_markers_include_using_shell():
-    assert "Using Shell" in KimiCodeAdapter().busy_markers()
-    assert "Booting" in KimiCodeAdapter().busy_markers()
 
 
 def test_process_names_match_expected_binaries():

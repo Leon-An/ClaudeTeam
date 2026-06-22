@@ -6,8 +6,9 @@ isolated_env(team=...) for the env / file fixture.
 from __future__ import annotations
 
 import contextlib
+import time
 
-from helpers import isolated_env, run_cli, tmux_patch
+from helpers import attr_patch, isolated_env, run_cli, tmux_patch
 from claudeteam.agents import identity
 from claudeteam.store import local_facts
 
@@ -26,9 +27,6 @@ _ALL_READY_MARKERS = (
     "OpenAI Codex\npermissions: YOLO\n"                # codex-cli
     "Welcome to Kimi Code CLI\nSend /help for help\n"  # kimi-code
     ">\nType your request\n"                            # gemini-cli / qwen-code
-    "⣾\n"  # a spinner (in every adapter's busy_markers) so provision's
-           # inject_and_confirm sees the agent go busy and returns at once
-           # (no settle sleep / re-nudge)
 )
 
 
@@ -75,18 +73,26 @@ def _fake_tmux():
         state["calls"].append(("send_keys", str(t), *keys))
         return True
 
+    # Always carries every adapter's ready markers (so wait_until_ready
+    # short-circuits on the first poll) AND changes each call, so provision's
+    # motion-based inject_and_confirm sees the pane move = submitted and
+    # returns without escalating the submit key.
     def capture_pane(target, lines=80):
-        return _ALL_READY_MARKERS
+        state["cap_n"] = state.get("cap_n", 0) + 1
+        return _ALL_READY_MARKERS + f"\nframe {state['cap_n']}\n"
 
     def inject(t, text, *, submit_keys=("Enter",)):
         state["calls"].append(("inject", str(t), text))
         return True
 
+    # No-op sleep: provision's inject_and_confirm always settles once before
+    # checking for motion; without this each provisioned pane paid ~1s.
     with tmux_patch(has_session=has_session, has_window=has_window,
                     new_session=new_session, new_window=new_window,
                     kill_window=kill_window, spawn_agent=spawn_agent,
                     send_keys=send_keys, capture_pane=capture_pane,
-                    inject=inject):
+                    inject=inject), \
+         attr_patch(time, sleep=lambda *a, **k: None):
         yield state
 
 
