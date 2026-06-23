@@ -783,42 +783,54 @@ async function stage_publish(page, _ctx, state) {
   }
   log(`  tenant_token swap OK · token=${verify.tenant_access_token.slice(0, 12)}...`);
 
-  // Now that a version is published, scopes are actually ACTIVE — this is
-  // the meaningful moment to verify (the pre-publish read in stage 3 always
-  // returned ~0 and false-alarmed). Advisory only: we never throw here,
-  // because the tenant_token swap above already proved the bot is usable;
-  // a missing advanced scope shouldn't fail the whole publish.
-  log('Stage 7/7 verify: checking activated scopes...');
-  const expected = JSON.parse(SCOPES_JSON).scopes;
-  const expectedFlat = new Set([...(expected.tenant || []), ...(expected.user || [])]);
-  const appliedResp = await page.evaluate(async (appId) => {
+  // The version is published, but scopes only become EFFECTIVE after the
+  // tenant admin reviews it — UNLESS the admin enabled 免审 (no-review), in
+  // which case it's effective almost immediately (with up to ~1-2 min of
+  // propagation). We do NOT trust the private /developers console scope
+  // endpoint we used before: it lags publish, reports console-internal names,
+  // and false-alarmed "IM core MISSING" right after publish even though the
+  // scopes were fine (there is no official "list granted scopes" API). Instead
+  // we PROBE the real IM API with the bot's tenant_access_token and classify by
+  // Feishu error code — the authoritative signal. Advisory only (never throws):
+  // the token swap above already proved the app is usable.
+  log('Stage 7/7 verify: probing IM scope (functional, with backoff)...');
+  const probeImScope = (token) => page.evaluate(async (tok) => {
     try {
-      const r = await fetch(`/developers/v1/scope/applied/${appId}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: '{}',
+      const r = await fetch('https://open.feishu.cn/open-apis/im/v1/chats?page_size=1', {
+        headers: { Authorization: 'Bearer ' + tok },
       });
-      return await r.json();
-    } catch (e) { return { error: e.message }; }
-  }, state.appId);
-  const applied = new Set();
-  for (const s of (appliedResp?.data?.scopes || [])) {
-    if (s.scope) applied.add(s.scope);
-    else if (s.scopeId) applied.add(s.scopeId);
-    else if (s.name) applied.add(s.name);
+      const j = await r.json();
+      return { code: j.code, msg: j.msg };
+    } catch (e) { return { code: -1, msg: e.message }; }
+  }, token);
+
+  // code 0 → scope ACTIVE; 230027 → not (yet) effective — version pending admin
+  // review, or scopes truly missing; 99991663 → token problem, NOT a scope
+  // issue. Scopes can take ~1-2 min to propagate, so retry with backoff (~90s)
+  // before judging — this is what eliminates the +6s false-negative.
+  const BACKOFF_S = [3, 7, 15, 25, 40];
+  let probe = await probeImScope(verify.tenant_access_token);
+  let waitedS = 0;
+  for (const delay of BACKOFF_S) {
+    if (probe.code === 0 || probe.code === 99991663) break;
+    await page.waitForTimeout(delay * 1000);
+    waitedS += delay;
+    probe = await probeImScope(verify.tenant_access_token);
   }
-  const IM_CORE = ['im:message', 'im:chat:create', 'im:chat:read'];
-  const coreMissing = IM_CORE.filter(s => !applied.has(s));
-  const missing = [...expectedFlat].filter(s => !applied.has(s));
-  if (coreMissing.length === 0) {
-    log(`  ✅ scopes active: ${applied.size} applied; IM core granted — ClaudeTeam ready`);
-    if (missing.length) {
-      log(`  ℹ ${missing.length} advanced scope(s) (Calendar / Docs / Wiki / Base / ` +
-          `Mail / Contact) still pending — these commonly need tenant-admin approval`);
-    }
+  const after = waitedS ? ` after ~${waitedS}s` : '';
+  if (probe.code === 0) {
+    log(`  ✅ IM scope ACTIVE${after} (im/v1/chats probe ok) — ClaudeTeam ready`);
+  } else if (probe.code === 230027) {
+    log(`  ⚠️ IM scope NOT effective${after} (code 230027). The published version is ` +
+        `likely PENDING TENANT-ADMIN REVIEW — approve it in the admin console, or enable ` +
+        `免审 (no-review) for self-built apps, then re-check. ` +
+        `Scopes: https://open.feishu.cn/app/${state.appId}/auth`);
+  } else if (probe.code === 99991663) {
+    log(`  ⚠️ tenant_access_token rejected (99991663) — a token/credential issue, NOT a ` +
+        `scope problem; re-run verify or re-check the app secret.`);
   } else {
-    log(`  ⚠️ IM core scope(s) still MISSING after publish (${coreMissing.join(', ')}) — ` +
-        `grant at https://open.feishu.cn/app/${state.appId}/auth and re-publish`);
+    log(`  ⚠️ IM scope probe inconclusive${after} (code=${probe.code} msg=${probe.msg}) — ` +
+        `verify manually at https://open.feishu.cn/app/${state.appId}/auth`);
   }
 }
 
