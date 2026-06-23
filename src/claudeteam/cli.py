@@ -103,6 +103,10 @@ def main(argv: list[str] | None = None) -> int:
     if not args or args[0] in ("-h", "--help", "help"):
         print(_usage())
         return 0
+    # `-v`/`--version` are the flags operators reflexively try; alias them
+    # to the `version` subcommand so they don't bounce off "unknown command".
+    if args[0] in ("-v", "--version"):
+        return int(version.main([]) or 0)
     cmd, rest = args[0], args[1:]
     handler = COMMANDS.get(cmd)
     if handler is None:

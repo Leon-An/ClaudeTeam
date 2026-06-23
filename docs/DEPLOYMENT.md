@@ -19,21 +19,25 @@ deployment, the flow is the same:
    ```bash
    cd scripts/feishu_bot_creator
    npm install                                          # one-time
-   # drive does login + all 7 stages in ONE chromium session
+   # drive does login + all 7 stages in ONE chromium session,
+   # AUTO-ADVANCING through every stage — no per-stage input on the
+   # happy path. It exits when publish completes.
    node create_feishu_bot.js drive <bot-name> "<description>" \
      > /tmp/drive.log 2>&1 &
    # First run prompts the user to scan QR (~30 s); cookies persist.
 
-   # After each stage drive blocks waiting on .state/<bot>.cmd.
-   # Read the log + state, then advance with one of:
-   echo next             > .state/<bot-name>.cmd   # next stage
-   echo skip             > .state/<bot-name>.cmd   # agent did it manually
-   echo "redo events"    > .state/<bot-name>.cmd   # redo a stage
+   # The .state/<bot>.cmd file is ONLY for failure recovery: if a stage
+   # hard-fails, drive stops, drops a handoff (screenshot + failure.json),
+   # keeps the browser on CDP, and waits — then you steer with one of:
+   echo skip             > .state/<bot-name>.cmd   # you fixed it in the browser → mark done + continue
+   echo "redo events"    > .state/<bot-name>.cmd   # re-run a stage
+   echo quit             > .state/<bot-name>.cmd   # stop
    ```
 
    `skip` is the key escape hatch when a Playwright selector breaks
    on a Feishu UI update — fix the page in the open browser
-   yourself, then `skip` to advance.
+   yourself, then `skip` to advance. (The happy path needs none of
+   these — they only come up when a stage fails.)
 
    Per-stage details (what Playwright does, equivalent manual UI,
    how to recover) are in [`setup_feishu_bot.md`](setup_feishu_bot.md).
@@ -91,18 +95,36 @@ deployment, the flow is the same:
    needs Python 3.10+, tmux, and the agent CLIs locally. Sections
    below cover both.
 
-4. **Config** — write the credentials into `.env` (Docker) and the
-   `chat_id` + agents into `claudeteam.toml`. `claudeteam init`
+4. **Config** — set the `chat_id` (+ agents) in `claudeteam.toml`.
+   Bot credentials are **not** stored in the toml (it has no App
+   ID/Secret field): on **host** they come from `lark-cli`'s config
+   — set once by `lark-cli config init`, secret kept in the OS
+   keychain — so the only required edit is `chat_id`. Only **Docker**
+   puts `FEISHU_APP_ID`/`FEISHU_APP_SECRET` in `.env`. `claudeteam init`
    generates a starter `claudeteam.toml` with three default agents
    (`manager` running Claude Code + `worker_cc` running Claude Code +
    `worker_codex` running Codex CLI) — keep them for a quick first
    smoke or edit before launch.
 
-5. **Launch + verify** — `claudeteam up` then `claudeteam health`
-   should be all green. From the Feishu group send `/health` and
-   `@manager 你好`; manager should reply within ~30 s.
+5. **Launch** — `claudeteam up` then `claudeteam health` should be all
+   green.
 
-6. **If anything goes red**, see [Common failures](#common-failures)
+6. **Hand the boss the join link, then verify.** This last mile can't
+   be automated: the bot can't receive its own messages, so only a real
+   human (boss) message in the group exercises the inbound path. Whoever
+   drives the deploy (human or agent) must hand the user two things:
+   1. the group **join link** — the `share_link` (`applink.feishu.cn/...`)
+      returned by `+chat-create` in step 2 (Path A); for a pre-existing
+      group, send the boss the group link out-of-band instead;
+   2. the two test messages.
+
+   The boss opens the link on Feishu **mobile → Join Group**, then sends
+   `/health` (zero-LLM card) and `@manager 你好` (manager replies ~30 s).
+   **Seeing the manager reply is the e2e green light.** Confirm inbound
+   landed with `claudeteam health` — its `inbound:` line flips from
+   "none observed yet" to "last event …" once your message routes.
+
+7. **If anything goes red**, see [Common failures](#common-failures)
    at the bottom — it covers Claude OAuth stale, container env not
    picked up, lark WebSocket drop, codex update prompt, etc.
 
@@ -154,6 +176,11 @@ No per-shell env exports — `claudeteam init` writes `[feishu] send_as = "bot"`
 #    macOS note: /usr/bin/python3 is 3.9.6 — too old. Use brew/pyenv:
 #      brew install python@3.12 && /opt/homebrew/bin/python3.12 -m venv .venv
 #    Linux: python3 from your distro is usually fine if it's ≥3.10.
+#    ANY Python ≥3.10 on PATH works — venv, conda/miniconda, or pyenv.
+#    If `claudeteam` is already installed under conda (so it resolves on
+#    PATH), you can skip the venv entirely; just confirm the agent CLIs
+#    (claude/codex/...) are on the same PATH. Check version any time with
+#    `claudeteam --version`.
 cd /path/to/ClaudeTeam
 python3 -m venv .venv
 source .venv/bin/activate
@@ -161,7 +188,7 @@ pip install -e .
 
 # 2. bootstrap config (writes claudeteam.toml in cwd, send_as/no_proxy preset)
 claudeteam init
-$EDITOR claudeteam.toml                    # set chat_id (+ App ID/Secret); agents have defaults
+$EDITOR claudeteam.toml                    # set chat_id only — host bot creds come from lark-cli config, not the toml; agents have defaults
 
 # 3. install slash hooks BEFORE up (claude-code caches them at pane spawn)
 claudeteam install-hooks                   # writes .claude/commands/<name>.md
@@ -406,12 +433,26 @@ Verify inside the container:
 docker compose exec claudeteam env | grep CLAUDETEAM_LARK_SEND_AS
 ```
 
-### Router silent stall (lark-cli alive but no events for 180s)
+### `router.log` shows "no live events … rotating subscribe" every ~120s
 
-Router self-SIGTERMs via `_watch_subscribe_health` and watchdog
-respawns. Usually transient (lark WebSocket dropped). If it's
-constant, check whether another `lark-cli +subscribe` is running
-elsewhere (host vs container, or a stale orphan):
+**This is usually NORMAL, not a fault — especially on macOS.** On an
+idle chat the live WebSocket goes quiet; the router self-SIGTERMs via
+`_watch_subscribe_health`, watchdog respawns it, and catchup-on-restart
+refetches anything missed from Feishu's REST API. The recovery loop *is*
+the design. Two log shapes distinguish the cases:
+
+- `ℹ️ no live events for Ns — rotating subscribe (none inbound yet this
+  session …)` — idle, no traffic yet. Expected; ignore.
+- `⚠️ live events stopped after Ns idle …` — events WERE flowing and
+  stopped. More notable (esp. on Linux, where the WS is meant to be
+  stable).
+
+**Don't trust the log to tell you inbound works — it never prints "I
+received your message".** The at-a-glance truth is `claudeteam health`'s
+`inbound:` line ("none observed yet" → "last event …") plus one real
+human message in the group (see the verify step above). If the `⚠️`
+variant is *constant*, check for a second `lark-cli +subscribe` stealing
+events (host vs container, or a stale orphan):
 
 ```bash
 ps -ef | grep -E "lark-cli.*subscribe" | grep -v grep

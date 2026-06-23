@@ -453,48 +453,19 @@ async function stage_import_scopes(page, _ctx, state) {
   await page.waitForTimeout(2000);
   await page.getByRole('button', { name: 'Add', exact: true }).click();
   await page.waitForTimeout(3000);
-  // Post-import verification: how many of what we paste actually got
-  // through Feishu's filter (some sensitive scopes need admin approval
-  // and won't auto-activate — caller logs it for the operator).
-  const expected = JSON.parse(SCOPES_JSON).scopes;
-  const expectedFlat = new Set([...(expected.tenant || []), ...(expected.user || [])]);
-  const actualResp = await page.evaluate(async (appId) => {
-    try {
-      const r = await fetch(`/developers/v1/scope/applied/${appId}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: '{}',
-      });
-      return await r.json();
-    } catch (e) { return { error: e.message }; }
-  }, state.appId);
-  const applied = new Set();
-  for (const s of (actualResp?.data?.scopes || [])) {
-    if (s.scope) applied.add(s.scope);
-    else if (s.scopeId) applied.add(s.scopeId);
-    else if (s.name) applied.add(s.name);
-  }
-  const missing = [...expectedFlat].filter(s => !applied.has(s));
-  log(`scope verification: ${applied.size} applied · ${missing.length} of ${expectedFlat.size} requested didn't activate`);
-  // Many tenants gate non-IM scopes (Calendar
-  // / Docs / Wiki / Base / Mail / Contact) behind admin approval. Calling
-  // the "didn't activate" warning loud without context made operators
-  // think the bot was unusable. Classify by IM-core vs advanced so the
-  // operator knows ClaudeTeam's basic flow still works.
-  const IM_CORE = ['im:message', 'im:chat:create', 'im:chat:read'];
-  const coreApplied = IM_CORE.filter(s => applied.has(s));
-  const coreMissing = IM_CORE.filter(s => !applied.has(s));
-  if (missing.length) {
-    if (coreMissing.length === 0) {
-      log(`  ✅ IM core scopes (${coreApplied.join(', ')}) granted — ClaudeTeam's basic flow will work`);
-      log(`  ℹ Advanced scopes (Calendar / Docs / Wiki / Base / Mail / Contact) commonly need admin approval in your tenant`);
-    } else {
-      log(`  ⚠️ IM core scope(s) MISSING (${coreMissing.join(', ')}) — ClaudeTeam's basic flow may fail`);
-    }
-    log(`  hints: ${missing.slice(0, 6).join(', ')}${missing.length > 6 ? ` (+${missing.length - 6} more)` : ''}`);
-    log(`  manually grant any missing at https://open.feishu.cn/app/${state.appId}/auth`);
-  }
-  log('Permissions imported');
+  // Confirm the import dialog went through. We deliberately do NOT query
+  // /scope/applied here: Feishu only ACTIVATES requested scopes once a
+  // version is PUBLISHED (stage 7), so pre-publish this endpoint always
+  // reads ~0 — which used to false-alarm "IM core MISSING — may fail" and
+  // send operators chasing a non-problem (the scopes were fine, just not
+  // published yet). The real, meaningful applied-scope check now runs
+  // post-publish in stage_publish().
+  const requested = new Set([
+    ...(JSON.parse(SCOPES_JSON).scopes.tenant || []),
+    ...(JSON.parse(SCOPES_JSON).scopes.user || []),
+  ]);
+  log(`Permissions imported: ${requested.size} scopes requested ` +
+      `(Feishu activates them on publish — verified at stage 7)`);
 }
 
 async function stage_data_range(page, _ctx, _state) {
@@ -811,6 +782,44 @@ async function stage_publish(page, _ctx, state) {
       `Check https://open.feishu.cn/app/${state.appId}/version for status.`);
   }
   log(`  tenant_token swap OK · token=${verify.tenant_access_token.slice(0, 12)}...`);
+
+  // Now that a version is published, scopes are actually ACTIVE — this is
+  // the meaningful moment to verify (the pre-publish read in stage 3 always
+  // returned ~0 and false-alarmed). Advisory only: we never throw here,
+  // because the tenant_token swap above already proved the bot is usable;
+  // a missing advanced scope shouldn't fail the whole publish.
+  log('Stage 7/7 verify: checking activated scopes...');
+  const expected = JSON.parse(SCOPES_JSON).scopes;
+  const expectedFlat = new Set([...(expected.tenant || []), ...(expected.user || [])]);
+  const appliedResp = await page.evaluate(async (appId) => {
+    try {
+      const r = await fetch(`/developers/v1/scope/applied/${appId}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      });
+      return await r.json();
+    } catch (e) { return { error: e.message }; }
+  }, state.appId);
+  const applied = new Set();
+  for (const s of (appliedResp?.data?.scopes || [])) {
+    if (s.scope) applied.add(s.scope);
+    else if (s.scopeId) applied.add(s.scopeId);
+    else if (s.name) applied.add(s.name);
+  }
+  const IM_CORE = ['im:message', 'im:chat:create', 'im:chat:read'];
+  const coreMissing = IM_CORE.filter(s => !applied.has(s));
+  const missing = [...expectedFlat].filter(s => !applied.has(s));
+  if (coreMissing.length === 0) {
+    log(`  ✅ scopes active: ${applied.size} applied; IM core granted — ClaudeTeam ready`);
+    if (missing.length) {
+      log(`  ℹ ${missing.length} advanced scope(s) (Calendar / Docs / Wiki / Base / ` +
+          `Mail / Contact) still pending — these commonly need tenant-admin approval`);
+    }
+  } else {
+    log(`  ⚠️ IM core scope(s) still MISSING after publish (${coreMissing.join(', ')}) — ` +
+        `grant at https://open.feishu.cn/app/${state.appId}/auth and re-publish`);
+  }
 }
 
 // Each stage carries enough metadata that, on failure, we can hand a

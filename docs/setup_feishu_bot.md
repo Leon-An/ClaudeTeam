@@ -114,18 +114,19 @@ node create_feishu_bot.js drive <bot-name> "<desc>" \
   > /tmp/drive-<bot-name>.log 2>&1 &
 ```
 
-drive 跑完一个 stage 就阻塞等命令文件，agent 读 state + log
-判断结果后写命令推进：
+drive **自动连跑全部 7 个 stage**，happy path 不需要写任何命令文件，跑完
+publish 自动退出。命令文件只在**某个 stage 硬失败、drive 停下交接**时才用到
+（agent 读 state + log + 失败截图判断后写命令）：
 
 ```bash
-# 推进下一 stage（happy path, 上一 stage 自动跑完了）:
-echo next > scripts/feishu_bot_creator/.state/<bot-name>.cmd
-
-# Agent 接管浏览器（CDP / cookie）完成了当前失败的 stage, 标记 done:
+# 你在打开的浏览器里手动补完了失败的 stage → 标记 done 并继续:
 echo skip > scripts/feishu_bot_creator/.state/<bot-name>.cmd
 
 # 重跑某个 stage (drive 不退出):
 echo "redo events" > scripts/feishu_bot_creator/.state/<bot-name>.cmd
+
+# 跳到下一 stage（不把当前标记为 done）:
+echo next > scripts/feishu_bot_creator/.state/<bot-name>.cmd
 
 # 提前结束:
 echo quit > scripts/feishu_bot_creator/.state/<bot-name>.cmd
@@ -220,8 +221,16 @@ Mail 等），一次性全部添加。
 **对应 manual UI**：左侧「权限管理」→「批量导入/导出权限」→ 选
 「导入」→ 粘贴 `feishu_scopes.json` 全部内容 → 「下一步」→ 「添加」。
 
-**完成判断**：导入后权限列表显示约 480 条权限；`completedStages`
-含 `import-scopes`。
+**完成判断**：导入对话框走完，bot-creator 打印
+`Permissions imported: N scopes requested (...)`；`completedStages` 含
+`import-scopes`。
+
+> **注意（不是 bug）**：飞书的权限**只有在发布版本（stage 7）之后才激活**。
+> 所以在 stage 3 这个时点去查"已生效 scope"必然是 **0**——这是预期现象，
+> 不代表导入失败，更不代表 IM 核心权限缺失。早期版本在这里会吓人地打
+> `0 applied · IM core MISSING — may fail`，已移除。真正的生效校验放到了
+> publish 之后：stage 7 会打 `✅ scopes active … IM core granted`，或在确实
+> 仍缺核心权限时才打 `⚠️ … MISSING after publish`。
 
 **失败常见原因**：Monaco editor 的 textarea 被 span 覆盖（脚本就是
 为此点 `.view-lines` 而不是 textarea）；或剪贴板权限被浏览器拦

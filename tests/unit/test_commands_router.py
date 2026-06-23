@@ -18,6 +18,7 @@ from claudeteam.commands.router import (
     _make_on_progress,
     _notify_catchup_skips,
     _stale_event_threshold_s,
+    _subscribe_rotate_reason,
     _watch_subscribe_health,
 )
 
@@ -183,7 +184,8 @@ def test_make_on_progress_refreshes_timestamp_on_each_event():
     from types import SimpleNamespace
     with isolated_env():
         last_event_at = [0.0]
-        cb = _make_on_progress(last_event_at)
+        events_seen = [0]
+        cb = _make_on_progress(last_event_at, events_seen)
         # Mock decision (only attribute used is by record_decision; we patch
         # catchup.record_decision to a no-op so we don't need full Decision).
         from claudeteam.feishu import catchup
@@ -197,6 +199,26 @@ def test_make_on_progress_refreshes_timestamp_on_each_event():
             catchup.record_decision = real_record
     # time.monotonic always > 0 since boot; before was 0.0
     assert after > before
+    # genuine handled event is counted (idle-vs-stalled signal for #5)
+    assert events_seen[0] == 1
+
+
+def test_subscribe_rotate_reason_idle_is_calm_not_alarming():
+    """events_seen==0 is the NORMAL macOS idle case (no inbound yet this
+    session; live WS goes quiet, catchup recovers on restart). The log must
+    NOT scream 'silently stalled' — it reads as broken on a fresh deploy."""
+    line = _subscribe_rotate_reason(130.0, 120.0, events_seen=0)
+    assert "ℹ️" in line
+    assert "stalled" not in line.lower()
+    assert "catchup" in line.lower()
+
+
+def test_subscribe_rotate_reason_after_events_is_warning():
+    """events_seen>0 means events WERE flowing then stopped — genuinely
+    more notable (esp. Linux, where the WS is supposed to be stable)."""
+    line = _subscribe_rotate_reason(130.0, 120.0, events_seen=5)
+    assert "⚠️" in line
+    assert "stopped" in line.lower()
 
 
 def test_watch_subscribe_health_self_terminates_on_stale_events():
@@ -225,7 +247,7 @@ def test_watch_subscribe_health_self_terminates_on_stale_events():
             last_event_at = [0.0]
             t = threading.Thread(
                 target=_watch_subscribe_health,
-                args=(FakeProc(), stop_event, last_event_at),
+                args=(FakeProc(), stop_event, last_event_at, [0]),
                 daemon=True,
             )
             t.start()
@@ -259,7 +281,7 @@ def test_watch_subscribe_health_self_terminates_on_child_exit():
             last_event_at = [time.monotonic()]  # fresh
             t = threading.Thread(
                 target=_watch_subscribe_health,
-                args=(FakeProc(), stop_event, last_event_at),
+                args=(FakeProc(), stop_event, last_event_at, [0]),
                 daemon=True,
             )
             t.start()
@@ -326,7 +348,7 @@ def test_on_progress_appends_msg_id_to_seen_file():
     from claudeteam.runtime import paths
     with isolated_env():
         last_event_at = [0.0]
-        cb = _make_on_progress(last_event_at)
+        cb = _make_on_progress(last_event_at, [0])
         # Mock the catchup.record_decision side effect
         from claudeteam.feishu import catchup
         real_record = catchup.record_decision
@@ -354,7 +376,7 @@ def test_seen_persists_across_simulated_restart():
         real_record = catchup.record_decision
         catchup.record_decision = lambda d: None
         try:
-            cb1 = _make_on_progress([0.0])
+            cb1 = _make_on_progress([0.0], [0])
             cb1(SimpleNamespace(msg_id="om_X"), object())
         finally:
             catchup.record_decision = real_record

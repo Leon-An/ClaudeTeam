@@ -180,7 +180,7 @@ def _load_seen_msg_ids() -> set[str]:
     return set(ids)
 
 
-def _make_on_progress(last_event_at: list[float]) -> Callable:
+def _make_on_progress(last_event_at: list[float], events_seen: list[int]) -> Callable:
     """Build the on_progress callback bound to a mutable timestamp slot.
 
     Every successfully handled (non-DROP) event:
@@ -197,6 +197,11 @@ def _make_on_progress(last_event_at: list[float]) -> Callable:
     def _on_progress(decision, stats):
         catchup.record_decision(decision)
         last_event_at[0] = time.monotonic()
+        # Count only genuine handled events (NOT every line — keepalive/
+        # heartbeat lines bump last_event_at via _bump_subscribe_alive but
+        # aren't "inbound events"). Lets the health thread tell "idle since
+        # start, never saw traffic" apart from "was flowing, then stalled".
+        events_seen[0] += 1
         msg_id = getattr(decision, "msg_id", "")
         if msg_id:
             try:
@@ -255,8 +260,30 @@ def _stale_event_threshold_s() -> float:
         _platform_default_stale_event_threshold_s()))
 
 
+def _subscribe_rotate_reason(idle: float, threshold: float, events_seen: int) -> str:
+    """The router log line printed right before self-SIGTERM for respawn.
+
+    Pure so it's unit-testable without the kill/loop machinery. The whole
+    point of #5: the *idle* case (no inbound yet this session) is the NORMAL
+    macOS state — the live WebSocket goes quiet, the respawn + catchup-on-
+    restart is the designed recovery, NOT a fault. Wording it "silently
+    stalled" every ~120s made first deploys look broken. So:
+
+      - events_seen == 0  → calm ℹ️: rotating subscribe, catchup will refetch.
+      - events_seen  > 0  → ⚠️: events WERE flowing then stopped (more notable,
+                            esp. on Linux where the WS is supposed to be stable).
+    """
+    if events_seen == 0:
+        return (f"  ℹ️ no live events for {idle:.0f}s — rotating subscribe "
+                f"(none inbound yet this session; on macOS the WebSocket often "
+                f"goes quiet, catchup refetches on restart)")
+    return (f"  ⚠️ live events stopped after {idle:.0f}s idle "
+            f"(threshold {threshold:.0f}s) — rotating subscribe for respawn")
+
+
 def _watch_subscribe_health(proc: subprocess.Popen, stop_event: threading.Event,
-                            last_event_at: list[float]) -> None:
+                            last_event_at: list[float],
+                            events_seen: list[int]) -> None:
     """Background thread: kill the daemon if the subscribe child dies OR
     stops delivering events.
 
@@ -290,7 +317,7 @@ def _watch_subscribe_health(proc: subprocess.Popen, stop_event: threading.Event,
             return
         idle = time.monotonic() - last_event_at[0]
         if idle > threshold:
-            print(f"  ⚠️ no events for {idle:.0f}s (threshold {threshold:.0f}s); subscribe likely silently stalled, exiting for respawn")
+            print(_subscribe_rotate_reason(idle, threshold, events_seen[0]))
             os.kill(os.getpid(), signal.SIGTERM)
             return
 
@@ -387,9 +414,10 @@ def main(argv: list[str]) -> int:
     # flowing for too long (silent-subscribe-stall mode).
     stop_watchdog = threading.Event()
     last_event_at = [time.monotonic()]
+    events_seen = [0]  # genuine handled events this process (idle vs stalled)
     threading.Thread(
         target=_watch_subscribe_health,
-        args=(proc, stop_watchdog, last_event_at),
+        args=(proc, stop_watchdog, last_event_at, events_seen),
         daemon=True,
     ).start()
 
@@ -429,7 +457,7 @@ def main(argv: list[str]) -> int:
             chat_id=chat,
             default_target="manager",
             apply_fn=apply_fn,
-            on_progress=_make_on_progress(last_event_at),
+            on_progress=_make_on_progress(last_event_at, events_seen),
             on_line_received=_bump_subscribe_alive,
             seen_msg_ids=seen,
         )

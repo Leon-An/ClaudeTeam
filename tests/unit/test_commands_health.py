@@ -141,6 +141,27 @@ def test_health_info_when_cursor_empty():
         assert "ℹ️" in out  # info marker, not warn marker
         # ensure "advances on first inbound event" is in the cursor line
         assert "first inbound event" in out
+        # #5: empty cursor → tell the operator how to confirm inbound works,
+        # instead of leaving "is it working?" unanswerable.
+        assert "inbound: none observed yet" in out
+
+
+def test_health_shows_inbound_age_when_cursor_present():
+    """#5: with a cursor, health prints a positive 'inbound: last event …'
+    signal. On macOS the live WS goes quiet and router.log only shows the
+    rotate line, so this is the at-a-glance answer to 'is inbound working?'."""
+    from claudeteam.commands import health
+    from claudeteam.feishu import catchup
+    team = {"session": "S", "agents": {"manager": {}}}
+    with isolated_env(team=team, runtime_config={"chat_id": "oc_x"}):
+        # epoch-ms string passes straight through _to_epoch_ms → create_time_ms
+        catchup.write_cursor("om_test", "1782220000000")
+        rep = health.HealthReport()
+        health._check_cursor(rep)
+    text = "\n".join(rep.lines)
+    assert "router cursor: om_test" in text
+    assert "inbound: last event" in text
+    assert "ago" in text  # ago_ms-formatted
 
 
 # ── memory section ──────────────────────────────────────────────

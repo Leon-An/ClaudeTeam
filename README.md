@@ -215,29 +215,31 @@ node create_feishu_bot.js login
 
 **Drive mode (recommended for agents)** — `drive` is the single
 entry point: it opens chromium **once**, asks the user to scan QR if
-no saved cookies, then runs the first incomplete stage and blocks
-waiting for the next agent command. Browser stays open across all 7
-stages.
+no saved cookies, then **auto-advances through all 7 stages** and exits
+when publish completes. Browser stays open the whole time. The `.cmd`
+commands below are **only for failure recovery** — the happy path needs
+none of them.
 
 ```bash
 # Start drive in the background. If first run, user scans QR (~30 s);
-# cookies persist so subsequent drives skip this.
+# cookies persist so subsequent drives skip this. Then it runs all 7
+# stages on its own.
 node create_feishu_bot.js drive my-bot "My ClaudeTeam bot" \
   > /tmp/drive.log 2>&1 &
 
-# Agent watches /tmp/drive.log + .state/my-bot.json. After each
-# stage settles, agent advances by writing one of:
-echo next             > scripts/feishu_bot_creator/.state/my-bot.cmd
+# Agent watches /tmp/drive.log + .state/my-bot.json. ONLY if a stage
+# hard-fails does drive stop and wait — then steer with one of:
 echo skip             > scripts/feishu_bot_creator/.state/my-bot.cmd
 echo "redo events"    > scripts/feishu_bot_creator/.state/my-bot.cmd
+echo next             > scripts/feishu_bot_creator/.state/my-bot.cmd
 echo quit             > scripts/feishu_bot_creator/.state/my-bot.cmd
 ```
 
-Command meanings:
-- `next` — run the next incomplete stage (happy path)
+Command meanings (failure-recovery only — happy path auto-advances):
 - `skip` — agent finished the current failed stage **manually in the
   open browser**; mark it done and move on (key escape hatch when
   Feishu UI changes break a Playwright selector)
+- `next` — advance to the next stage without marking the current done
 - `redo <stage-id>` — un-mark that stage so the next iteration re-runs it
 - `quit` — close browser and exit
 
