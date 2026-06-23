@@ -128,6 +128,47 @@ def test_usage_json_records_cc_failure_without_aborting():
         assert "已过期" in data["claude_code"]["note"]
 
 
+# ── _query_cc_usage HTTPError body capture ──────────────────────
+
+
+def test_cc_usage_http_error_includes_api_message():
+    """When the API returns a 4xx with a JSON error body, the `note`
+    in the failure dict should include Anthropic's message string so
+    users see WHY it failed (e.g. 'subscription required') not just
+    the bare 'HTTP 403: Forbidden'."""
+    import contextlib
+    import io
+    import json as _json
+    import tempfile
+    from pathlib import Path as _Path
+    from urllib import error as urllib_error
+
+    body = _json.dumps({"error": {"type": "permission_error",
+                                   "message": "Claude Max subscription required"}})
+
+    def fake_opener(req, timeout):
+        fp = io.BytesIO(body.encode())
+        raise urllib_error.HTTPError(
+            "https://api.anthropic.com/api/oauth/usage",
+            403, "Forbidden", hdrs={}, fp=fp)
+
+    import time as _t
+    creds = {"claudeAiOauth": {
+        "accessToken": "sk-ant-oat01-test",
+        "expiresAt": int(_t.time() * 1000) + 3_600_000,  # 1h from now
+    }}
+    with tempfile.TemporaryDirectory() as tmp:
+        home = _Path(tmp) / "home"
+        home.mkdir()
+        (home / ".claude").mkdir()
+        (home / ".claude" / ".credentials.json").write_text(_json.dumps(creds))
+        result = _usage_mod._query_cc_usage(home=home, opener=fake_opener)
+
+    assert result["ok"] is False
+    assert "403" in result["note"]
+    assert "subscription required" in result["note"].lower()
+
+
 # ── codex + kimi probes ─────────────────────────────────────────
 
 

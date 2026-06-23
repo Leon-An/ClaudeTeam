@@ -140,7 +140,15 @@ def _query_cc_usage(home: Path | None = None,
         with opener(req, timeout=15) as resp:
             data = json.loads(resp.read())
     except urllib_error.HTTPError as e:
-        return {"ok": False, "note": f"Claude usage HTTP {e.code}: {e.reason}"}
+        body = ""
+        try:
+            body = (json.loads(e.read()).get("error") or {}).get("message", "")
+        except Exception:
+            pass
+        note = f"Claude usage HTTP {e.code}: {e.reason}"
+        if body:
+            note += f" · {body}"
+        return {"ok": False, "note": note}
     except (urllib_error.URLError, OSError, ValueError) as e:
         return {"ok": False, "note": f"Claude usage 请求失败: {e}"}
 
