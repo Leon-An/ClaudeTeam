@@ -53,8 +53,8 @@ def test_team_shows_relative_age():
 
 
 def test_team_json_dumps_machine_readable_records():
-    """`--json` emits a list[dict] consumable by CI / smoke conductors
-    / peer agents — no emoji, no relative timestamps to parse."""
+    """`--json` emits a list[dict] consumable by CI / scripts / peer
+    agents — no emoji, no relative timestamps to parse."""
     with isolated_env():
         run_cli(["status", "worker_a", "进行中", "task A"])
         run_cli(["status", "worker_b", "已完成", "task B", "blocked on review"])

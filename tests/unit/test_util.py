@@ -14,7 +14,7 @@ from claudeteam.util import (
     ago_ms, atomic_write_text, env_path, env_str, error_exit, flock,
     fmt_bytes, fmt_time_ms, help_requested, maybe_print_help, now_ms,
     pop_bool_flag, pop_flag, print_json, read_json, read_jsonl,
-    reject_extra_args, usage_error, warn,
+    reject_extra_args, reject_flag_as_agent, usage_error, warn,
 )
 
 
@@ -291,6 +291,30 @@ def test_reject_extra_args_returns_one_and_prints_when_leftover():
     assert "usage: foo bar" in msg
 
 
+# ── reject_flag_as_agent (flag-as-agent guard) ──────────────
+
+
+def test_reject_flag_as_agent_passes_real_name():
+    """A normal agent name is not flag-shaped → None so caller continues."""
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        assert reject_flag_as_agent("worker_cc", "usage: foo") is None
+    assert err.getvalue() == ""
+
+
+def test_reject_flag_as_agent_rejects_dash_prefixed():
+    """A '-'-prefixed token (misparsed option like --help) → rc=1 + usage,
+    never accepted as an agent (would spawn a phantom agent in facts)."""
+    for bad in ("--help", "-h", "--json"):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = reject_flag_as_agent(bad, "usage: foo bar")
+        assert rc == 1, bad
+        msg = err.getvalue()
+        assert bad in msg
+        assert "usage: foo bar" in msg
+
+
 # ── print_json ──────────────────────────────────────────────────
 
 
@@ -298,8 +322,8 @@ def test_reject_extra_args_returns_one_and_prints_when_leftover():
 
 
 def test_read_jsonl_returns_empty_when_missing(tmp_dir_path=None):
-    """Round-90: missing file is the common 'no records yet' case;
-    callers shouldn't have to special-case existence."""
+    """Missing file is the common 'no records yet' case; callers
+    shouldn't have to special-case existence."""
     import tempfile, os
     from pathlib import Path
     with tempfile.TemporaryDirectory() as td:
@@ -352,7 +376,7 @@ def test_read_jsonl_skips_corrupt_lines_silently():
 
 def test_print_json_uses_canonical_formatting():
     """ensure_ascii=False so Chinese stays readable; indent=2 so jq /
-    smoke conductors get diff-friendly multi-line output. The trailing
+    scripts get diff-friendly multi-line output. The trailing
     newline is print()'s default, not part of json.dumps."""
     out = io.StringIO()
     with contextlib.redirect_stdout(out):

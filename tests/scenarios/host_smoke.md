@@ -6,11 +6,24 @@
 
 - 部署上线（venv 激活、`claudeteam up`、`claudeteam health`）
 - 用户 OAuth（设备授权流程，只跑一次终身有效）
-- 9 条斜杠命令全覆盖
-- 普通文本路由（验证 R174「manager 是唯一接口」契约）
+- 斜杠命令矩阵（/help 列 13 条，§3 抽样验证 + 边界）
+- 普通文本路由（验证「manager 是唯一接口」契约）
 - worker 反向路由（worker 卡片自动转回 manager 收件箱）
 
-不覆盖：容器部署（看 [docker_deploy.md](docker_deploy.md)）、Round C 真任务协作（看 [round_c_real_task.md](round_c_real_task.md)）。
+不覆盖：容器部署（看 [docker_deploy.md](docker_deploy.md)）、端到端真任务协作（看 [real_task_e2e.md](real_task_e2e.md)）。
+
+> **给驱动这套测试的 agent**：这是最还原的端到端——你用 `--as user`（§2 起）往群里
+> 发消息，再用 `chat-messages-list` / `state/facts/inbox.json` / `tmux capture-pane`
+> 验响应；§3–§7 全是你能自己跑的具体命令。但有 **3 步你做不了、要交给你的人做一次**：
+>
+> 1. **建飞书自建 App + 机器人进群**——见 [`docs/DEPLOYMENT.md`](../../docs/DEPLOYMENT.md) +
+>    [`docs/setup_feishu_bot.md`](../../docs/setup_feishu_bot.md)（拿到 `App ID`/`Secret`/`chat_id`）。
+> 2. **用户 OAuth（§2）**——要在浏览器点「授权」，agent 代不了。
+> 3. **各 agent CLI 登录**——`claude` / `codex` 等要有登录好的账号（或按
+>    [agent_auth 的 `.env` 方案](slash_matrix.md) 配长期 token / api key）。
+>
+> 这 3 步真人做完一次后，下面整条龙你自己驱动。**完整旅程**：先按
+> [`docs/DEPLOYMENT.md`](../../docs/DEPLOYMENT.md) 装好 → 再从本篇 §0 起跑。
 
 ## 适用范围
 
@@ -71,7 +84,7 @@ LARK_CLI_NO_PROXY=1 lark-cli im +messages-send \
   --chat-id <你的 chat_id> --text "/team" --as user
 ```
 
-## 3. 斜杠命令矩阵（9 条 + 1 条边界用例）
+## 3. 斜杠命令矩阵（抽样几条 + 2 条边界用例）
 
 每条都用 `--as user` 触发，等 router 接收 → 看群里有没有期望的卡。
 
@@ -133,11 +146,11 @@ SEND "/clear worker_cc"             # 清历史 + 重新注入 identity（rehire
 SEND "/stop worker_cc"              # 送 C-c 中断当前动作（不杀 pane；slash 自身 help 写的是"中断"）
 ```
 
-## 4. 普通文本路由（验证 R174）
+## 4. 普通文本路由（验证「manager 是唯一接口」）
 
 证明 router 把 4 条人话都只投给 manager 的收件箱。manager 之后**可以**主动
 派单给 worker（「你在吗」之类的简单问，他可能懒得自己 echo 而 dispatch 给
-worker_cc 直接答；这是 manager 的判断力，不算契约破）。R174 真正禁止的是
+worker_cc 直接答；这是 manager 的判断力，不算契约破）。契约真正禁止的是
 **router 跳过 manager、把 worker 当独立接口直接送投递**——这条用 inbox 文件
 查最严谨。
 
@@ -154,7 +167,7 @@ SEND "全体注意：smoke ping $(date +%s)"  # 中文广播 + 时间戳锚定
    manager 真处理了具体消息，不是回复以前的指令；不超过 60 秒
 2. `state/facts/inbox.json` 里这 4 条的 `to` 字段**全部是 manager**，没有
    `to=worker_cc` / `to=worker_codex` 的人话条目（manager dispatch 后产生的
-   `from=manager, to=worker_cc` 是合法派单，不计在 R174 之内）
+   `from=manager, to=worker_cc` 是合法派单，不计在「manager 是唯一接口」契约之内）
 
 ```bash
 # 严谨验证：直接看 inbox 投递记录
@@ -164,7 +177,7 @@ msgs = json.load(open('state/facts/inbox.json'))['messages']
 for m in msgs[-12:]:
     print(f\"to={m['to']:13} from={m['from']:10}  {(m.get('text') or '')[:70]}\")"
 # 期望最近 4 条人话 to= manager, from= user。
-# 任何 to=worker_*, from=user 的条目就是 R174 破了。
+# 任何 to=worker_*, from=user 的条目就是契约破了。
 ```
 
 **失败排查**（仅当 inbox 里出现 `to=worker_*, from=user` 才看）：
@@ -172,7 +185,7 @@ for m in msgs[-12:]:
 - 查 `feishu/router.classify_event` 有没有被回退到老的 @-mention 路由
 - 群里 manager 没回——manager pane 卡住或没在工作。先 `tmux capture-pane -t ClaudeTeam:manager -p | tail -30` 看 LLM 状态；再看 `state/router.log` 看路由是不是 ROUTE 到 manager
 
-## 5. Worker → manager 反向路由（R174 的例外分支）
+## 5. Worker → manager 反向路由（「manager 是唯一接口」的例外分支）
 
 证明 worker 自己发的卡能被 manager 看到并在群里**继续动作**——闭环就这一条。
 
@@ -192,7 +205,7 @@ claudeteam say worker_cc "$ANCHOR" --card
 
 **失败排查**：
 
-- 只看到 worker_cc 卡，半分钟后没 manager 卡——R174 的 worker→manager
+- 只看到 worker_cc 卡，半分钟后没 manager 卡——worker→manager
   反向分支没生效，或 manager 卡住了。先 `claudeteam inbox manager` 看消息
   有没有进来。如果没进来，看 `feishu/router._card_sender_agent`。如果进
   来了 manager 没动，看 manager pane（identity init 是否完成）
@@ -275,7 +288,7 @@ claudeteam down && claudeteam up
 
 ## 8. 多部署冲突（同一个 App 抢订阅）
 
-⚠️ **2026-05-06 重测发现实际行为与本节描述不符**——下文仅为说明 lark-cli 1.0.23
+⚠️ **重测发现实际行为与本节描述不符**——下文仅为说明 lark-cli 1.0.23
 之后的真实情况：
 
 **lark-cli 单实例锁是 fcntl-advisory**（`~/.lark-cli/locks/subscribe_<app_id>.lock`），
@@ -368,7 +381,7 @@ claudeteam down
 ## 已知的本机特有怪现象
 
 1. **`/usage` 的 Claude Code 段会显示「读取失败」**——macOS 上 claude OAuth 存在 keychain，不在文件里。ccusage 找不到 `~/.claude/.credentials.json`。Codex 与 Kimi 段正常
-2. **重新部署后 worker pane 可能「Not logged in」**——claude 续期 token 时只更新 keychain，每个 agent home 下的 `state/agent-home/<agent>/.claude/.credentials.json` 是当时快照，过几天会过期。临时解：`claudeteam down && claudeteam up`，让 lifecycle 从 keychain 重新物化一遍
+2. **重新部署后 worker pane 可能「Not logged in」**——claude 的 login（订阅）凭证是物化进 `state/agents/<agent>/home/.claude/.credentials.json` 的快照，过几天会过期。临时解：`claudeteam down && claudeteam up` 从 keychain 重新物化一遍。**持久解**：在 secrets `.env`（`$CLAUDETEAM_SECRETS_FILE`，默认 `<state>/.env`，已 gitignore）里写 `CLAUDE_CODE_OAUTH_TOKEN=<claude setup-token>`（`claude setup-token` 生成的 ~1 年长期 token）——`agent_auth` 按 token>login>api_key 优先吃它，不再受快照过期影响；要单独给某个 agent 用 `<AGENT_大写>_CLAUDE_CODE_OAUTH_TOKEN`（如 `WORKER_CC_CLAUDE_CODE_OAUTH_TOKEN`）。同理 codex 用 `CODEX_ACCESS_TOKEN`、gemini/qwen 用 `GEMINI_API_KEY`/`DASHSCOPE_API_KEY`
 3. **codex 启动可能弹更新框**——挡住 ready marker 60 秒超时。手动 `tmux send-keys -t ClaudeTeam:worker_codex 3 Enter` 选 Skip-until-next，再 `claudeteam reidentify --all`
 4. **第一次 user OAuth 之后，每个新 shell 仍要 `export` 那 4 个环境变量**——没持久化的话 `claudeteam say` 偶尔会走 user 身份失败
 
@@ -376,5 +389,5 @@ claudeteam down
 
 - 容器部署专属问题（`FEISHU_APP_ID` / tenant_access_token 自动注入）：看 [docker_deploy.md](docker_deploy.md)
 - 多份部署互相切换：看 [team_switch.md](team_switch.md)
-- manager 拆任务派 worker、worker 完工汇报、manager 写 review 报告（真协作）：看 [round_c_real_task.md](round_c_real_task.md)
+- manager 拆任务派 worker、worker 完工汇报、manager 写 review 报告（真协作）：看 [real_task_e2e.md](real_task_e2e.md)
 - agent 之间互相发信（`claudeteam send worker_a worker_b "..."`）：看 [local_message_cycle.md](local_message_cycle.md)

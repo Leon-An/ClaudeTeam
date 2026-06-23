@@ -9,7 +9,7 @@ from __future__ import annotations
 import shlex
 from pathlib import Path
 
-from .base import CliAdapter, MULTILINE_SUBMIT_KEYS, SPINNER_CHARS
+from .base import AuthSlots, CliAdapter
 from .claude_code import agent_home
 
 
@@ -73,11 +73,26 @@ class CodexCliAdapter(CliAdapter):
         # the spawn-command echo that includes "gpt-5".
         return ["OpenAI Codex", "permissions: YOLO"]
 
-    def busy_markers(self) -> list[str]:
-        return ["esc to interrupt", "Booting MCP server", *SPINNER_CHARS]
-
     def process_name(self) -> str:
         return "codex"
 
+    def auth_slots(self) -> AuthSlots:
+        # codex reads auth.json itself via CODEX_HOME (login = file present);
+        # a token / api key blanks it so neither overrides the file.
+        return AuthSlots(
+            token_env="CODEX_ACCESS_TOKEN",
+            api_key_envs=("OPENAI_API_KEY",),
+            login_credfile=".codex/auth.json",
+        )
+
     def submit_keys(self) -> list[str]:
-        return list(MULTILINE_SUBMIT_KEYS)
+        # Codex's TUI submits on plain Enter; Ctrl+J inserts a newline (verified
+        # against codex-rs's tui chat_composer.rs: the KeyCode::Enter arm returns
+        # Submitted, C-j inserts "\n"). Alt/Meta-Enter is NOT a reliable submit
+        # under tmux, and C-j would only pile up newlines — so codex leads with
+        # real Enter, with C-m (== Enter) as the lone safe escalation. Combined
+        # with the settle-before-inject in wake.inject_and_confirm, this fixes the
+        # first-wake "text sits in the composer unsubmitted / ♥ never" race: the
+        # initial Enter is eaten by codex's paste-burst heuristic, and the
+        # re-nudge then lands a standalone Enter once the banner has settled.
+        return ["Enter", "C-m"]

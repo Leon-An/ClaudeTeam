@@ -135,8 +135,8 @@ def _make_apply_with_wake(*, session: str, chat_id: str, profile: str,
 def _terminate_subscribe_group(proc: subprocess.Popen) -> None:
     """Kill the entire subscribe process group (npx + node + lark-cli).
 
-    Round 7 D2: router's plain proc.terminate() only signaled npx; the
-    lark-cli grandchild lived on as an orphan after each up/down cycle.
+    A plain proc.terminate() only signals npx; the lark-cli grandchild
+    then lives on as an orphan after each up/down cycle.
     Putting the subprocess in its own session (start_new_session=True at
     Popen time) means we can take the whole group out with one killpg.
     """
@@ -180,7 +180,7 @@ def _load_seen_msg_ids() -> set[str]:
     return set(ids)
 
 
-def _make_on_progress(last_event_at: list[float]) -> Callable:
+def _make_on_progress(last_event_at: list[float], events_seen: list[int]) -> Callable:
     """Build the on_progress callback bound to a mutable timestamp slot.
 
     Every successfully handled (non-DROP) event:
@@ -191,12 +191,17 @@ def _make_on_progress(last_event_at: list[float]) -> Callable:
       survives across process restarts. Without this, router self-
       restarts (driven by stale-detect or watchdog) re-apply messages
       that catchup re-fetches because seen_msg_ids was an in-memory
-      set (host_smoke 2026-05-06: /tmux manager card forwarded into
-      manager inbox every ~3.5min on every restart cycle).
+      set (e.g. a /tmux manager card forwarded into the manager inbox
+      every ~3.5min on every restart cycle).
     """
     def _on_progress(decision, stats):
         catchup.record_decision(decision)
         last_event_at[0] = time.monotonic()
+        # Count only genuine handled events (NOT every line — keepalive/
+        # heartbeat lines bump last_event_at via _bump_subscribe_alive but
+        # aren't "inbound events"). Lets the health thread tell "idle since
+        # start, never saw traffic" apart from "was flowing, then stalled".
+        events_seen[0] += 1
         msg_id = getattr(decision, "msg_id", "")
         if msg_id:
             try:
@@ -215,18 +220,17 @@ def _platform_default_stale_event_threshold_s() -> float:
     behaviour, not a single-knob tuning problem.
 
     macOS (Darwin) → 120s. lark-cli 1.0.23 WebSocket subscribe silently
-    drops on macOS without reconnecting (verified 2026-05-09 host smoke:
-    subscribe child stayed alive but stopped delivering events; only
-    self-SIGTERM + watchdog respawn + catchup recovers). A tighter
+    drops on macOS without reconnecting (the subscribe child stays
+    alive but stops delivering events; only self-SIGTERM + watchdog
+    respawn + catchup recovers). A tighter
     threshold lets recovery happen in ~2 min instead of ~10. Quiet-chat
     overhead is acceptable on a dev laptop.
 
     Linux (and everything else) → 600s. WebSocket is stable here; quiet
     chats shouldn't churn through respawns. History on this platform:
-    1200s → too lax (2026-05-06 caught manager not seeing user msg for
-    7+ min); 180s → too tight (2026-05-07 fresh-user smoke caught a
-    genuinely quiet chat respawning every ~3 min, churning router.log
-    into a wall of "no events for 180s; respawning"). 600s is the
+    1200s → too lax (manager not seeing a user msg for 7+ min); 180s →
+    too tight (a genuinely quiet chat respawned every ~3 min, churning
+    router.log into a wall of "no events for 180s; respawning"). 600s is the
     calibrated middle.
     """
     import platform
@@ -256,8 +260,30 @@ def _stale_event_threshold_s() -> float:
         _platform_default_stale_event_threshold_s()))
 
 
+def _subscribe_rotate_reason(idle: float, threshold: float, events_seen: int) -> str:
+    """The router log line printed right before self-SIGTERM for respawn.
+
+    Pure so it's unit-testable without the kill/loop machinery. The whole
+    point of #5: the *idle* case (no inbound yet this session) is the NORMAL
+    macOS state — the live WebSocket goes quiet, the respawn + catchup-on-
+    restart is the designed recovery, NOT a fault. Wording it "silently
+    stalled" every ~120s made first deploys look broken. So:
+
+      - events_seen == 0  → calm ℹ️: rotating subscribe, catchup will refetch.
+      - events_seen  > 0  → ⚠️: events WERE flowing then stopped (more notable,
+                            esp. on Linux where the WS is supposed to be stable).
+    """
+    if events_seen == 0:
+        return (f"  ℹ️ no live events for {idle:.0f}s — rotating subscribe "
+                f"(none inbound yet this session; on macOS the WebSocket often "
+                f"goes quiet, catchup refetches on restart)")
+    return (f"  ⚠️ live events stopped after {idle:.0f}s idle "
+            f"(threshold {threshold:.0f}s) — rotating subscribe for respawn")
+
+
 def _watch_subscribe_health(proc: subprocess.Popen, stop_event: threading.Event,
-                            last_event_at: list[float]) -> None:
+                            last_event_at: list[float],
+                            events_seen: list[int]) -> None:
     """Background thread: kill the daemon if the subscribe child dies OR
     stops delivering events.
 
@@ -291,9 +317,46 @@ def _watch_subscribe_health(proc: subprocess.Popen, stop_event: threading.Event,
             return
         idle = time.monotonic() - last_event_at[0]
         if idle > threshold:
-            print(f"  ⚠️ no events for {idle:.0f}s (threshold {threshold:.0f}s); subscribe likely silently stalled, exiting for respawn")
+            print(_subscribe_rotate_reason(idle, threshold, events_seen[0]))
             os.kill(os.getpid(), signal.SIGTERM)
             return
+
+
+def _catchup_slash_fresh_ms() -> int:
+    """Freshness threshold (ms) below which a catchup-delivered slash is
+    treated as a live WS-fallback command (dispatch) rather than a stale
+    backlog replay (suppress). Tunable; default 180s. <=0 is clamped to the
+    default so a misconfig can't make everything 'stale' and re-eat slashes."""
+    from claudeteam.runtime import tunables
+    try:
+        v = int(tunables.tunable("router.catchup_slash_fresh_ms", 600_000))
+    except (TypeError, ValueError):
+        v = 600_000
+    return v if v > 0 else 180_000
+
+
+def _notify_catchup_skips(default_target: str, *, dropped_stale: int,
+                          slash_skipped: int) -> None:
+    """After catchup, tell the routing-target agent (default manager) if the
+    replay skipped anything — over-cap stale messages or un-replayed control
+    commands — so it doesn't over-claim it received the whole backlog.
+    No-op when nothing was skipped. Best-effort: a
+    notice-write failure must never break bring-up."""
+    if dropped_stale <= 0 and slash_skipped <= 0:
+        return
+    parts = []
+    if dropped_stale > 0:
+        parts.append(f"{dropped_stale} 条超上限的陈旧历史消息未重放")
+    if slash_skipped > 0:
+        parts.append(f"{slash_skipped} 条控制命令(/...)按规则未重放")
+    note = ("⚠️ 恢复(catchup)时跳过了部分历史：" + "；".join(parts)
+            + "。本次你**未必收到完整 backlog**——涉及老板原话/约束请 "
+              "`task intent get` 现读或请老板重发，别按记忆脑补。")
+    try:
+        from claudeteam.store import local_facts
+        local_facts.append_message(default_target, "router", note, priority="高")
+    except Exception as e:
+        warn(f"⚠️ catchup skip-notice failed: {e}")
 
 
 def main(argv: list[str]) -> int:
@@ -319,10 +382,10 @@ def main(argv: list[str]) -> int:
     try:
         # Two precautions on the subscribe child:
         # - env=lark.subprocess_env() strips HTTPS_PROXY under LARK_CLI_NO_PROXY=1
-        #   (round 6 D-class bug — lark-cli long-poll dies behind a proxy).
+        #   (lark-cli long-poll dies behind a proxy).
         # - start_new_session=True puts the npx → node → lark-cli chain in its
         #   own process group so SIGTERMing the router can kill the whole tree
-        #   in one killpg call (round 7 D2 — orphaned grandchildren).
+        #   in one killpg call (otherwise grandchildren are orphaned).
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -351,9 +414,10 @@ def main(argv: list[str]) -> int:
     # flowing for too long (silent-subscribe-stall mode).
     stop_watchdog = threading.Event()
     last_event_at = [time.monotonic()]
+    events_seen = [0]  # genuine handled events this process (idle vs stalled)
     threading.Thread(
         target=_watch_subscribe_health,
-        args=(proc, stop_watchdog, last_event_at),
+        args=(proc, stop_watchdog, last_event_at, events_seen),
         daemon=True,
     ).start()
 
@@ -382,7 +446,7 @@ def main(argv: list[str]) -> int:
 
         # Persisted dedup set — survives daemon restarts so catchup
         # replay after stale-detect / watchdog respawn doesn't re-apply
-        # already-handled messages (host_smoke 2026-05-06 caught it).
+        # already-handled messages.
         seen = _load_seen_msg_ids()
 
         def _bump_subscribe_alive():
@@ -393,20 +457,36 @@ def main(argv: list[str]) -> int:
             chat_id=chat,
             default_target="manager",
             apply_fn=apply_fn,
-            on_progress=_make_on_progress(last_event_at),
+            on_progress=_make_on_progress(last_event_at, events_seen),
             on_line_received=_bump_subscribe_alive,
             seen_msg_ids=seen,
         )
 
         # Catchup: replay anything newer than the cursor before going live
+        catchup_meta: dict = {}
         try:
-            pending = catchup.pending_lines(chat, profile=profile)
+            pending = catchup.pending_lines(chat, profile=profile, meta=catchup_meta)
         except Exception as e:
             warn(f"⚠️  catchup fetch failed: {e}")
             pending = []
         if pending:
             print(f"📥 catching up {len(pending)} missed message(s)")
-            process_lines(iter(pending), **loop_kwargs)
+            # suppress_slash: drop a STALE replay or a destructive lifecycle
+            # command (/restart, /shutdown 确认) from the backlog — replaying
+            # those re-runs `down` and tears the team back down (F-G2-restore).
+            # But a FRESH non-lifecycle slash arriving here is a WS-fallback
+            # delivery of a live boss command (WS down) — it must dispatch,
+            # not get eaten; the freshness threshold draws that line.
+            cstats = process_lines(iter(pending), suppress_slash=True,
+                                   catchup_slash_fresh_ms=_catchup_slash_fresh_ms(),
+                                   **loop_kwargs)
+            # Tell the routing-target agent if the
+            # replay skipped anything (over-cap stale / un-replayed control
+            # commands) so it doesn't over-claim it got the whole backlog.
+            _notify_catchup_skips(
+                loop_kwargs["default_target"],
+                dropped_stale=catchup_meta.get("dropped_stale", 0),
+                slash_skipped=cstats.drops_by_reason.get("catchup_slash_skip", 0))
 
         stats = process_lines(proc.stdout, **loop_kwargs)
         print(f"router exited: handled={stats.handled} dropped={stats.dropped}")

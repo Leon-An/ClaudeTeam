@@ -46,7 +46,7 @@ def test_list_recent_empty_when_agent_unknown():
         assert memory.list_recent("nobody") == []
 
 
-# ── Round-141: list_recent_filtered ─────────────────────────────
+# ── list_recent_filtered ────────────────────────────────────────
 
 
 def test_list_recent_filtered_no_kind_matches_list_recent():
@@ -74,8 +74,8 @@ def test_list_recent_filtered_picks_only_matching_kind():
 
 
 def test_list_recent_filtered_scans_full_window_so_rare_kinds_surface():
-    """Round-141 contract: when filtering, scan the FULL backlog, then
-    trim to limit AFTER. A buried decision among many notes must not
+    """When filtering, scan the FULL backlog, then trim to limit AFTER.
+    A buried decision among many notes must not
     get missed by limit's pre-filter pruning. This is the whole reason
     the helper exists — `list_recent(agent, limit=N)` would have
     pre-pruned the rare kind out of the window before the filter ran."""
@@ -212,12 +212,12 @@ def test_all_agents_with_memory_lists_only_agents_that_wrote():
         assert sorted(agents) == ["manager", "worker_cc"]
 
 
-# ── Round-111: clear_kind (scalpel inside the scalpel) ─────────
+# ── clear_kind (scalpel inside the scalpel) ────────────────────
 
 
 def test_clear_kind_drops_only_matching_entries():
-    """Round-111: `clear_kind(agent, K)` removes only entries with
-    kind == K, leaves others untouched."""
+    """`clear_kind(agent, K)` removes only entries with kind == K,
+    leaves others untouched."""
     with isolated_env():
         memory.append("manager", "decision", "use bcrypt")
         memory.append("manager", "blocker", "missing PAT")
@@ -258,11 +258,11 @@ def test_clear_kind_drops_all_unlinks_file():
         assert memory.list_recent("worker_cc") == []
 
 
-# ── Round-106: KNOWN_KINDS soft validation ──────────────────────
+# ── KNOWN_KINDS soft validation ─────────────────────────────────
 
 
 def test_known_kinds_covers_documented_vocabulary():
-    """The 6 conventional kinds match what manager identity v2 +
+    """The 6 conventional kinds match what the manager identity +
     install-hooks `/remember` documentation teaches. Pin the set so a
     drift between code and docs gets caught."""
     assert set(memory.KNOWN_KINDS) == {
@@ -272,9 +272,9 @@ def test_known_kinds_covers_documented_vocabulary():
 
 
 def test_kinds_summary_renders_canonical_separator():
-    """Round-119: USAGE strings + future docs format kinds with `' / '`.
-    The helper is the single source of truth so a separator change
-    (e.g. to commas) propagates without grep-and-replace."""
+    """USAGE strings + future docs format kinds with `' / '`. The helper
+    is the single source of truth so a separator change (e.g. to commas)
+    propagates without grep-and-replace."""
     s = memory.kinds_summary()
     # Every kind shows up at least once
     for k in memory.KNOWN_KINDS:
@@ -286,9 +286,9 @@ def test_kinds_summary_renders_canonical_separator():
 
 
 def test_kinds_sorted_returns_alphabetical_list():
-    """Round-120: slash card display uses alphabetical order so boss
-    reading two cards (kind list in /recall help vs /forget warn) sees
-    the same sequence. KNOWN_KINDS itself is in author-priority order
+    """Slash card display uses alphabetical order so a boss reading two
+    cards (kind list in /recall help vs /forget warn) sees the same
+    sequence. KNOWN_KINDS itself is in author-priority order
     (task_assigned first), but the slash UI prefers stable sort."""
     s = memory.kinds_sorted()
     assert s == sorted(memory.KNOWN_KINDS)
@@ -298,11 +298,11 @@ def test_kinds_sorted_returns_alphabetical_list():
     assert isinstance(s, list)
 
 
-# ── Round-156: warn_unknown_kind ─────────────────────────────────
+# ── warn_unknown_kind ────────────────────────────────────────────
 
 
 def test_warn_unknown_kind_no_op_for_known():
-    """Round-156 contract: known kind = silence, no stderr noise."""
+    """Known kind = silence, no stderr noise."""
     with captured_stderr() as err:
         memory.warn_unknown_kind("decision")
     assert err.getvalue() == ""

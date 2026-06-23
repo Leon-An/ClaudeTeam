@@ -9,7 +9,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python 3.10+" />
-  <img src="https://img.shields.io/badge/tests-878%20passing-brightgreen.svg" alt="878 tests passing" />
+  <a href="https://github.com/zylMozart/ClaudeTeam/actions/workflows/ci.yml"><img src="https://github.com/zylMozart/ClaudeTeam/actions/workflows/ci.yml/badge.svg" alt="tests" /></a>
   <a href="docs/DEPLOYMENT.md"><img src="https://img.shields.io/badge/docs-deployment-success.svg" alt="Documentation" /></a>
   <img src="https://img.shields.io/badge/chat-Feishu-1a73e8.svg" alt="Chat: Feishu" />
 </p>
@@ -93,12 +93,16 @@ on the other end, not a bot wall.
   Silence noisy traffic without losing the audit log.
 - **Multi-CLI** — Claude Code, Codex CLI, Kimi Code, Gemini CLI,
   Qwen Code can all run in the same team.
-- **Durable memory** — agent memory survives `/clear` and pane respawn,
-  auto-injected into the wake prompt.
+- **Durable memory** — each agent's memory survives `/clear` and pane
+  respawn, auto-injected into the wake prompt.
+- **Per-agent space + shared brain** — every agent gets its own
+  `workspace/` scratch dir and isolated CLI home; the team also shares a
+  pooled experience log (`remember --team`) and a reusable `skills/`
+  library, both surfaced on wake.
 - **Watchdog** — crashed daemons respawn with cooldown + Feishu chat
   alert when cooldown trips.
 - **Slash commands from chat** — `/help /team /health /usage /tmux
-  /send /compact /clear /stop /peek /say /remember /recall`.
+  /send /compact /stop /clear /task` + operational `/restart /shutdown /login`.
 - **Zero Python dependencies** — runs on the standard library only;
   the only external runtime is `lark-cli` (Node).
 
@@ -121,37 +125,40 @@ container or via bind-mount).
 
 ## Quick start
 
-> **First**: create a Feishu app + add the bot to your group
-> ([see below](#feishu-bot-setup)). You'll need the `App ID`,
-> `App Secret`, and the `chat_id` of the group the bot is in.
+The only multi-step part is Feishu — hand it to a human once. You need three
+values: **App ID**, **App Secret**, and the **chat_id** of the group the bot
+is in. No app yet? → [Feishu bot setup](#feishu-bot-setup).
+
+Then run these top to bottom — no branching, nothing to `export`:
 
 ```bash
-git clone https://github.com/zylMozart/ClaudeTeam.git
-cd ClaudeTeam
-
-# Shell env (per terminal — add to ~/.zshrc to persist)
-export CLAUDETEAM_STATE_DIR="$PWD/state"
-export LARK_CLI_NO_PROXY=1
-export CLAUDETEAM_LARK_SEND_AS=bot
-
-# Install
-python3 -m venv .venv && source .venv/bin/activate
+# 1 — code + the `claudeteam` CLI (zero Python deps)
+git clone https://github.com/zylMozart/ClaudeTeam.git && cd ClaudeTeam
+python3 -m venv .venv && source .venv/bin/activate     # Python 3.10+
 pip install -e .
 
-# Config
-claudeteam init                  # writes claudeteam.toml
-$EDITOR claudeteam.toml          # set chat_id + agents
-claudeteam install-hooks         # claude-code slash commands
+# 2 — external tools on PATH (none are pip-installable):
+#       tmux · node + npx · lark-cli (npm i -g @larksuite/cli)
+#       · at least one agent CLI: claude / codex / kimi / gemini / qwen
 
-# Launch
+# 3 — config: generate, then set chat_id (+ App ID/Secret); agents have defaults
+claudeteam init                  # writes claudeteam.toml (send_as=bot, no_proxy=true preset)
+$EDITOR claudeteam.toml          # fill in chat_id
+claudeteam install-hooks         # claude-code slash hooks — run BEFORE `up`
+
+# 4 — launch + verify
 claudeteam up                    # tmux + agents + router + watchdog
-claudeteam health                # green/yellow/red snapshot
+claudeteam health                # expect all green
 ```
 
-Chat with the team in your Feishu group. Manager handles dispatch.
+Then in your Feishu group: send `/health`, then `@manager 你好` — manager
+replies in ~30 s. If `health` is red →
+[docs/DEPLOYMENT.md → Common failures](docs/DEPLOYMENT.md#common-failures).
 
-For detailed setup, Docker, multi-team isolation, and troubleshooting
-see **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
+> **No per-shell env vars needed.** `claudeteam init` writes `send_as` /
+> `no_proxy` into `claudeteam.toml`, and state defaults to `~/.claudeteam`.
+> Docker, multi-team isolation, and the full reference live in
+> **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
 
 ---
 
@@ -208,29 +215,31 @@ node create_feishu_bot.js login
 
 **Drive mode (recommended for agents)** — `drive` is the single
 entry point: it opens chromium **once**, asks the user to scan QR if
-no saved cookies, then runs the first incomplete stage and blocks
-waiting for the next agent command. Browser stays open across all 7
-stages.
+no saved cookies, then **auto-advances through all 7 stages** and exits
+when publish completes. Browser stays open the whole time. The `.cmd`
+commands below are **only for failure recovery** — the happy path needs
+none of them.
 
 ```bash
 # Start drive in the background. If first run, user scans QR (~30 s);
-# cookies persist so subsequent drives skip this.
+# cookies persist so subsequent drives skip this. Then it runs all 7
+# stages on its own.
 node create_feishu_bot.js drive my-bot "My ClaudeTeam bot" \
   > /tmp/drive.log 2>&1 &
 
-# Agent watches /tmp/drive.log + .state/my-bot.json. After each
-# stage settles, agent advances by writing one of:
-echo next             > scripts/feishu_bot_creator/.state/my-bot.cmd
+# Agent watches /tmp/drive.log + .state/my-bot.json. ONLY if a stage
+# hard-fails does drive stop and wait — then steer with one of:
 echo skip             > scripts/feishu_bot_creator/.state/my-bot.cmd
 echo "redo events"    > scripts/feishu_bot_creator/.state/my-bot.cmd
+echo next             > scripts/feishu_bot_creator/.state/my-bot.cmd
 echo quit             > scripts/feishu_bot_creator/.state/my-bot.cmd
 ```
 
-Command meanings:
-- `next` — run the next incomplete stage (happy path)
+Command meanings (failure-recovery only — happy path auto-advances):
 - `skip` — agent finished the current failed stage **manually in the
   open browser**; mark it done and move on (key escape hatch when
   Feishu UI changes break a Playwright selector)
+- `next` — advance to the next stage without marking the current done
 - `redo <stage-id>` — un-mark that stage so the next iteration re-runs it
 - `quit` — close browser and exit
 

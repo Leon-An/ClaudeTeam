@@ -37,6 +37,8 @@ _DEFAULT_TOML_TEMPLATE = """\
 chat_id      = ""                         # 飞书群 chat_id（机器人加群后用 lark-cli 取）
 lark_profile = ""                         # lark-cli profile 名, 空字符串走默认
 default_model = "opus"                    # team.json agent 没指定 model 时回退到这里
+# App ID / App Secret 不写在这里：host 模式从 lark-cli config 取（`lark-cli config
+# init` 写入, secret 进 keychain）；只有 Docker 模式才把它们放进 .env。
 
 # ── [team]  团队成员 ──────────────────────────────────────
 [team]

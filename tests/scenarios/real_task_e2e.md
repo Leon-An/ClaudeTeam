@@ -1,4 +1,4 @@
-# Round C — 真任务派发端到端（全自动）
+# 真任务派发端到端（全自动）
 
 ## 目的
 
@@ -6,7 +6,7 @@
 人工介入，30-60 分钟后回来看群里是否出现 manager 的最终汇总卡。
 
 通过即证明：**消息进入 → manager 拆任务 → 派 worker → worker 完工
-回报 → R174 例外路由让 manager 看见 → manager 汇总 → 群里产出最终
+回报 → 例外路由让 manager 看见 → manager 汇总 → 群里产出最终
 答复**——这条 LLM 协作闭环工作。
 
 不通过则说明从「基础设施」（路由、收件箱、pane 注入、say 反向）到
@@ -16,7 +16,7 @@
 ## 适用范围
 
 - 跑前提：[host_smoke.md](host_smoke.md) §3-§7 已通过——基础设施不通时
-  跑 round_c 没意义
+  跑真任务没意义
 - 时长：30-60 分钟（取决于任务复杂度与 LLM 响应）
 - 凭证：用户 OAuth 已就绪（`lark-cli auth list` 有效）
 
@@ -98,7 +98,7 @@ test -s README.en.md && echo "README.en.md exists, $(wc -l < README.en.md) lines
 | 群里没看到任何 manager 卡 | 任务消息根本没进 manager pane | `claudeteam inbox manager`；如果有 anchor 这条，但 pane 里 `tmux capture-pane -t ClaudeTeam:manager -p \| tail -30` 没动，是 pane 注入失败 |
 | manager 卡有但只是 ack | manager LLM 没拆任务 | manager identity prompt 不够明确——这是 prompt 工程问题，不是 router bug |
 | 群里只看到 manager 派单卡，没 worker 回报 | worker 收件箱没拿到派单，或 worker pane 卡住 | `claudeteam inbox worker_cc`；`claudeteam peek worker_cc 30` |
-| 群里 worker 报了完工，但 manager 没出汇总卡 | R174 反向路由分支没生效 | `claudeteam inbox manager` 看 worker 回报有没有路回；如果没路回，看 `state/router.log` 找 `_card_sender_agent` 解析 |
+| 群里 worker 报了完工，但 manager 没出汇总卡 | worker→manager 反向路由分支没生效 | `claudeteam inbox manager` 看 worker 回报有没有路回；如果没路回，看 `state/router.log` 找 `_card_sender_agent` 解析 |
 | 60 分钟超时 | LLM 思考慢 / quota 限速 / 卡在 reidentify | `claudeteam team` 看每个 agent 状态；`claudeteam usage` 看是否限速 |
 | README.en.md 不存在 | worker 真没干活，只在群里说完成了 | `claudeteam peek worker_cc 50` 看是否真跑了 Write 工具 |
 
@@ -107,10 +107,10 @@ test -s README.en.md && echo "README.en.md exists, $(wc -l < README.en.md) lines
 1. **manager 拆任务质量飘**：LLM 的拆分 / 汇总质量每次不一样。这条烟测
    只验"manager 真在试图汇总"，不强求每次质量都一致。如果连续多次跑
    出现汇总质量差，回去改 manager identity prompt 而不是 router 代码
-2. **worker 用 `send` 写收件箱而不是 `say` 发群**：Round B G5.a 留下的
+2. **worker 用 `send` 写收件箱而不是 `say` 发群**：已知的
    LLM 行为问题。如果 worker 完工后 manager 一直不汇总，多半是 worker
-   只 send 没 say，导致 R174 反向路由没触发。看 manager 收件箱有没有
-   from=worker 的行——有则 R174 OK，没有则是 worker 的 prompt 问题
+   只 send 没 say，导致反向路由没触发。看 manager 收件箱有没有
+   from=worker 的行——有则反向路由 OK，没有则是 worker 的 prompt 问题
 3. **kimi 配额 429**：如果你的 team 含 worker_kimi，可能因为 quota
    卡住。验通过条件 #4 时只要求出现 ≥2 个 worker 名字，不强求 kimi
 4. **macOS host：claude 凭证可能过期**——长跑期间如果 worker 凭证过期，
@@ -120,8 +120,8 @@ test -s README.en.md && echo "README.en.md exists, $(wc -l < README.en.md) lines
 ## 不在范围
 
 - **真改代码 + 真 git push**：本剧本任务限定在文档/翻译类，避免 worker
-  真 push。代码 PR 类放 Round D
-- **多任务并发**：本剧本只发一个任务，看 manager 调度多任务放 Round D
+  真 push。代码 PR 类的协作不在本剧本范围
+- **多任务并发**：本剧本只发一个任务，manager 调度多任务不在本剧本范围
 - **跨群任务**：所有 say 都在同一个群
 
 ## 记录（跑的时候填）

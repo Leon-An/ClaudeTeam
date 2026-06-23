@@ -52,13 +52,13 @@ def test_drop_when_sender_matches_bot_id():
 
 
 def test_drop_when_sender_type_is_app_even_without_bot_id():
-    """REGRESSION: 2026-05-06 host_smoke caught manager's own ack cards
-    looping back into manager inbox every router restart. Root cause:
-    `commands/router.py` never passed bot_id to classify_event, so the
-    `bot_id == sender_id` check never fired. Modern lark-cli `--compact`
-    payload carries sender_type=app for bot-sent messages, and
-    chat-messages-list returns id_type=app_id — both surface as
-    sender_type here. R174 bot-self path now triggers on either signal.
+    """REGRESSION: manager's own ack cards looped back into manager inbox
+    every router restart. Root cause: `commands/router.py` never passed
+    bot_id to classify_event, so the `bot_id == sender_id` check never
+    fired. Modern lark-cli `--compact` payload carries sender_type=app
+    for bot-sent messages, and chat-messages-list returns id_type=app_id
+    — both surface as sender_type here. The bot-self path now triggers on
+    either signal.
     """
     d = classify_event(
         _ev(sender_id="cli_xxx", sender_type="app",
@@ -81,7 +81,7 @@ def test_drop_when_sender_id_type_is_app_id_from_catchup_path():
 
 
 def test_route_to_manager_when_worker_card_is_bot_sent():
-    """R174 exception still works under the new sender_type detection:
+    """The exception still works under the new sender_type detection:
     worker-sent cards (bot identity, but card title parses as worker_X)
     route back to manager's inbox. Real card title shape includes ` · `
     after the agent name, which `_card_sender_agent` keys on."""
@@ -137,13 +137,13 @@ def test_default_target_can_be_overridden():
     assert d.targets == ["worker_cc"]
 
 
-# ── R174: ALL human routes go to manager (mentions are text, not routes) ──
+# ── ALL human routes go to manager (mentions are text, not routes) ──
 
 
 def test_human_at_mention_still_routes_only_to_manager():
-    """R174: `@worker_codex review this` from boss — `@worker_codex` is
-    text content for manager to parse, NOT a routing instruction.
-    Manager decides whether to dispatch via `claudeteam send`."""
+    """`@worker_codex review this` from boss — `@worker_codex` is text
+    content for manager to parse, NOT a routing instruction. Manager
+    decides whether to dispatch via `claudeteam send`."""
     d = classify_event(_ev(text="@worker_codex review this"), team_agents=_AGENTS)
     assert d.action is Action.ROUTE
     assert d.targets == ["manager"]
@@ -207,9 +207,8 @@ def test_msg_id_propagates_into_decision():
 
 
 def test_slash_command_returns_slash_action():
-    """REGRESSION (round A.2): /team etc. must NOT route as ROUTE
-    (would inject into manager pane); must be SLASH for router-level
-    zero-LLM dispatch."""
+    """REGRESSION: /team etc. must NOT route as ROUTE (would inject into
+    manager pane); must be SLASH for router-level zero-LLM dispatch."""
     d = classify_event(_ev(text="/team"), team_agents=_AGENTS)
     assert d.action is Action.SLASH
     assert d.text == "/team"
@@ -229,7 +228,7 @@ def test_slash_unknown_command_still_emits_slash():
 
 
 def test_slash_strips_sender_prefix_before_detection():
-    """REGRESSION (round A2 B1): \`claudeteam say boss "/team"\` produces
+    """REGRESSION: \`claudeteam say boss "/team"\` produces
     \`[boss] /team\` in chat. Without prefix-strip, slash detection
     misses it and the message gets routed to manager (which then has
     its LLM cobble together a fake response). The prefix must be
@@ -252,8 +251,8 @@ def test_slash_strips_known_agent_prefix_too():
 
 
 def test_chinese_broadcast_phrase_routes_to_manager_only():
-    """R174: `全体成员请汇报状态` from boss → only manager. Manager
-    parses the broadcast intent and dispatches to workers."""
+    """`全体成员请汇报状态` from boss → only manager. Manager parses the
+    broadcast intent and dispatches to workers."""
     d = classify_event(_ev(text="全体成员请汇报状态"), team_agents=_AGENTS)
     assert d.action is Action.ROUTE
     assert d.targets == ["manager"]
@@ -278,10 +277,10 @@ def test_at_everyone_routes_to_manager_only():
 
 
 def test_action_broadcast_no_longer_emitted():
-    """R174: routing-level broadcast is dead. Every variant of
-    'broadcast trigger' from a human now ROUTEs to manager. The
-    BROADCAST action itself is kept in the enum for legacy reasons
-    but is unreachable from classify_event."""
+    """Routing-level broadcast is dead. Every variant of 'broadcast
+    trigger' from a human now ROUTEs to manager. The BROADCAST action
+    itself is kept in the enum for legacy reasons but is unreachable
+    from classify_event."""
     for text in ("全体注意", "@team x", "@all y", "@everyone z"):
         d = classify_event(_ev(text=text, message_id=f"om_{hash(text)}"),
                             team_agents=_AGENTS)
@@ -290,21 +289,21 @@ def test_action_broadcast_no_longer_emitted():
 
 
 def test_explicit_mention_with_broadcast_token_routes_to_manager():
-    """`@worker_cc 全体成员都开会` — both tokens present. R174: still
-    just manager. Manager reads the text and decides intent."""
+    """`@worker_cc 全体成员都开会` — both tokens present. Still just
+    manager. Manager reads the text and decides intent."""
     d = classify_event(_ev(text="@worker_cc 全体成员都开会"), team_agents=_AGENTS)
     assert d.action is Action.ROUTE
     assert d.targets == ["manager"]
 
 
-# ── R174: bot-sent worker cards route to manager ────────────────
+# ── bot-sent worker cards route to manager ──────────────────────
 
 
 def test_worker_card_say_routes_to_manager_inbox():
     """Worker `claudeteam say` posts an interactive card with title
     `💎 worker_cc · ...`. sender_id == bot_id but the card-title
-    parser identifies the originating agent. R174: route to manager
-    so manager has visibility into worker chat replies."""
+    parser identifies the originating agent. Route to manager so
+    manager has visibility into worker chat replies."""
     card_text = '<card title="💎 worker_cc · 工程师">step 1 done</card>'
     d = classify_event(
         _ev(text=card_text, sender_id="bot_xxx"),

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import shlex
 
-from .base import CliAdapter, MULTILINE_SUBMIT_KEYS, SPINNER_CHARS
+from .base import AuthSlots, CliAdapter, MULTILINE_SUBMIT_KEYS
 from .claude_code import agent_home
 
 
@@ -47,15 +47,22 @@ class QwenCodeAdapter(CliAdapter):
         # the welcome banner when first launched.
         return ["qwen>", "Type your request", "Qwen Code"]
 
-    def busy_markers(self) -> list[str]:
-        return [
-            *SPINNER_CHARS,
-            "Thinking", "Calling tool", "Running",
-        ]
-
     def process_name(self) -> str:
         return "qwen"
+
+    def auth_slots(self) -> AuthSlots:
+        # No long-term-token mode — DashScope / OpenAI-compatible key, or its
+        # own oauth_creds (login).
+        return AuthSlots(
+            token_env=None,
+            api_key_envs=("DASHSCOPE_API_KEY", "OPENAI_API_KEY"),
+            login_credfile=".qwen/oauth_creds.json",
+        )
 
     def submit_keys(self) -> list[str]:
         # Ink-based UI, same submit pattern as Codex / Kimi / Gemini
         return list(MULTILINE_SUBMIT_KEYS)
+
+    def compact_command(self) -> str:
+        # qwen-code (a gemini-cli fork) compacts context with /compress.
+        return "/compress"

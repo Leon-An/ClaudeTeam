@@ -46,7 +46,7 @@ CONSTRAINT='绝不加第三步'
 RAW="把支付页改成两步结账：第一步选地址、第二步付款，${CONSTRAINT}。${NONCE}"
 WORKER=worker_cc
 PANE="ClaudeTeam:${WORKER}"
-CLAUDE_MD="/data/agent-home/${WORKER}/.claude/CLAUDE.md"   # 宿主回退见 agent_home()
+CLAUDE_MD="${CLAUDETEAM_STATE_DIR:-$HOME/.claudeteam}/agents/${WORKER}/home/.claude/CLAUDE.md"   # CLAUDETEAM_AGENT_HOME_ROOT 覆盖时见 agent_home()
 ```
 
 ## 操作

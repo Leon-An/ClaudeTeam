@@ -8,7 +8,7 @@ Composes existing primitives:
 Skip steps where the resource is already alive (idempotent restart).
 Returns 0 if everything ends up alive, 1 if any required step failed.
 
-Round-62 fast-fail guard: each daemon spawn waits up to 3s for its
+Fast-fail guard: each daemon spawn waits up to 3s for its
 pid file to appear under `state_dir/`. If no pid file shows up
 (daemon `error_exit`'d before pidlock — usually missing chat_id /
 no team agents / port collision), `up` reports the boot failure and
@@ -44,9 +44,9 @@ def _ensure_daemon(spec: watchdog.ProcessSpec) -> int:
     # daemon's main(), so 3s is generous for a healthy spawn. If the
     # daemon fast-failed (e.g. missing chat_id, no team agents, port
     # collision), no pid file appears — treat that as failure rather
-    # than silently saying "team up". Round-62 caught this: a missing
-    # chat_id used to give "⚠️ launched but no pid file yet" + rc=0,
-    # masking the boot failure from `claudeteam up`'s exit code.
+    # than silently saying "team up". Otherwise a missing chat_id gives
+    # "⚠️ launched but no pid file yet" + rc=0, masking the boot
+    # failure from `claudeteam up`'s exit code.
     for _ in range(30):
         if spec.pid_file.exists():
             print(f"🚀 {spec.name} launched (pid {spec.pid_file.read_text().strip()})")

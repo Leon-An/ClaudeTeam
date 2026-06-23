@@ -5,8 +5,8 @@ human-readable single-line per agent:
   `name  status  task  [⛔ blocker]  (Nm ago)  ♥ Nm ago`.
 
 With `--json`, dump a list of status records (each with name, status,
-task, blocker, updated_at_ms, heartbeat_ms) so CI / smoke conductors
-/ peer agents can parse machine-readable state.
+task, blocker, updated_at_ms, heartbeat_ms) so CI / peer agents can
+parse machine-readable state.
 """
 from __future__ import annotations
 

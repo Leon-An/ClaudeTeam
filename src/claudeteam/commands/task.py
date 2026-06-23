@@ -8,7 +8,8 @@
   task pause <id>         [--note <why>] [--to <who>] [--by <agent>]
   task approve <id>       [--done]
   task reject <id> <feedback> [--cancel]
-  task intent create <raw...> [--src <msg_id>] [--key <points>]
+  task void <id>          [--note <why>] [--by <agent>]
+  task intent create <raw...> [--src <msg_id>] [--key <points>] [--by <agent>]
   task intent get <I-n>
 """
 from __future__ import annotations
@@ -30,7 +31,8 @@ USAGE = (
     "  claudeteam task pause <id> [--note <why>] [--to <who>] [--by <agent>]\n"
     "  claudeteam task approve <id> [--done] [--note <裁决内容>]\n"
     "  claudeteam task reject <id> <feedback> [--cancel]\n"
-    "  claudeteam task intent create <raw...> [--src <msg_id>] [--key <points>]\n"
+    "  claudeteam task void <id> [--note <why>] [--by <agent>]\n"
+    "  claudeteam task intent create <raw...> [--src <msg_id>] [--key <points>] [--by <agent>]\n"
     "  claudeteam task intent get <I-n>"
 )
 
@@ -84,10 +86,14 @@ def _reidentify_stale_anchor(agent: str) -> None:
         target = tmux.Target(session, agent)
         if not tmux.has_session(session) or not tmux.has_window(target):
             return
-        if not wake.is_ready(target, adapter) or wake.is_busy(target, adapter):
-            return  # idle gate: only inject at a quiet ready prompt
-        tmux.inject(target, identity.init_prompt(agent),
-                    submit_keys=adapter.submit_keys())
+        from claudeteam.runtime import pane_probe
+        if pane_probe.probe(target) != pane_probe.IDLE:
+            return  # only inject at a quiet, alive, idle pane (probe: no markers)
+        # Verified inject (escalates the submit key + confirms via pane motion)
+        # instead of a bare fire-and-forget: a dropped submit on these
+        # non-reload CLIs (codex/qwen/kimi) is what leaves the big identity
+        # prompt wedged + piling up in the composer.
+        wake.inject_and_confirm(target, adapter, identity.init_prompt(agent))
     except Exception:
         pass
 
@@ -110,6 +116,36 @@ def _fmt_task(t: dict) -> list[str]:
     return [head] + body
 
 
+def _auto_memory(agent: str, kind: str, content: str, *, ref: str = "") -> None:
+    """Auto-record a task-lifecycle event into the assignee's durable memory.
+
+    The highest-value memories (assigned / done / blocked) were the ones most
+    often MISSING, because memory.append's only writer is the manual
+    `claudeteam remember` — nothing wrote on task transitions, so capture was
+    left to the agent remembering to run the command (memory's core
+    unreliability). This records them by CODE instead.
+
+    Memory stays a best-effort *notepad* — the authoritative record is the
+    task/intent store, not this. To avoid flooding (memory caps at ~200), we
+    write ONE brief line per REAL state change only; content is title-capped.
+    Best-effort: a memory write must never fail the task command."""
+    if not agent:
+        return
+    try:
+        from claudeteam.store import memory
+        memory.append(agent, kind, content, ref=ref)
+    except Exception:
+        pass
+
+
+def _mem_title(t: dict | None) -> str:
+    """Short task label for a memory line (id + capped title)."""
+    if not t:
+        return ""
+    title = (t.get("title") or "")[:50]
+    return f"{t.get('id', '')} {title}".strip()
+
+
 def _cmd_create(rest: list[str]) -> int:
     by = pop_flag(rest, "--by") or ""
     desc = pop_flag(rest, "--desc") or ""
@@ -124,6 +160,8 @@ def _cmd_create(rest: list[str]) -> int:
     except ValueError as e:
         return error_exit(f"❌ {e}")
     _refresh_anchor(assignee)
+    intent_note = f" (intent {intent_id})" if intent_id else ""
+    _auto_memory(assignee, "task_assigned", f"{tid} {title[:50]}{intent_note}", ref=tid)
     print(f"✅ created {tid}: {title} → {assignee}")
     return 0
 
@@ -149,6 +187,12 @@ def _cmd_update(rest: list[str]) -> int:
     # moves it between two agents, so refresh both old and new owner.
     _refresh_anchor(before["assignee"] if before else "",
                     after["assignee"] if after else "")
+    # Auto-memory only on a REAL transition INTO 已完成 (covers `task done`);
+    # idempotent re-asserts (already 已完成) don't re-record.
+    if (after and after.get("status") == "已完成"
+            and (not before or before.get("status") != "已完成")):
+        _auto_memory(after.get("assignee", ""), "task_completed",
+                     f"{_mem_title(after)} 已完成", ref=tid)
     print(f"✅ updated {tid}")
     return 0
 
@@ -200,6 +244,9 @@ def _cmd_pause(rest: list[str]) -> int:
     local_facts.append_message(awaiting, by or t["assignee"],
                                note or f"{tid} 需审批", priority="高", task_id=tid)
     _refresh_anchor(t["assignee"])
+    _auto_memory(t.get("assignee", ""), "blocker",
+                 f"{_mem_title(t)} 需审批(await {awaiting})"
+                 + (f": {note}" if note else ""), ref=tid)
     print(f"⏸️  {tid} 需审批 — awaiting {awaiting}")
     return 0
 
@@ -216,7 +263,7 @@ def _cmd_approve(rest: list[str]) -> int:
     # Thread the verdict into the audit row and the assignee receipt so
     # "what was decided" travels the same gated channel as "decided" —
     # not a free-text relay that can lose the race against a worker
-    # resuming from a question-only anchor (regression smoke A1).
+    # resuming from a question-only anchor.
     suffix = f": {note}" if note else ""
     local_facts.append_log(t["assignee"], "task_transition",
                            f"{tid} 需审批→{t['status']} (approved){suffix}", ref=tid)
@@ -224,6 +271,10 @@ def _cmd_approve(rest: list[str]) -> int:
                                f"{tid} 已批准{'并完成' if done else '·继续'}{suffix}",
                                task_id=tid)
     _refresh_anchor(t["assignee"])
+    # approve --done is a completion path → record it like `task done`.
+    if done and t.get("status") == "已完成":
+        _auto_memory(t.get("assignee", ""), "task_completed",
+                     f"{_mem_title(t)} 已批准完成", ref=tid)
     print(f"✅ approved {tid} → {t['status']}")
     return 0
 
@@ -247,6 +298,25 @@ def _cmd_reject(rest: list[str]) -> int:
     return 0
 
 
+def _cmd_void(rest: list[str]) -> int:
+    note = pop_flag(rest, "--note") or ""
+    by = pop_flag(rest, "--by") or ""
+    if len(rest) < 1:
+        return usage_error(USAGE)
+    tid = rest[0]
+    before = tasks.get(tid)
+    if not tasks.void(tid, reason=note, voided_by=by):
+        return error_exit(f"❌ cannot void {tid} (missing or already 已取消)")
+    t = tasks.get(tid)
+    suffix = f": {note}" if note else ""
+    prev = before["status"] if before else "?"
+    local_facts.append_log(t["assignee"], "task_transition",
+                           f"{tid} {prev}→已取消 (void){suffix}", ref=tid)
+    _refresh_anchor(t["assignee"])
+    print(f"🗑️  voided {tid} → 已取消")
+    return 0
+
+
 def _cmd_intent(rest: list[str]) -> int:
     if not rest:
         return usage_error(USAGE)
@@ -254,9 +324,11 @@ def _cmd_intent(rest: list[str]) -> int:
     if action == "create":
         src = pop_flag(rest, "--src") or ""
         key = pop_flag(rest, "--key") or ""
+        by = pop_flag(rest, "--by") or ""
         raw = " ".join(rest[1:])
         try:
-            iid = tasks.create_intent(raw, source_msg=src, key_points=key)
+            iid = tasks.create_intent(raw, source_msg=src, key_points=key,
+                                      creator=by or "user")
         except ValueError as e:
             return error_exit(f"❌ {e}")
         print(f"✅ intent {iid}")
@@ -284,6 +356,7 @@ SUBCOMMANDS = {
     "pause":   _cmd_pause,
     "approve": _cmd_approve,
     "reject":  _cmd_reject,
+    "void":    _cmd_void,
     "intent":  _cmd_intent,
 }
 

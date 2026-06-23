@@ -170,7 +170,7 @@ def tmux_patch(**stubs):
 def captured_stderr():
     """Yield a StringIO bound to `sys.stderr` for the with-block.
 
-    R157: extracted from test_store_memory.py where 6 tests duplicated
+    Extracted from test_store_memory.py where several tests duplicated
     `import contextlib, io; err = io.StringIO(); with
     contextlib.redirect_stderr(err): ...`. Use when testing a function
     that writes to stderr directly (vs a CLI command — for those use

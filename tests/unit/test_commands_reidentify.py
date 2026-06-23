@@ -57,7 +57,7 @@ def test_reidentify_injects_init_prompt_into_existing_pane():
         assert "✅" in out
 
 
-# ── --all flag (round-91) ────────────────────────────────────────
+# ── --all flag ───────────────────────────────────────────────────
 
 
 def test_reidentify_all_injects_into_every_agent():

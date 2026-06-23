@@ -168,11 +168,10 @@ def test_pending_lines_keeps_recent_earlier_minutes_within_lookback():
 
 
 def test_pending_lines_recovers_messages_when_cursor_has_subminute_precision():
-    """REGRESSION: 2026-05-06 host_smoke caught the deeper bug — cursor
-    written from live events has millisecond precision, REST API
-    list_recent returns minute precision strings. A bare `>=` still
-    loses same-minute messages because REST 14:08:00 < cursor 14:08:32.
-    Cutoff must floor to minute boundary."""
+    """REGRESSION: the deeper bug — cursor written from live events has
+    millisecond precision, REST API list_recent returns minute precision
+    strings. A bare `>=` still loses same-minute messages because REST
+    14:08:00 < cursor 14:08:32. Cutoff must floor to minute boundary."""
     cursor_ms = "1778047712107"  # 2026-05-06 14:08:32.107
     rest_minute = "2026-05-06 14:08"  # REST API shape, parses to 14:08:00
     history = [
@@ -192,10 +191,10 @@ def test_pending_lines_recovers_messages_when_cursor_has_subminute_precision():
 
 
 def test_pending_lines_recovers_messages_at_same_minute_as_cursor():
-    """REGRESSION: 2026-05-06 host_smoke caught lark WebSocket missing
-    4 of 9 slash commands all sharing the same minute as the cursor.
-    Strict `>` cutoff lost them permanently. With `>=`, they come back
-    via catchup. Same minute simulated here as same epoch-ms."""
+    """REGRESSION: lark WebSocket missed 4 of 9 slash commands all
+    sharing the same minute as the cursor. Strict `>` cutoff lost them
+    permanently. With `>=`, they come back via catchup. Same minute
+    simulated here as same epoch-ms."""
     same_minute = "1778047200000"
     history = [
         _msg("om_processed", same_minute),   # cursor lands here after live event
@@ -217,11 +216,11 @@ def test_pending_lines_recovers_messages_at_same_minute_as_cursor():
 def test_pending_lines_returns_empty_when_no_cursor():
     """Fresh deploy: catchup must NOT replay arbitrary chat history.
     Otherwise `claudeteam up` re-fires every recent message including
-    old dispatches from a previous team. Round 2 host smoke caught
-    this 2026-05-07: a fresh up replayed a 30-min-old r1-mix dispatch
-    and manager re-dispatched workers for a task the boss had cleared.
-    Live subscribe picks up from "now" forward; first live event
-    writes the cursor so subsequent restarts catch up only the gap."""
+    old dispatches from a previous team — a fresh up replaying a
+    30-min-old dispatch would make manager re-dispatch workers for a
+    task the boss had cleared. Live subscribe picks up from "now"
+    forward; first live event writes the cursor so subsequent restarts
+    catch up only the gap."""
     history = [_msg("om_a", "100"), _msg("om_b", "200")]
     with isolated_env():
         lines = catchup.pending_lines("oc_x", list_fn=lambda: history)
@@ -309,9 +308,9 @@ def test_pending_lines_default_list_fn_uses_bot_when_env_says_bot():
 def test_pending_lines_default_list_fn_honors_toml_send_as_bot():
     """Container deploy without env CLAUDETEAM_LARK_SEND_AS but with
     [feishu] send_as = "bot" in claudeteam.toml: catchup must respect
-    the tunable and use bot identity. Boss-flagged 2026-05-06 host_smoke:
-    bot-only container catchup got rc=2 because env var wasn't pinned
-    in docker-compose; tunables fallback should cover that."""
+    the tunable and use bot identity. Bot-only container catchup got
+    rc=2 because the env var wasn't pinned in docker-compose; the
+    tunables fallback should cover that."""
     captured = {}
     from claudeteam.feishu import chat as _chat
     real_list_recent = _chat.list_recent
@@ -396,12 +395,12 @@ def test_pending_lines_round_trip_through_process_lines():
     assert applies[0].create_time == "5000"
 
 
-# ── live lark-cli 1.0.21 response shape (REGRESSION ROUND-56) ───
+# ── live lark-cli 1.0.21 response shape (REGRESSION) ────────────
 #
 # `lark-cli im +chat-messages-list` emits messages with content at TOP
 # LEVEL (not under .body.content) AND create_time as a human-readable
-# string ("2026-05-03 18:53"), not epoch ms. Prior to round-56,
-# catchup silently dropped every replayed message because:
+# string ("2026-05-03 18:53"), not epoch ms. Earlier, catchup silently
+# dropped every replayed message because:
 #   - body.get("content") returned "" (no .body key in live shape)
 #   - int("2026-05-03 ...") raised ValueError → message skipped
 # Tests below pin the live shape so we don't regress.
@@ -443,15 +442,17 @@ def test_pending_lines_iso_time_compared_correctly_against_epoch_cursor():
     """The cursor stores epoch ms (set by record_decision from subscribe
     events), but list_recent returns ISO strings. The comparator must
     coerce both to the same scale."""
-    # 2026-05-03 18:50 local ≈ 1777805400000 ish
     history = [
         _msg_live("om_before", "2026-05-03 17:00"),
         _msg_live("om_after", "2026-05-03 19:00"),
     ]
     with isolated_env():
-        # cursor in epoch ms, between the two ISO times above
-        # 2026-05-03 18:00 local = ~1777801200000
-        catchup.write_cursor("om_cursor", "1777801200000")
+        # Derive the cursor from the SAME local-time parse the messages use, so
+        # the between-ness holds regardless of the runner's TZ. Hardcoding an
+        # absolute epoch made this pass at +0800 but fail under UTC (CI): the
+        # code parses naive ISO strings as LOCAL time, so the cursor must too.
+        cursor_ms = catchup._to_epoch_ms("2026-05-03 18:00")
+        catchup.write_cursor("om_cursor", str(cursor_ms))
         lines = catchup.pending_lines("oc_x", list_fn=lambda: history)
     parsed = [json.loads(l) for l in lines]
     ids = [p["event"]["message"]["message_id"] for p in parsed]
@@ -482,7 +483,7 @@ def test_pending_lines_round_trip_with_live_shape_through_process_lines():
 
 # ── REGRESSION: cross-minute out-of-order silent-drop (永久丢消息) ──
 #
-# Bug (devops 2026-06-10): the cursor is a MONOTONIC high-water mark. When
+# Bug: the cursor is a MONOTONIC high-water mark. When
 # lark's WebSocket silently drops (~120s on macOS), an earlier message can
 # be missed live while a LATER message gets classified and pushes the
 # cursor past it. On the next catchup that earlier message is older than
@@ -552,3 +553,99 @@ def test_cross_minute_miss_delivered_once_through_process_lines():
     delivered = [d.msg_id for d in applies]
     assert delivered == ["om_early"], f"expected only the miss delivered, got {delivered}"
     assert stats.handled == 1
+
+
+# ── catchup volume cap + seed-forward ───────────────────────────────
+
+
+def test_pending_lines_caps_backlog_and_seeds_cursor_forward():
+    """A large bring-up backlog must not all replay (router choke). Over the
+    cap, keep only the most recent N, seed the cursor forward past the rest
+    so a mid-bring-up respawn doesn't re-fetch and re-choke."""
+    base = 1778047500000
+    history = [_msg(f"om_{i}", str(base + i * 60000)) for i in range(40)]
+    with isolated_env():
+        catchup.write_cursor("om_cursor", str(base - 600000))  # 10 min before
+        lines = catchup.pending_lines("oc_x", list_fn=lambda: history)
+        cur = catchup.read_cursor()             # read INSIDE the temp state dir
+    ids = [json.loads(l)["event"]["message"]["message_id"] for l in lines]
+    assert len(ids) == 30                       # default cap
+    assert ids[0] == "om_10" and ids[-1] == "om_39"   # most-recent 30
+    assert cur["message_id"] == "om_39"         # cursor seeded forward
+
+
+def test_pending_lines_under_cap_replays_all():
+    base = 1778047500000
+    history = [_msg(f"om_{i}", str(base + i * 60000)) for i in range(5)]
+    with isolated_env():
+        catchup.write_cursor("om_cursor", str(base - 600000))
+        lines = catchup.pending_lines("oc_x", list_fn=lambda: history)
+    assert len(lines) == 5                       # under cap → untouched
+
+
+def test_pending_lines_cap_is_tunable_off():
+    """router.catchup_max_messages <= 0 disables the cap."""
+    base = 1778047500000
+    history = [_msg(f"om_{i}", str(base + i * 60000)) for i in range(40)]
+    with isolated_env() as tmp:
+        toml = tmp / "controls.toml"
+        toml.write_text("[router]\ncatchup_max_messages = 0\n", encoding="utf-8")
+        from helpers import env_patch
+        from claudeteam.runtime import tunables
+        with env_patch(CLAUDETEAM_CONFIG_FILE=str(toml)):
+            tunables.reset_cache()
+            catchup.write_cursor("om_cursor", str(base - 600000))
+            lines = catchup.pending_lines("oc_x", list_fn=lambda: history)
+    assert len(lines) == 40                      # cap off → all replay
+
+
+# ── same-minute must replay oldest-first ──────────
+
+
+def test_pending_lines_same_minute_replays_oldest_first():
+    """REST returns newest-first + minute precision → same-minute messages
+    tie on the sort key. Sent 1→5 within one minute, REST gives 5→1; catchup
+    must emit 1→5, not the reversed 5→1."""
+    minute = "1778047680000"          # one minute, all share it
+    history = [_msg("om_5", minute), _msg("om_4", minute), _msg("om_3", minute),
+               _msg("om_2", minute), _msg("om_1", minute)]   # REST newest-first
+    with isolated_env():
+        catchup.write_cursor("om_cursor", "1778047620000")   # the minute before
+        lines = catchup.pending_lines("oc_x", list_fn=lambda: history)
+    ids = [json.loads(l)["event"]["message"]["message_id"] for l in lines]
+    assert ids == ["om_1", "om_2", "om_3", "om_4", "om_5"]
+
+
+def test_pending_lines_cross_minute_still_chronological():
+    """Distinct minutes still order by time regardless of REST order."""
+    history = [_msg("om_late", "1778047740000"),     # 14:09 (REST newest)
+               _msg("om_mid", "1778047680000"),      # 14:08
+               _msg("om_early", "1778047620000")]    # 14:07
+    with isolated_env():
+        catchup.write_cursor("om_cursor", "1778047500000")   # 14:05
+        lines = catchup.pending_lines("oc_x", list_fn=lambda: history)
+    ids = [json.loads(l)["event"]["message"]["message_id"] for l in lines]
+    assert ids == ["om_early", "om_mid", "om_late"]
+
+
+# ── cap reports dropped count via meta ───────
+
+
+def test_pending_lines_meta_reports_dropped_stale():
+    base = 1778047500000
+    history = [_msg(f"om_{i}", str(base + i * 60000)) for i in range(40)]
+    meta = {}
+    with isolated_env():
+        catchup.write_cursor("om_cursor", str(base - 600000))
+        catchup.pending_lines("oc_x", list_fn=lambda: history, meta=meta)
+    assert meta["dropped_stale"] == 10        # 40 - default cap 30
+
+
+def test_pending_lines_meta_absent_when_under_cap():
+    base = 1778047500000
+    history = [_msg(f"om_{i}", str(base + i * 60000)) for i in range(5)]
+    meta = {}
+    with isolated_env():
+        catchup.write_cursor("om_cursor", str(base - 600000))
+        catchup.pending_lines("oc_x", list_fn=lambda: history, meta=meta)
+    assert "dropped_stale" not in meta        # no cap → no key

@@ -40,7 +40,7 @@ from claudeteam.util import env_str
 # so worker agents' shell-out calls (via Bash tool) see the deployment's
 # state dir instead of falling back to ~/.claudeteam.
 #
-# FEISHU_APP_*/LARKSUITE_CLI_APP_* added 2026-05-08 (bringup B5): when
+# FEISHU_APP_*/LARKSUITE_CLI_APP_* are propagated too: when the
 # tmux server was started by an earlier checkout's `claudeteam up`, new
 # panes inherit *its* global env (no FEISHU_APP_ID/SECRET). lark.py's
 # tenant_token_from_env() returned None and fell back to the saved
@@ -63,11 +63,11 @@ _PROPAGATED_ENV = (
 
 def _path_readable(p: Path) -> bool:
     """Returns True iff `p` can be stat'd. False on PermissionError /
-    not-found / any OSError. deploy-issues 2026-05-08 #1: on Linux host
-    where /root is mode 700, Path("/root/...").exists() raised
-    PermissionError instead of returning False (Python <3.13 behavior),
-    killing `claudeteam up` for non-root deployers. Three /root probes
-    in this module need the soft semantic."""
+    not-found / any OSError. On a Linux host where /root is mode 700,
+    Path("/root/...").exists() raised PermissionError instead of
+    returning False (Python <3.13 behavior), killing `claudeteam up`
+    for non-root deployers. Three /root probes in this module need the
+    soft semantic."""
     try:
         return p.exists()
     except OSError:
@@ -83,10 +83,10 @@ def _pick_claude_seed(candidates: list[Path]) -> bytes | None:
     do, return the first readable one anyway so onboarding/migration
     flags still land. None when nothing is readable.
 
-    deploy-issues 2026-06-08: the Dockerfile's `claude --version` leaves
-    a stub /root/.claude.json with no oauthAccount. Seeding from it blind
-    (it sorts before the real /root/host-claude.json mount) put every
-    agent at the login screen despite a valid CLAUDE_CODE_OAUTH_TOKEN.
+    The Dockerfile's `claude --version` leaves a stub /root/.claude.json
+    with no oauthAccount. Seeding from it blind (it sorts before the real
+    /root/host-claude.json mount) put every agent at the login screen
+    despite a valid CLAUDE_CODE_OAUTH_TOKEN.
     """
     seed = None
     for src in candidates:
@@ -110,9 +110,9 @@ def _mark_project_trusted(claude_json: Path, workdir: Path) -> None:
     operator's own project paths, so a fresh container agent-home blocks
     at the interactive "Is this a project you trust?" gate on first
     spawn — which stalls wait_until_ready and skips the identity init
-    prompt (2026-06-08 docker smoke). Mirrors codex's
-    ensure_workdir_trusted. Idempotent + best-effort: a malformed
-    claude.json or read-only home never aborts `claudeteam start`.
+    prompt. Mirrors codex's ensure_workdir_trusted. Idempotent +
+    best-effort: a malformed claude.json or read-only home never aborts
+    `claudeteam start`.
     """
     key = str(workdir)
     try:
@@ -162,10 +162,10 @@ def _ensure_claude_agent_home(agent: str) -> None:
     # macOS host: prefer the live keychain over a (potentially-stale) host
     # ~/.claude/.credentials.json. Claude refreshes OAuth into the keychain
     # but only writes the file occasionally, so a symlink to the host file
-    # can hand the pane a `refreshToken` the server has already revoked.
-    # 2026-05-07 caught: pane symlinked to stale host file, refresh
-    # round-tripped 401, claude blanked the field, pane logged "401
-    # Invalid auth credentials". Re-extract on every provision and write
+    # can hand the pane a `refreshToken` the server has already revoked:
+    # a pane symlinked to the stale host file would round-trip a 401,
+    # claude blanked the field, and the pane logged "401 Invalid auth
+    # credentials". Re-extract on every provision and write
     # a *regular file* — not a symlink — because claude's atomic-write
     # of credentials replaces the symlink target with a plain file on
     # first refresh anyway, defeating the original sharing intent.
@@ -260,11 +260,11 @@ def _ensure_claude_agent_home(agent: str) -> None:
 #
 # claude-code is absent — its richer seeding (macOS keychain, ~/.claude.json,
 # folder trust) lives in _ensure_claude_agent_home. kimi is absent on
-# purpose: its adapter does NOT set HOME=<agent_home> (Plan B keeps cwd=repo
+# purpose: its adapter does NOT set HOME=<agent_home> (it keeps cwd=repo
 # with no native file), so the pane already inherits the operator's
 # ~/.kimi/config.toml — there is nothing to isolate and nothing to seed.
-# (expert K3 confirmed in the prod container: worker_kimi has no agent-home
-# at all.) If kimi ever gains HOME isolation, add its seed entry here.
+# (In the prod container, worker_kimi has no agent-home at all.) If kimi
+# ever gains HOME isolation, add its seed entry here.
 _CLI_CRED_SEEDS: dict[str, tuple[str, str | None]] = {
     "codex":  (".codex/auth.json", None),
     "gemini": (".gemini/oauth_creds.json", "GEMINI_API_KEY"),
@@ -417,6 +417,10 @@ def provision_pane(agent: str, target: tmux.Target) -> str:
     # defaulting to `agent` matches render's own fallback so the
     # rendered file is byte-identical.
     identity.write(agent, role=cfg.get("role") or agent, cli=cli, model=model)
+    # Each agent owns a private scratch dir for long reports / drafts so
+    # output doesn't collide in the shared repo cwd (see the workspace
+    # section that identity.render injects).
+    paths.agent_workspace(agent).mkdir(parents=True, exist_ok=True)
     if cfg.get("lazy"):
         local_facts.upsert_status(agent, "待命", "lazy: CLI starts on first message")
         return LAZY
@@ -434,7 +438,9 @@ def provision_pane(agent: str, target: tmux.Target) -> str:
         import sys
         print(f"  ⚠️ {agent}: {e}", file=sys.stderr)
         return CONFIG_ERROR
-    cmd = f"{pane_env_prefix()} {adapter.spawn_cmd(agent, model)}"
+    from claudeteam.runtime import agent_auth
+    cmd = (f"{agent_auth.spawn_env_prefix(agent, adapter)} "
+           f"{pane_env_prefix()} {adapter.spawn_cmd(agent, model)}")
     if not tmux.spawn_agent(target, cmd):
         return SPAWN_FAILED
     # 60s ready timeout (was 20s): fresh container claude panes go
@@ -445,8 +451,11 @@ def provision_pane(agent: str, target: tmux.Target) -> str:
     from claudeteam.runtime import tunables
     ready_timeout = float(tunables.tunable("wake.ready_marker_timeout_s", 60.0))
     if wake.wait_until_ready(target, adapter, timeout_s=ready_timeout):
-        tmux.inject(target, identity.init_prompt(agent),
-                    submit_keys=adapter.submit_keys())
+        # inject_and_confirm, not a bare inject: a freshly-ready pane can
+        # drop the submit key on the fixed-settle paste, leaving the identity
+        # prompt sitting unsubmitted until a human Enter. It re-nudges
+        # submit until the agent goes busy.
+        wake.inject_and_confirm(target, adapter, identity.init_prompt(agent))
         outcome = READY
     else:
         outcome = READY_NO_INIT

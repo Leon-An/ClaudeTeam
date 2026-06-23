@@ -25,8 +25,8 @@ def test_send_text_as_user_when_flag_set():
 
 
 def test_send_text_routes_to_messages_reply_when_reply_to_set():
-    """REGRESSION (round 7 D1): lark-cli +messages-send has no --reply-to;
-    replies must go through +messages-reply with --message-id."""
+    """REGRESSION: lark-cli +messages-send has no --reply-to; replies
+    must go through +messages-reply with --message-id."""
     spy = _Spy({})
     chat.send_text("oc_x", "x", reply_to="om_parent", lark_run=spy)
     args = spy.calls[0]["args"]

@@ -31,10 +31,10 @@ class _FakePopenProc:
     """subprocess.Popen-shaped fake good enough for both `watchdog.respawn`
     (which discards the proc) and `watchdog.list_orphan_pids` →
     `subprocess.run` (which uses Popen as context manager and calls
-    poll/communicate/wait/kill on the result). Round-65 round-67: hoisted
-    to module level so `_fake_popen` and `silent_popen` share one
-    Popen-contract surface — fixing a subprocess-internal contract change
-    only needs touching one class."""
+    poll/communicate/wait/kill on the result). Hoisted to module level
+    so `_fake_popen` and `silent_popen` share one Popen-contract surface
+    — fixing a subprocess-internal contract change only needs touching
+    one class."""
 
     def __init__(self, argv):
         self.argv = argv
@@ -139,8 +139,8 @@ def test_up_help():
 
 
 def test_up_returns_one_when_daemon_fast_fails_no_pid_file():
-    """REGRESSION (round-62, real bug): a daemon that fast-fails at
-    startup (e.g. chat_id missing in runtime_config) error_exits
+    """REGRESSION (real bug): a daemon that fast-fails at startup
+    (e.g. chat_id missing in runtime_config) error_exits
     BEFORE writing its pid file. up.py used to print
     '⚠️ launched but no pid file yet' and STILL return 0, masking
     the boot failure. Now treats absence-of-pidfile as failure."""
@@ -162,9 +162,9 @@ def test_up_returns_one_when_daemon_fast_fails_no_pid_file():
 
 
 def test_up_warns_when_daemon_spawn_fails():
-    """REGRESSION (round 7 D4): up was printing '✅ team up' even when
-    router/watchdog Popen raised OSError (e.g. 'claudeteam' not on PATH).
-    Now must say 'team up with errors' and return non-zero."""
+    """REGRESSION: up was printing '✅ team up' even when router/watchdog
+    Popen raised OSError (e.g. 'claudeteam' not on PATH). Now must say
+    'team up with errors' and return non-zero."""
     team = {"session": "S", "agents": {"manager": {}}}
 
     def boom_popen(argv, *args, **kwargs):
@@ -270,8 +270,8 @@ def test_down_handles_corrupt_pid_file():
 def test_down_returns_one_when_pid_refuses_to_die():
     """SIGTERM delivered, then SIGKILL escalation, then surface the
     warning — when both signals appear ineffective (kill -0 keeps
-    succeeding), down should warn + return non-zero. Smoke v3 bumped
-    grace 3s→10s SIGTERM + 2s post-SIGKILL = 12s total."""
+    succeeding), down should warn + return non-zero. Grace is 10s
+    SIGTERM + 2s post-SIGKILL = 12s total."""
     import time as _time
     team = {"session": "S", "agents": {"manager": {}}}
     with isolated_env(team=team), _fake_tmux(session_alive=False):
@@ -290,8 +290,8 @@ def test_down_returns_one_when_pid_refuses_to_die():
         # pid file is NOT removed — operator needs to investigate
         assert paths.router_pid_file().exists()
         # Both SIGTERM and SIGKILL must have been attempted (escalation
-        # loop survived the smoke-v3 finding that 3s SIGTERM-only grace
-        # left daemons orphaned).
+        # loop guards against a 3s SIGTERM-only grace leaving daemons
+        # orphaned).
         import signal as _signal
         assert _signal.SIGTERM in signals_seen
         assert _signal.SIGKILL in signals_seen

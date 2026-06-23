@@ -13,18 +13,36 @@ concrete capability needs them, not before.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-
-
-# Braille-pattern spinner glyphs that every Ink/Rich/Bubbletea-style CLI
-# uses for "I'm busy" indication. Concrete adapters splice this into their
-# own busy_markers() return.
-SPINNER_CHARS = ("⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷")
+from dataclasses import dataclass
 
 
 # Submit-key sequence for multi-line CLIs (Codex / Kimi use Ink + prompt_toolkit
 # style multi-line input where Enter inserts a newline, M-Enter commits the
 # buffer). Plain `Enter` is kept as a fallback for single-line edge cases.
 MULTILINE_SUBMIT_KEYS = ("M-Enter", "Enter", "C-m", "C-j")
+
+
+@dataclass(frozen=True)
+class AuthSlots:
+    """Where a CLI looks for its credential, by mode. `runtime.agent_auth`
+    reads this off the adapter and resolves which one to use, by priority
+    long-term token > login > api_key. Per-CLI *data* lives here on the
+    adapter (next to spawn_cmd / ready_markers); the *resolution* (priority,
+    secrets-file read, conflict-blanking) is the CLI-agnostic algorithm in
+    agent_auth.
+
+      token_env       — env var holding a long-term token, or None if the CLI
+                        has no such mode.
+      api_key_envs    — env var(s) holding an API key, in preference order.
+      login_credfile  — the CLI's own login creds file, relative to the agent
+                        HOME (present = "logged in"), or None.
+      login_token_env — if set, materialise the login file's token into this
+                        env on spawn (claude's keychain-avoidance trick).
+    """
+    token_env: str | None
+    api_key_envs: tuple[str, ...]
+    login_credfile: str | None
+    login_token_env: str | None = None
 
 
 class CliAdapter(ABC):
@@ -34,15 +52,23 @@ class CliAdapter(ABC):
 
     @abstractmethod
     def ready_markers(self) -> list[str]:
-        """If any string here appears in the pane, CLI UI is ready."""
+        """If any string here appears in the pane, the CLI UI has booted.
 
-    @abstractmethod
-    def busy_markers(self) -> list[str]:
-        """If any string here appears at the pane tail, the agent is busy."""
+        Readiness only (spawn boot-wait + lazy-wake gate). Busy / idle / dead
+        are detected without markers by `runtime.pane_probe`.
+        """
 
     @abstractmethod
     def process_name(self) -> str:
         """/proc/<pid>/comm value; used to find the CLI process under a pane."""
+
+    def auth_slots(self) -> "AuthSlots | None":
+        """Where this CLI's credential lives, for runtime.agent_auth's
+        token > login > api_key resolution. Default None = "unmanaged": the
+        orchestrator places / blanks nothing (e.g. kimi, which shares the
+        operator's ~/.kimi with no per-agent isolation). CLIs with an
+        isolated per-agent HOME override to declare their slots."""
+        return None
 
     def submit_keys(self) -> list[str]:
         """Tmux keys to try in order to commit a line of input.
@@ -51,6 +77,52 @@ class CliAdapter(ABC):
         override to lead with M-Enter.
         """
         return ["Enter", "C-m", "C-j"]
+
+    def interrupt_keys(self) -> list[str]:
+        """Tmux key(s) that interrupt the CLI's CURRENT action — what `/stop`
+        sends to halt an agent's in-flight turn WITHOUT killing its CLI.
+
+        Default `Escape`, uniform across every CLI we target. Both
+        claude-code and codex label Esc as the interrupt in their own UI
+        ("esc to interrupt") and Esc cleanly cancels the turn (claude
+        prints "Interrupted", codex "Model interrupted"); the Ink-based
+        TUIs (gemini / qwen / kimi) cancel the running generation on Esc
+        as well. Ctrl-C — the old `/stop` key —
+        was neither consistent nor safe: a 2nd Ctrl-C quits codex, Ink CLIs
+        treat it as EOF/exit, and on claude it only ambiguously interrupts
+        (it dumps the typed line back into the prompt). An adapter whose CLI
+        interrupts with a different key overrides this.
+        """
+        return ["Escape"]
+
+    def resubmit_on_idle(self) -> bool:
+        """Whether wake.inject_and_confirm may RE-SEND the submit key if the
+        pane looks idle after the post-spawn identity inject (the autosubmit
+        re-nudge for a pane that didn't autosubmit on respawn).
+
+        Default True — safe on claude-code + codex (the re-nudge only lands
+        when the agent isn't busy, and a stray submit on an empty prompt is
+        a harmless blank line). kimi-cli overrides to False: its TUI reads
+        the re-sent submit key as an interrupt ("Interrupted by user"), so
+        for kimi inject_and_confirm does a plain single inject (no re-nudge)
+        until kimi's submit/interrupt semantics are handled on the kimi
+        track.
+        """
+        return True
+
+    def clear_command(self) -> str | None:
+        """The CLI's in-REPL command to clear / reset the conversation
+        context. claude-code / codex / gemini / qwen / kimi all expose
+        `/clear`, so that's the default; override (or return None) if a CLI
+        names it differently or has none."""
+        return "/clear"
+
+    def compact_command(self) -> str | None:
+        """The CLI's in-REPL command to compact / summarise context into a
+        shorter form. claude-code / codex / kimi call it `/compact` (the
+        default); gemini / qwen call it `/compress` and override. None if the
+        CLI has no compaction command."""
+        return "/compact"
 
     def display_model(self, model: str) -> str:
         """Human-facing model label for the agent's identity file.

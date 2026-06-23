@@ -12,8 +12,8 @@ from typing import Callable
 
 from claudeteam.commands import (
     init, send, inbox, read, status, log, team, workspace,
-    start, hire, fire, up, down, reset, reidentify, switch,
-    say, router, watchdog, task, remember, recall, forget, peek,
+    start, hire, fire, restart, up, down, reset, reidentify, switch,
+    say, router, watchdog, task, teamctl, remember, recall, forget, peek,
     health, usage, install_hooks, version,
 )
 from claudeteam.util import error_exit
@@ -45,8 +45,11 @@ _COMMAND_GROUPS: list[tuple[str, list[tuple[str, CommandHandler]]]] = [
         ("start", start.main),
         ("hire", hire.main),
         ("fire", fire.main),
+        ("restart", restart.main),
         ("up", up.main),
         ("down", down.main),
+        ("team-shutdown", teamctl.shutdown_main),
+        ("team-restart", teamctl.restart_main),
         ("reset", reset.main),
         ("reidentify", reidentify.main),
         ("switch", switch.main),
@@ -100,6 +103,10 @@ def main(argv: list[str] | None = None) -> int:
     if not args or args[0] in ("-h", "--help", "help"):
         print(_usage())
         return 0
+    # `-v`/`--version` are the flags operators reflexively try; alias them
+    # to the `version` subcommand so they don't bounce off "unknown command".
+    if args[0] in ("-v", "--version"):
+        return int(version.main([]) or 0)
     cmd, rest = args[0], args[1:]
     handler = COMMANDS.get(cmd)
     if handler is None:

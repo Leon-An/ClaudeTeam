@@ -104,7 +104,37 @@ def mark_read(local_id: str) -> bool:
 # ── status ────────────────────────────────────────────────────────────
 
 
+# Authoritative retirement marker. `claudeteam fire` writes this status,
+# and every pane-spawning path consults `is_retired()` before bringing a
+# pane back up:
+#   • commands/start.py provision loop   (mass restart)
+#   • runtime/wake.wake_if_dormant        (lazy + delivery wake)
+#   • feishu/deliver._inject_to_pane      (router delivery)
+#   • commands/send.py                    (peer nudge)
+# Without this gate "已停止" was only a display string — a fired agent got
+# silently revived by the next inbound message or `claudeteam start`
+# (裁员不彻底 + 反复自动重启). The deliberate bring-back path
+# (`claudeteam hire`) intentionally does NOT consult it — provision_pane
+# overwrites the row with 待命/进行中, clearing retirement.
+RETIRED_STATUS = "已停止"
+
+
+def is_retired(agent: str) -> bool:
+    """True iff `agent`'s latest status row marks it retired (fired).
+
+    The single source of truth for "this agent was fired; do not revive
+    its pane". Reads the status snapshot; a missing row (never-seen agent)
+    is not retired."""
+    row = get_status(agent)
+    return bool(row) and row.get("status") == RETIRED_STATUS
+
+
 def upsert_status(agent: str, status: str, task: str, *, blocker: str = "") -> None:
+    # Defense-in-depth: never let a flag-shaped
+    # token (e.g. a misparsed '--help') become a phantom agent row. Real
+    # agent names never start with '-'. Mirrors the touch_heartbeat guard.
+    if not agent or agent.startswith("-"):
+        return
     with _locked():
         path = _status_file()
         data = read_json(path, {"agents": {}})
@@ -142,8 +172,11 @@ def touch_heartbeat(agent: str) -> None:
     is auxiliary; killing `claudeteam send` or `claudeteam inbox`
     because we couldn't update a freshness timestamp would be an
     unhelpful trade-off.
+
+    A flag-shaped name (leading '-') is rejected too: a misparsed option
+    like '--help' must never register as a phantom agent.
     """
-    if not agent:
+    if not agent or agent.startswith("-"):
         return
     try:
         with _locked():
@@ -191,8 +224,8 @@ def append_log(agent: str, kind: str, content: str, *, ref: str = "") -> str:
 
 def list_logs(agent: str, *, limit: int = 20) -> list[dict]:
     """Return up to `limit` most recent log entries for `agent`,
-    oldest-first. Round-90: corrupt lines (half-written from a crash)
-    are now silently skipped instead of raising — same behavior as
+    oldest-first. Corrupt lines (half-written from a crash) are
+    silently skipped instead of raising — same behavior as
     store/memory."""
     rows = [r for r in read_jsonl(_log_file()) if r.get("agent") == agent]
     return rows[-limit:]

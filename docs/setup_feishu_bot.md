@@ -16,52 +16,89 @@ ClaudeTeam 部署需要一个飞书企业自建 App + 机器人能力 + 一组�
 推进到下一 stage。**用户全程只需要扫一次 QR 登录**，之后由 agent
 托管完成，最后报回 `App ID` + `App Secret`。
 
-如果 UI 改版导致脚本某个 stage 失败，agent 可以参照本文里对应章节
-的"页面变化"描述手动操作那一个 stage，再用 `next` 接着自动跑剩下
-的——不必整套重来。
+如果 UI 改版导致脚本某个 stage 失败，drive 不会整套放弃：它自动留下
+一个交接包（截图 + `failure.json`）并把浏览器挂在 CDP 上，agent
+[接管这一个 stage](#stage-失败时-agent-接管这一-stage)、按对
+应章节做完，再 `skip` 让 drive 接着自动跑剩下的——不必整套重来。
 
 ---
 
-## ⚠️ 当某 stage 的脚本失败 — 立刻切 agent 介入模式
+## Stage 失败时 agent 接管这一 stage
 
-**核心原则：先 agent 后 workflow**。Feishu 开放平台 UI 改版频率不
-低，新 bot 和已有 bot 的页面状态也常有差异（Monaco mount 时机、
-表单 disabled 状态、按钮文案随版本切换）。**当 drive 跑某个 stage
-失败时，不要第一时间去改 Playwright selector**——你不一定知道页面
-现在长什么样。改成下面这个 agent 介入流程：
+**核心原则：drive 失败不放弃，自动把这一 stage 交接给 agent，agent
+按指示在浏览器里做完，再 `skip` 让 drive 继续跑后面的 stage。**
+Feishu 开放平台 UI 改版频率不低（Monaco mount 时机、表单 disabled
+状态、按钮文案随版本切换），所以"某个 stage 偶尔崩"是常态——stage
+化的价值就是：崩一个不影响整体，agent 只补那一个。
 
-1. **看 chromium 屏幕** —— drive 失败时浏览器是开着的；用户能直接
-   看 UI 当前状态，agent 也能截屏看
-2. **写小段 Playwright 探针**，每次只做一两个动作 + 立刻
-   `page.screenshot({ path: '/tmp/probe_step_N.png', fullPage: true })`
-   + 拿 button states / dialog 数 / form input 值。把 PNG `Read` 进来肉眼
-   看（agent 是多模态的）
-3. **看清楚下一步该点什么再写下一段**，不要一口气写完整 stage。每
-   一段都基于上一段的 screenshot + DOM dump 决策
-4. 直到这个 stage 干完。然后 `echo skip > .state/<bot>.cmd` 让 drive
-   把这个 stage 标 done，让 drive 接着自动跑剩下的 stage
-5. **熟练之后再 codify**：把 agent 摸出来的 click 顺序 / 选择器
-   翻译成 stage 函数里的 Playwright 代码，下次 drive 直接 happy
-   path 跑通。**不要 codify 没真跑过的猜测**
+### drive 失败时自动产出的"交接包"（不用翻日志）
 
-**反模式**（千万别犯）：
+任一 stage 的自动化抛错时，`cmd_drive` 会自动:
 
-- 试图通过反复 patch script + redo 看 timeout 来 reverse engineer UI
-  —— 每次 redo 浪费 30s+，看不到屏幕等于盲调
-- 大段 `await page.click(X) → wait → click Y → wait → click Z` 一气
-  写完 —— 中途任何一步失败，你都不知道是 X / Y / Z 中哪个变了；不
-  如分 3 段，每段一截图
-- 把"理论上应该工作"的代码 commit 上去 —— 没真在当前 Feishu UI 上跑
-  通的代码就是死代码，下次别人 dryrun 还会撞同样问题
+1. **截图**整页到 `.state/<bot>.<stage>.fail.png`
+   —— agent 是多模态的，直接 `Read` 这张图就能看到出错现场
+2. 写**结构化交接文件** `.state/<bot>.failure.json`，字段:
+   - `stage` / `goal` —— 这一步要达成什么
+   - `targetUrl` —— 该 stage 对应的开放平台页面
+   - `instructions` —— 本文里对应的章节（如 `Stage 3 — import-scopes`）
+   - `cookieFile` —— 登录态 cookie 路径（`.feishu_cookies.json`）
+   - `cdpEndpoint` —— 见下
+   - `currentUrl` / `error` —— 出错时的实际页面 + 报错首行
+3. **保持浏览器打开**，并通过 CDP 暴露给 agent 接管：默认
+   `http://127.0.0.1:9222`（用 `FEISHU_BOT_CDP_PORT` 改端口）
 
-**已知会需要 agent 介入的 stage**（遇到时直接进介入模式）：
-- **stage 3 import-scopes** —— Monaco editor 在 fresh bot 上 mount
-  时机敏感，已加 5s wait 缓解。如果在 freshtest 之外的 dev 机第一次
-  跑还撞 timeout，按上面流程 agent 介入 + 把 wait 再调 / 加 retry
-- **stage 7 publish** —— 表单里 "Bot — Configure" 子按钮可能要先
-  点一下让 bot 内部 config 生成；Save 按钮在 config 完之前一直
-  disabled。具体 click 顺序随 Feishu 版本变。这一 stage 几乎必然要
-  agent 介入（最近一次 2026-05-08 dryrun_docker_v2 撞过）
+### agent 接管流程
+
+1. `Read` `.state/<bot>.<stage>.fail.png` 看现场，读
+   `.state/<bot>.failure.json` 拿 `goal` / `targetUrl` / `instructions`
+2. **接管浏览器（二选一，优先 CDP）**：
+
+   **① 接管同一个浏览器（推荐）** —— 它已登录、就停在出错页:
+   ```js
+   const { chromium } = require('playwright');
+   const browser = await chromium.connectOverCDP('http://127.0.0.1:9222');
+   const ctx  = browser.contexts()[0];
+   const page = ctx.pages().find(p => p.url().includes('open.feishu.cn')) || ctx.pages()[0];
+   // …在 page 上接着操作…（别 browser.close()，那会关掉 drive 的浏览器）
+   ```
+
+   **② 退路：开自己的浏览器 + 复用 cookie**（CDP 连不上时）:
+   ```js
+   const browser = await chromium.launch({ headless: false });
+   const ctx = await browser.newContext();
+   await ctx.addCookies(JSON.parse(require('fs').readFileSync('.feishu_cookies.json','utf-8')));
+   const page = await ctx.newPage();
+   await page.goto(targetUrl);   // failure.json 里的 targetUrl
+   ```
+   > Playwright MCP 同理：用 cookie 注入 + 导航到 `targetUrl`。配置是
+   > **server-side** 的（写在飞书平台），在哪个浏览器里点完都生效。
+
+3. 按本文该 stage 章节的 **「自动操作 / 对应 manual UI」** 把这一步做
+   完（那一节就是 agent 的操作指示）。每点一两下截一次图核对，别一
+   口气盲点一长串。
+4. 做完后 `echo skip > .state/<bot>.cmd` —— drive 把这个 stage 标
+   done、清掉交接包，自动推进到下一 stage。
+
+### 反模式（别犯）
+
+- **盲调**：反复 patch selector + `redo` 看 timeout 来反推 UI —— 每次
+  redo 浪费 30s+，不 `Read` 截图就是闭眼调
+- **一口气写一长串** `click X → click Y → click Z` —— 中途崩了不知道
+  哪步变了；分段、每段一截图
+- **commit 没真跑通的代码** —— 没在当前 Feishu UI 上验证过的 selector
+  就是死代码，下次还撞同样的坑。摸通后再把 click 顺序 codify 回 stage
+  函数（happy path），但**只 codify 真跑过的**
+
+### 已知较脆的 stage
+
+- **stage 3 import-scopes** —— Monaco 编辑器。脚本已做**多策略加固**
+  （`fillMonaco`：monaco-API setValue → 聚焦 textarea 粘贴 →
+  `keyboard.insertText`），失败概率大降；真撞 UI 改版时按上面接管，手
+  动打开「批量导入」对话框把 `feishu_scopes.json` 粘进去即可（最简单
+  的是 `pbcopy < feishu_scopes.json` 后在编辑器 `Cmd+V`）
+- **stage 7 publish** —— 表单里 "Configure" 子按钮可能要先点一下生成
+  bot 内部 config，Save 在 config 完前一直 disabled；具体 click 顺序随
+  版本变，较易需要接管
 
 ---
 
@@ -77,33 +114,39 @@ node create_feishu_bot.js drive <bot-name> "<desc>" \
   > /tmp/drive-<bot-name>.log 2>&1 &
 ```
 
-drive 跑完一个 stage 就阻塞等命令文件，agent 读 state + log
-判断结果后写命令推进：
+drive **自动连跑全部 7 个 stage**，happy path 不需要写任何命令文件，跑完
+publish 自动退出。命令文件只在**某个 stage 硬失败、drive 停下交接**时才用到
+（agent 读 state + log + 失败截图判断后写命令）：
 
 ```bash
-# 推进下一 stage（happy path, 上一 stage 自动跑完了）:
-echo next > scripts/feishu_bot_creator/.state/<bot-name>.cmd
-
-# Agent 自己在浏览器里手动完成了当前失败的 stage, 标记 done:
+# 你在打开的浏览器里手动补完了失败的 stage → 标记 done 并继续:
 echo skip > scripts/feishu_bot_creator/.state/<bot-name>.cmd
 
 # 重跑某个 stage (drive 不退出):
 echo "redo events" > scripts/feishu_bot_creator/.state/<bot-name>.cmd
 
+# 跳到下一 stage（不把当前标记为 done）:
+echo next > scripts/feishu_bot_creator/.state/<bot-name>.cmd
+
 # 提前结束:
 echo quit > scripts/feishu_bot_creator/.state/<bot-name>.cmd
 ```
 
-**`skip` 是核心 escape hatch** —— 当 Feishu UI 改版导致某个 stage
-的 Playwright selector 失败时, agent 不必整套放弃 / 重起浏览器:
-直接在 drive 还开着的那个 chromium 窗口里手动完成那一步 (paste
-JSON / 点该点的按钮 / 改下拉选项), 然后 `echo skip` 让 drive 把这
-个 stage 标 done, 自动推进到下一 stage 继续自动化. 这就是 stage 化
-的真正价值 — UI 飘移不会让流程整体崩, agent 只需要修一个 stage.
+**`skip` 是核心 escape hatch** —— 当 Feishu UI 改版导致某个 stage 的
+selector 失败时，agent 不必整套放弃。drive 已自动留下交接包（截图 +
+`failure.json`）并把浏览器挂在 CDP 上；agent 按上面
+[「agent 接管这一 stage」](#stage-失败时-agent-接管这一-stage)
+接管、完成那一步，再 `echo skip` 让 drive 标 done 并继续。这就是 stage
+化的真正价值 —— UI 飘移不会让流程整体崩，agent 只补那一个 stage。
 
-状态 / 进度查看：
+状态 / 进度 / 失败交接查看：
 - `scripts/feishu_bot_creator/.state/<bot-name>.json`：JSON state
   含 `appId` / `completedStages` / `lastError`
+- `scripts/feishu_bot_creator/.state/<bot-name>.failure.json`：**仅在
+  某 stage 失败时存在** —— agent 接管所需的 `goal` / `targetUrl` /
+  `instructions` / `cookieFile` / `cdpEndpoint`（成功或 `skip` 后自动清掉）
+- `scripts/feishu_bot_creator/.state/<bot-name>.<stage>.fail.png`：失败
+  现场整页截图，`Read` 进来看
 - `/tmp/drive-<bot-name>.log`：实时 stdout / stderr
 - `node create_feishu_bot.js status --app <bot-name>`：单次打印
   state 表格
@@ -178,8 +221,16 @@ Mail 等），一次性全部添加。
 **对应 manual UI**：左侧「权限管理」→「批量导入/导出权限」→ 选
 「导入」→ 粘贴 `feishu_scopes.json` 全部内容 → 「下一步」→ 「添加」。
 
-**完成判断**：导入后权限列表显示约 480 条权限；`completedStages`
-含 `import-scopes`。
+**完成判断**：导入对话框走完，bot-creator 打印
+`Permissions imported: N scopes requested (...)`；`completedStages` 含
+`import-scopes`。
+
+> **注意（不是 bug）**：飞书的权限**只有在发布版本（stage 7）之后才激活**。
+> 所以在 stage 3 这个时点去查"已生效 scope"必然是 **0**——这是预期现象，
+> 不代表导入失败，更不代表 IM 核心权限缺失。早期版本在这里会吓人地打
+> `0 applied · IM core MISSING — may fail`，已移除。真正的生效校验放到了
+> publish 之后：stage 7 会打 `✅ scopes active … IM core granted`，或在确实
+> 仍缺核心权限时才打 `⚠️ … MISSING after publish`。
 
 **失败常见原因**：Monaco editor 的 textarea 被 span 覆盖（脚本就是
 为此点 `.view-lines` 而不是 textarea）；或剪贴板权限被浏览器拦

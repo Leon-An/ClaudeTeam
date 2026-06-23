@@ -14,9 +14,8 @@ from claudeteam.agents.qwen_code import QwenCodeAdapter
 
 
 def test_registry_lists_known_clis_plus_kimi_and_qwen_aliases():
-    """Round-85 added gemini-cli; round-101 added qwen-code (+qwen-cli
-    alias). kimi-cli + qwen-cli are aliases so both forms in team.json
-    work."""
+    """gemini-cli and qwen-code (+qwen-cli alias) are registered.
+    kimi-cli + qwen-cli are aliases so both forms in team.json work."""
     names = set(known_clis())
     assert names == {
         "claude-code", "codex-cli", "gemini-cli",
@@ -61,20 +60,42 @@ def test_every_adapter_implements_required_methods():
         assert isinstance(cmd, str) and cmd.strip()
         ready = adapter.ready_markers()
         assert ready and isinstance(ready, list)
-        busy = adapter.busy_markers()
-        assert busy and isinstance(busy, list)
         assert adapter.process_name()
         assert adapter.submit_keys()
 
 
 def test_default_submit_keys_are_enter_variants():
-    # base default lists Enter / C-m / C-j; ClaudeCode keeps it, Codex/Kimi prepend M-Enter
+    # base default lists Enter / C-m / C-j; ClaudeCode keeps it.
     cc = ClaudeCodeAdapter().submit_keys()
     assert cc[0] == "Enter"
-    for adapter in (CodexCliAdapter(), KimiCodeAdapter()):
-        keys = adapter.submit_keys()
-        assert keys[0] == "M-Enter"
-        assert "Enter" in keys
+    # Codex submits on plain Enter (M-Enter is unreliable under tmux; C-j is a
+    # newline, never a submit) → it leads with Enter and drops C-j.
+    codex = CodexCliAdapter().submit_keys()
+    assert codex[0] == "Enter"
+    assert "C-j" not in codex
+    # Kimi's TUI still commits the buffer on M-Enter.
+    kimi = KimiCodeAdapter().submit_keys()
+    assert kimi[0] == "M-Enter"
+    assert "Enter" in kimi
+
+
+def test_interrupt_keys_are_uniform_escape_across_every_cli():
+    """`/stop`'s interrupt must be CONSISTENT across all CLIs. Every
+    registered adapter — claude-code / codex-cli / gemini-cli /
+    kimi-code / qwen-code (+ aliases) — interrupts with Esc, not the
+    old Ctrl-C."""
+    for cli in known_clis():
+        assert get_adapter(cli).interrupt_keys() == ["Escape"], cli
+
+
+def test_resubmit_on_idle_true_except_kimi():
+    """Autosubmit re-nudge is safe on claude/codex/gemini/qwen,
+    but kimi's TUI reads the re-sent submit key as an interrupt → kimi alone
+    opts out."""
+    assert KimiCodeAdapter().resubmit_on_idle() is False
+    for a in (ClaudeCodeAdapter(), CodexCliAdapter(),
+              GeminiCliAdapter(), QwenCodeAdapter()):
+        assert a.resubmit_on_idle() is True, type(a).__name__
 
 
 # ── per-adapter spawn shape ──────────────────────────────────────
@@ -111,7 +132,7 @@ def test_codex_spawn_sets_per_agent_codex_home():
     from claudeteam.agents.codex_cli import codex_home
     cmd = CodexCliAdapter().spawn_cmd("worker_codex", "")
     assert f"CODEX_HOME={codex_home('worker_codex')}" in cmd
-    assert codex_home("worker_codex").endswith("/worker_codex/.codex")
+    assert codex_home("worker_codex").endswith("/worker_codex/home/.codex")
 
 
 def test_codex_native_memory_path_is_agents_md_under_codex_home():
@@ -173,18 +194,48 @@ def test_kimi_spawn_uses_yolo_flag_and_disable_update():
     assert "KIMI_AGENT=worker_kimi" in cmd
 
 
+# ── kimi model bootstrap ─────────────
+
+
+def test_kimi_passes_kimi_valid_team_model_via_dash_m():
+    """A kimi/Moonshot model from team config is passed explicitly with -m
+    (no longer dropped) so a respawned session can't land on 'LLM not set'."""
+    cmd = KimiCodeAdapter().spawn_cmd("worker_kimi", "kimi-for-coding")
+    assert "kimi --yolo -m kimi-for-coding" in cmd
+
+
+def test_kimi_drops_non_kimi_model_but_force_applies_config_default():
+    """A claude/gpt team alias isn't a kimi model → dropped; instead kimi's
+    own config default_model is force-applied with -m (defeats kimi-cli's
+    respawn quirk of not auto-loading it)."""
+    import os
+    import tempfile
+    from pathlib import Path
+    from claudeteam.agents import kimi_code
+    from helpers import attr_patch
+    with tempfile.TemporaryDirectory() as d:
+        cfg = Path(d) / "config.toml"
+        cfg.write_text('default_model = "kimi-code"\n')
+        with attr_patch(kimi_code, _kimi_config_path=lambda: cfg):
+            cmd = KimiCodeAdapter().spawn_cmd("worker_kimi", "claude-opus-4-8")
+    assert "claude-opus-4-8" not in cmd          # claude alias dropped
+    assert "kimi --yolo -m kimi-code" in cmd     # config default force-applied
+
+
+def test_kimi_omits_dash_m_when_no_model_and_no_config():
+    """No kimi-valid model + no readable config default → omit -m (graceful
+    fallback to kimi's own auto path; never emit a broken `-m`)."""
+    from pathlib import Path
+    from claudeteam.agents import kimi_code
+    from helpers import attr_patch
+    with attr_patch(kimi_code,
+                    _kimi_config_path=lambda: Path("/nonexistent/.kimi/config.toml")):
+        cmd = KimiCodeAdapter().spawn_cmd("worker_kimi", "")
+    assert " -m " not in cmd
+    assert "kimi --yolo" in cmd
+
+
 # ── markers ──────────────────────────────────────────────────────
-
-
-def test_codex_busy_markers_include_boot_phase():
-    """R-busy fix carries over: Booting MCP server must be a busy marker so
-    inject_when_idle waits past the boot race."""
-    assert "Booting MCP server" in CodexCliAdapter().busy_markers()
-
-
-def test_kimi_busy_markers_include_using_shell():
-    assert "Using Shell" in KimiCodeAdapter().busy_markers()
-    assert "Booting" in KimiCodeAdapter().busy_markers()
 
 
 def test_process_names_match_expected_binaries():
@@ -236,3 +287,22 @@ def test_ensure_workdir_trusted_idempotent_when_entry_exists():
         ensure_workdir_trusted(Path("/already/here"), config_path=cfg)
         # File unchanged
         assert cfg.read_text(encoding="utf-8") == original
+
+
+def test_clear_and_compact_commands_are_per_cli():
+    """/clear is universal; /compact is claude/codex/kimi, /compress for the
+    gemini-style CLIs — declared on the adapter so the slash handler injects
+    each agent's OWN command instead of a hardcoded one."""
+    from claudeteam.agents.claude_code import ClaudeCodeAdapter
+    from claudeteam.agents.codex_cli import CodexCliAdapter
+    from claudeteam.agents.gemini_cli import GeminiCliAdapter
+    from claudeteam.agents.qwen_code import QwenCodeAdapter
+    from claudeteam.agents.kimi_code import KimiCodeAdapter
+    for adapter in (ClaudeCodeAdapter(), CodexCliAdapter(), GeminiCliAdapter(),
+                    QwenCodeAdapter(), KimiCodeAdapter()):
+        assert adapter.clear_command() == "/clear"
+    assert ClaudeCodeAdapter().compact_command() == "/compact"
+    assert CodexCliAdapter().compact_command() == "/compact"
+    assert KimiCodeAdapter().compact_command() == "/compact"
+    assert GeminiCliAdapter().compact_command() == "/compress"
+    assert QwenCodeAdapter().compact_command() == "/compress"

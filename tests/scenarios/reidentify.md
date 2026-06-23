@@ -9,7 +9,7 @@ boss 刚改了 `team.json` 里它的 role/model。这个时候不需要重启 pa
 重新注入 pane，让 agent 从 `agents/<name>/identity.md` 重新读取、回 inbox、
 upsert status。
 
-姊妹用例：B.2 的 `/compact <agent>` 飞书斜杠命令在 router 层面调度 45s
+姊妹用例：`/compact <agent>` 飞书斜杠命令在 router 层面调度 45s
 后 inject 同一个 init prompt，自动化版本的 reidentify。
 
 ## 范围
@@ -33,7 +33,7 @@ upsert status。
 
 claudeteam reidentify worker_cc
 
-# 全员一起刷新（R91：替代 `for a in ...; do claudeteam reidentify $a; done`）。
+# 全员一起刷新（替代 `for a in ...; do claudeteam reidentify $a; done`）。
 # 跳过没活 pane 的（lazy / fired），逐 agent 打印一行结果，整体 rc=0
 # 当且仅当所有 agent 都成功；任何一个 skip 或 inject fail 时 rc=1。
 claudeteam reidentify --all
@@ -93,8 +93,11 @@ slash `/compact` 触发自动 reidentify（commit `ab90bd0`）。手动入口
 
 ## Out of scope
 
-- **重启 CLI**：reidentify 不动 pane 进程，要重启用 `claudeteam fire <agent>
-  && claudeteam hire <agent>`。前者会丢 tmux scrollback 历史。
+- **重启 CLI**：reidentify 不动 pane 进程，要重启（换 model、CLI 卡死、重读
+  config）用 `claudeteam restart <agent>` —— 非破坏性，kill 窗口后按 toml 重新
+  provision，会丢 tmux scrollback 历史但保留花名册和工作目录。
+  ⚠️ **不要**用 `fire && hire` 当重启：`fire` 现在是破坏性裁员（归档工作目录 +
+  从 toml 删花名册），会把这个员工彻底裁掉。
 - **跨 session 批量**：`--all` 只刷当前 `team.json` 对应的 session。
   多 team 部署要用 `claudeteam switch` 切到下一个 team-data 再 `--all`，
   没有一次性跨 team 的口子。

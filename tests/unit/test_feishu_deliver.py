@@ -20,6 +20,14 @@ class _FakeAdapter:
     def ready_markers(self):
         return ["fake-ready"]
 
+    def process_name(self):
+        return "fake"
+
+    def auth_slots(self):
+        # No managed auth → agent_auth resolves to mode "none" (empty prefix),
+        # keeping these wake/spawn tests independent of auth.
+        return None
+
 
 def _adapter_factory(_agent):
     return _FakeAdapter()
@@ -157,6 +165,53 @@ def test_append_message_exception_skips_inject_for_that_agent():
     assert inject_calls == ["S:worker_b"]
 
 
+# ── retirement gate ─────────────────────────────────────────────
+
+
+def test_route_to_retired_agent_keeps_inbox_but_skips_pane():
+    """A fired agent (status 已停止) still gets its inbox row (recoverable
+    via hire) but its pane is never woken/injected — the delivery-path
+    half of the 反复自动重启 fix."""
+    decision = Decision(action=Action.ROUTE, targets=["worker_fired"],
+                        text="ping", msg_id="om")
+    inject_calls = []
+    wake_calls = []
+    with isolated_env():
+        local_facts.upsert_status("worker_fired", local_facts.RETIRED_STATUS, "fired")
+        report = apply(
+            decision,
+            adapter_for_agent=_adapter_factory,
+            tmux_inject=lambda t, *a, **kw: inject_calls.append(str(t)) or True,
+            wake_fn=lambda *a, **kw: wake_calls.append(a) or True,
+            session="S",
+        )
+    assert report.written == ["worker_fired"]   # inbox row kept
+    assert report.retired == ["worker_fired"]   # tracked as retired
+    assert report.injected == []
+    assert inject_calls == []                    # pane never touched
+    assert wake_calls == []                      # never tried to wake/revive
+
+
+def test_route_mixed_retired_and_live_targets():
+    """Firing one target doesn't block delivery to a live peer."""
+    decision = Decision(action=Action.ROUTE,
+                        targets=["worker_fired", "worker_live"],
+                        text="x", msg_id="om")
+    inject_calls = []
+    with isolated_env():
+        local_facts.upsert_status("worker_fired", local_facts.RETIRED_STATUS, "fired")
+        report = apply(
+            decision,
+            adapter_for_agent=_adapter_factory,
+            tmux_inject=lambda t, *a, **kw: inject_calls.append(str(t)) or True,
+            session="S",
+        )
+    assert set(report.written) == {"worker_fired", "worker_live"}
+    assert report.retired == ["worker_fired"]
+    assert report.injected == ["worker_live"]
+    assert inject_calls == ["S:worker_live"]
+
+
 # ── adapter integration ─────────────────────────────────────────
 
 
@@ -187,6 +242,45 @@ def test_wake_fn_called_per_target_with_spawn_cmd():
     assert wake_calls[0][0] == "S:worker_a"
     assert "worker_a" in wake_calls[0][1]
     assert "opus" in wake_calls[0][1]
+
+
+def test_spawn_cmd_carries_resolved_auth_on_every_wake():
+    """TRIGGER PROOF: a configured long-term token reaches the actual spawn
+    command (and blanks ANTHROPIC_API_KEY by priority) via agent_auth — i.e.
+    auth resolution really fires on the lazy-wake spawn path, not just in
+    agent_auth's own unit test."""
+    class _Claudeish:
+        def submit_keys(self): return ["Enter"]
+        def spawn_cmd(self, agent, model): return f"claude {agent} {model}"
+        def ready_markers(self): return ["ready"]
+        def process_name(self): return "claude"
+        def auth_slots(self):
+            from claudeteam.agents.base import AuthSlots
+            return AuthSlots("CLAUDE_CODE_OAUTH_TOKEN", ("ANTHROPIC_API_KEY",),
+                             ".claude/.credentials.json", "CLAUDE_CODE_OAUTH_TOKEN")
+
+    decision = Decision(action=Action.ROUTE, targets=["worker_a"], text="x", msg_id="om")
+    captured = []
+
+    def fake_wake(target, adapter, *, spawn_cmd, **_kw):
+        captured.append(spawn_cmd)
+        return True
+
+    with isolated_env(team=_WAKE_TEAM):
+        from claudeteam.runtime import paths
+        envp = paths.state_dir() / ".env"
+        envp.parent.mkdir(parents=True, exist_ok=True)
+        envp.write_text("CLAUDE_CODE_OAUTH_TOKEN=tok\n")
+        apply(
+            decision,
+            adapter_for_agent=lambda _a: _Claudeish(),
+            tmux_inject=lambda *a, **kw: True,
+            wake_fn=fake_wake,
+            session="S",
+        )
+    assert len(captured) == 1
+    assert "CLAUDE_CODE_OAUTH_TOKEN=tok" in captured[0]     # token reached spawn
+    assert "ANTHROPIC_API_KEY=" in captured[0]              # api key blanked (token wins)
 
 
 def test_wake_fn_returning_false_still_attempts_inject():
@@ -257,10 +351,9 @@ def test_slash_logs_warning_when_chat_send_returns_none():
 
     decision = Decision(action=Action.SLASH, text="/help",
                         msg_id="om_slash_test", create_time="0")
-    # Round-79: /help now returns a card dict; it routes through
-    # chat_send_card, not chat_send. Capture both sites so the test still
-    # exercises the failure path regardless of which transport the handler
-    # picked.
+    # /help returns a card dict; it routes through chat_send_card, not
+    # chat_send. Capture both sites so the test still exercises the
+    # failure path regardless of which transport the handler picked.
     chat_send_card_calls = []
 
     def failing_chat_send_card(chat_id, card, **kw):
@@ -285,7 +378,7 @@ def test_slash_logs_warning_when_chat_send_returns_none():
     assert "chat reply for om_slash_test failed to post" in log
 
 
-# ── inject-text composer (R172.b/R173) ───────────────────────────
+# ── inject-text composer ─────────────────────────────────────────
 
 
 def _decision(text, *, sender=""):
@@ -329,7 +422,7 @@ def test_compose_inject_text_omits_read_hint_when_local_id_blank():
 
 
 def test_compose_inject_text_summary_cue_adds_send_to_manager_hint():
-    """R173: when boss message asks for a summary / 汇总 / report,
+    """When a boss message asks for a summary / 汇总 / report,
     non-manager agents get an extra hint to also `claudeteam send
     manager` so manager's inbox pings (manager pane is blind to chat)."""
     out = _compose_inject_text(

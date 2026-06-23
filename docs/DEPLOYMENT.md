@@ -19,21 +19,25 @@ deployment, the flow is the same:
    ```bash
    cd scripts/feishu_bot_creator
    npm install                                          # one-time
-   # drive does login + all 7 stages in ONE chromium session
+   # drive does login + all 7 stages in ONE chromium session,
+   # AUTO-ADVANCING through every stage — no per-stage input on the
+   # happy path. It exits when publish completes.
    node create_feishu_bot.js drive <bot-name> "<description>" \
      > /tmp/drive.log 2>&1 &
    # First run prompts the user to scan QR (~30 s); cookies persist.
 
-   # After each stage drive blocks waiting on .state/<bot>.cmd.
-   # Read the log + state, then advance with one of:
-   echo next             > .state/<bot-name>.cmd   # next stage
-   echo skip             > .state/<bot-name>.cmd   # agent did it manually
-   echo "redo events"    > .state/<bot-name>.cmd   # redo a stage
+   # The .state/<bot>.cmd file is ONLY for failure recovery: if a stage
+   # hard-fails, drive stops, drops a handoff (screenshot + failure.json),
+   # keeps the browser on CDP, and waits — then you steer with one of:
+   echo skip             > .state/<bot-name>.cmd   # you fixed it in the browser → mark done + continue
+   echo "redo events"    > .state/<bot-name>.cmd   # re-run a stage
+   echo quit             > .state/<bot-name>.cmd   # stop
    ```
 
    `skip` is the key escape hatch when a Playwright selector breaks
    on a Feishu UI update — fix the page in the open browser
-   yourself, then `skip` to advance.
+   yourself, then `skip` to advance. (The happy path needs none of
+   these — they only come up when a stage fails.)
 
    Per-stage details (what Playwright does, equivalent manual UI,
    how to recover) are in [`setup_feishu_bot.md`](setup_feishu_bot.md).
@@ -91,18 +95,36 @@ deployment, the flow is the same:
    needs Python 3.10+, tmux, and the agent CLIs locally. Sections
    below cover both.
 
-4. **Config** — write the credentials into `.env` (Docker) and the
-   `chat_id` + agents into `claudeteam.toml`. `claudeteam init`
+4. **Config** — set the `chat_id` (+ agents) in `claudeteam.toml`.
+   Bot credentials are **not** stored in the toml (it has no App
+   ID/Secret field): on **host** they come from `lark-cli`'s config
+   — set once by `lark-cli config init`, secret kept in the OS
+   keychain — so the only required edit is `chat_id`. Only **Docker**
+   puts `FEISHU_APP_ID`/`FEISHU_APP_SECRET` in `.env`. `claudeteam init`
    generates a starter `claudeteam.toml` with three default agents
    (`manager` running Claude Code + `worker_cc` running Claude Code +
    `worker_codex` running Codex CLI) — keep them for a quick first
    smoke or edit before launch.
 
-5. **Launch + verify** — `claudeteam up` then `claudeteam health`
-   should be all green. From the Feishu group send `/health` and
-   `@manager 你好`; manager should reply within ~30 s.
+5. **Launch** — `claudeteam up` then `claudeteam health` should be all
+   green.
 
-6. **If anything goes red**, see [Common failures](#common-failures)
+6. **Hand the boss the join link, then verify.** This last mile can't
+   be automated: the bot can't receive its own messages, so only a real
+   human (boss) message in the group exercises the inbound path. Whoever
+   drives the deploy (human or agent) must hand the user two things:
+   1. the group **join link** — the `share_link` (`applink.feishu.cn/...`)
+      returned by `+chat-create` in step 2 (Path A); for a pre-existing
+      group, send the boss the group link out-of-band instead;
+   2. the two test messages.
+
+   The boss opens the link on Feishu **mobile → Join Group**, then sends
+   `/health` (zero-LLM card) and `@manager 你好` (manager replies ~30 s).
+   **Seeing the manager reply is the e2e green light.** Confirm inbound
+   landed with `claudeteam health` — its `inbound:` line flips from
+   "none observed yet" to "last event …" once your message routes.
+
+7. **If anything goes red**, see [Common failures](#common-failures)
    at the bottom — it covers Claude OAuth stale, container env not
    picked up, lark WebSocket drop, codex update prompt, etc.
 
@@ -144,35 +166,41 @@ gory details.
 
 ---
 
-## Host deploy (5 steps)
+## Host deploy (4 steps)
+
+No per-shell env exports — `claudeteam init` writes `[feishu] send_as = "bot"`
++ `no_proxy = true` into the toml, and state defaults to `~/.claudeteam`.
 
 ```bash
-# 1. shell env (per terminal — add to ~/.zshrc / ~/.bashrc to persist)
-cd /path/to/ClaudeTeam
-export CLAUDETEAM_STATE_DIR="$PWD/state"   # else state goes to ~/.claudeteam
-export LARK_CLI_NO_PROXY=1                 # required if HTTPS_PROXY is set
-export CLAUDETEAM_LARK_SEND_AS=bot         # bot identity for headless smoke;
-                                           # without it `say` defaults to user OAuth
-
-# 2. install (editable, in a venv — PEP 668 means no bare pip on macOS Homebrew)
+# 1. install (editable, in a venv — PEP 668 means no bare pip on macOS Homebrew)
 #    macOS note: /usr/bin/python3 is 3.9.6 — too old. Use brew/pyenv:
 #      brew install python@3.12 && /opt/homebrew/bin/python3.12 -m venv .venv
 #    Linux: python3 from your distro is usually fine if it's ≥3.10.
+#    ANY Python ≥3.10 on PATH works — venv, conda/miniconda, or pyenv.
+#    If `claudeteam` is already installed under conda (so it resolves on
+#    PATH), you can skip the venv entirely; just confirm the agent CLIs
+#    (claude/codex/...) are on the same PATH. Check version any time with
+#    `claudeteam --version`.
+cd /path/to/ClaudeTeam
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
 
-# 3. bootstrap config (writes claudeteam.toml in cwd)
+# 2. bootstrap config (writes claudeteam.toml in cwd, send_as/no_proxy preset)
 claudeteam init
-$EDITOR claudeteam.toml                    # set chat_id + add agents
+$EDITOR claudeteam.toml                    # set chat_id only — host bot creds come from lark-cli config, not the toml; agents have defaults
 
-# 4. install slash hooks BEFORE up (claude-code caches them at pane spawn)
+# 3. install slash hooks BEFORE up (claude-code caches them at pane spawn)
 claudeteam install-hooks                   # writes .claude/commands/<name>.md
 
-# 5. bring up the team
+# 4. bring up the team
 claudeteam up                              # tmux session + agents + router + watchdog
 claudeteam health                          # verify everything green/yellow
 ```
+
+> **Optional env** (rarely needed): `export CLAUDETEAM_STATE_DIR="$PWD/state"`
+> to keep state in the repo instead of `~/.claudeteam`; `export LARK_CLI_NO_PROXY=1`
+> only if an `HTTPS_PROXY` is set and you removed `no_proxy=true` from the toml.
 
 **Tear down:**
 
@@ -224,7 +252,7 @@ docker compose exec claudeteam claudeteam health
 docker compose exec claudeteam tmux attach -t ClaudeTeam   # see panes; Ctrl+B d to leave
 ```
 
-> **macOS subscribe stalls (handled automatically since 2026-05-09):**
+> **macOS subscribe stalls (handled automatically):**
 > lark-cli 1.0.23 on macOS — both Docker Desktop (`network_mode: host`
 > partially emulated) and host-native — has a known WebSocket subscribe
 > silent-drop: the subscribe child stays alive but stops delivering
@@ -345,16 +373,19 @@ After `claudeteam install-hooks`, the manager pane recognises these:
 
 | Slash | What it does |
 | ----- | ------------ |
-| `/help`     | Print the slash matrix card |
-| `/team`     | All agents' status with ♥ heartbeat |
+| `/help`     | List all slash commands (card) |
+| `/team`     | All agents' live pane state (marker-free probe) |
 | `/health`   | Server CPU / memory / disk card |
-| `/usage`    | ccusage wrapper for claude-code agents |
+| `/usage`    | Token/credit usage (claude ccusage / codex / kimi) |
 | `/tmux [agent] [N]` | Capture last N lines of an agent's pane |
-| `/send <agent> <msg>` | Inject message into agent's pane |
-| `/compact <agent>`    | Trigger LLM compact + scheduled re-identify |
-| `/clear <agent>`      | Wipe pane history |
-| `/stop <agent>`       | Kill pane (re-spawn with `claudeteam hire <agent>`) |
-| `/peek <agent> [N]`   | Branded `tmux capture-pane` for the 5-min 巡视 cadence |
+| `/send <agent> <msg>` | Inject a message into the agent's pane |
+| `/compact [agent]`    | Compact the CLI's context (gemini/qwen send `/compress`) + scheduled re-identify |
+| `/stop [agent]`       | Interrupt the agent's current action (sends Esc; pane stays alive) |
+| `/clear <agent>`      | `/clear` the CLI + re-inject identity (rehire shape) |
+| `/task [all]`         | Read-only task kanban |
+| `/shutdown [confirm]` | Take agent panes offline, keep router/watchdog for `/restart` (two-step) |
+| `/restart`            | Restart the whole team (≈ down→up) |
+| `/login <cli> [agent]`| Trigger a CLI's re-auth; surfaces the verification URL/code (gated by `controls.allow_*`) |
 
 Boss can also send these from chat — they zero-LLM dispatch through
 the router, no manager round-trip.
@@ -402,12 +433,26 @@ Verify inside the container:
 docker compose exec claudeteam env | grep CLAUDETEAM_LARK_SEND_AS
 ```
 
-### Router silent stall (lark-cli alive but no events for 180s)
+### `router.log` shows "no live events … rotating subscribe" every ~120s
 
-Router self-SIGTERMs via `_watch_subscribe_health` and watchdog
-respawns. Usually transient (lark WebSocket dropped). If it's
-constant, check whether another `lark-cli +subscribe` is running
-elsewhere (host vs container, or a stale orphan):
+**This is usually NORMAL, not a fault — especially on macOS.** On an
+idle chat the live WebSocket goes quiet; the router self-SIGTERMs via
+`_watch_subscribe_health`, watchdog respawns it, and catchup-on-restart
+refetches anything missed from Feishu's REST API. The recovery loop *is*
+the design. Two log shapes distinguish the cases:
+
+- `ℹ️ no live events for Ns — rotating subscribe (none inbound yet this
+  session …)` — idle, no traffic yet. Expected; ignore.
+- `⚠️ live events stopped after Ns idle …` — events WERE flowing and
+  stopped. More notable (esp. on Linux, where the WS is meant to be
+  stable).
+
+**Don't trust the log to tell you inbound works — it never prints "I
+received your message".** The at-a-glance truth is `claudeteam health`'s
+`inbound:` line ("none observed yet" → "last event …") plus one real
+human message in the group (see the verify step above). If the `⚠️`
+variant is *constant*, check for a second `lark-cli +subscribe` stealing
+events (host vs container, or a stale orphan):
 
 ```bash
 ps -ef | grep -E "lark-cli.*subscribe" | grep -v grep
@@ -425,7 +470,7 @@ forward to "now" makes the next catchup skip everything older.
 
 Symptom: `claudeteam say` from your launching shell **works**, but the
 exact same call from inside an agent pane (manager / worker_*) returns
-the HTTP 400 above. Bringup B5 caught this: a pre-existing tmux
+the HTTP 400 above. The cause: a pre-existing tmux
 **server** started by an earlier `claudeteam up` (different checkout,
 or a session you forgot you had) holds onto its original global env.
 `tmux new-session` attaches to that server and inherits *its* env, not
@@ -502,6 +547,10 @@ claudeteam reidentify worker_codex
 | `claudeteam usage [--days N]` | ccusage wrapper for claude-code agents |
 | `claudeteam say <agent> "<msg>" --to <role>` | Post as agent into the chat |
 | `claudeteam remember <agent> <kind> "<note>"` | Write durable memory (auto-injected on next pane wake) |
+| `claudeteam remember <agent> <kind> "<note>" --team` | Write **shared team experience** (every agent sees it on wake) |
+| `claudeteam recall [<agent> \| --team]` | Read per-agent memory, or the shared team experience |
+| `claudeteam remember <agent> <kind> "<note>" --team --update <E-n>` | Edit a shared experience entry in place |
+| `claudeteam forget --team [--id <E-n>]` | Retire one shared entry (or wipe the pool with `--yes`) |
 | `claudeteam switch <team-dir>` | Print env exports for multi-team UX |
 
 `claudeteam --help` lists everything grouped by section.

@@ -10,9 +10,9 @@ Does NOT spawn a new pane or restart the CLI — only sends the init
 prompt as a fresh user message. The agent re-reads `identity.md` and
 re-introduces itself in chat.
 
-Round-91: `--all` flag added. Skips agents that don't have a live
-pane (lazy / fired) and prints one line per agent for visibility.
-Returns rc=0 only if every targeted agent re-injected successfully.
+The `--all` flag skips agents that don't have a live pane (lazy /
+fired) and prints one line per agent for visibility. Returns rc=0
+only if every targeted agent re-injected successfully.
 """
 from __future__ import annotations
 

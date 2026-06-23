@@ -42,6 +42,7 @@ class DeliveryReport:
     written: list[str] = field(default_factory=list)        # inbox row landed
     injected: list[str] = field(default_factory=list)       # pane received text
     failed_inject: list[str] = field(default_factory=list)
+    retired: list[str] = field(default_factory=list)        # fired: inbox kept, pane not revived
     skipped: bool = False                                    # True iff decision was DROP
     slash_reply: str = ""                                    # set when action=SLASH
 
@@ -86,8 +87,10 @@ def _build_wake_args(agent: str, adapter) -> dict:
     actual job (deliver text) and isolates the cross-module wiring
     (lifecycle.pane_env_prefix, identity.init_prompt, status upsert).
     """
-    from claudeteam.runtime import tunables
-    spawn_cmd = f"{pane_env_prefix()} {adapter.spawn_cmd(agent, config.agent_model(agent))}"
+    from claudeteam.runtime import tunables, agent_auth
+    spawn_cmd = (f"{agent_auth.spawn_env_prefix(agent, adapter)} "
+                 f"{pane_env_prefix()} "
+                 f"{adapter.spawn_cmd(agent, config.agent_model(agent))}")
     return {
         "spawn_cmd": spawn_cmd,
         "init_msg": _identity.init_prompt(agent),
@@ -104,9 +107,8 @@ def _build_wake_args(agent: str, adapter) -> dict:
 # manager (not just `say` to chat) so manager's inbox pings and they can
 # follow up. manager's pane doesn't see chat messages — only its own
 # inbox + dispatched messages — so without this hint the dispatch +
-# summarize loop stalls (boss saw this 2026-05-05 in a Round C dry-run:
-# manager dispatched, worker counted, posted to chat, manager never
-# learned and never summarized).
+# summarize loop stalls (manager dispatches, the worker counts and posts
+# to chat, but manager never learns and never summarizes).
 _SUMMARY_CUE_TOKENS = (
     "汇总", "汇报", "总结", "报告",
     "summarize", "summary", "report back",
@@ -166,8 +168,14 @@ def _inject_to_pane(agent: str, decision: Decision,
     say` instead of answering in pane). `local_id` is appended to the
     hint so the agent knows which inbox row to mark read.
 
-    Returns a DeliveryReport field name: 'injected' / 'failed_inject'.
+    Returns a DeliveryReport field name: 'injected' / 'failed_inject' /
+    'retired'. A retired agent (status 已停止 — fired) keeps its inbox row
+    (written by the caller before this) so a future `hire` picks it up,
+    but its pane is NOT woken/injected — firing means stay down.
     """
+    if local_facts.is_retired(agent):
+        print(f"  ⏸️  {agent} 已停止 (fired); inbox row kept, pane not revived")
+        return "retired"
     target = tmux.Target(deps.session, agent)
     try:
         adapter = deps.adapter_for_agent(agent)
@@ -244,9 +252,9 @@ def _apply_slash(decision: Decision, deps: _Deps, *,
     """Run slash command at router level (zero LLM) and post reply to chat
     as bot. Pane is never touched.
 
-    Round-79: dispatch may now return a dict (Feishu card schema) — branch
-    on type to call chat.send_card instead of chat.send_text. `reply_to`
-    only applies to the text path; cards don't support thread-reply.
+    dispatch may return a dict (Feishu card schema) — branch on type to
+    call chat.send_card instead of chat.send_text. `reply_to` only applies
+    to the text path; cards don't support thread-reply.
     """
     dispatch = slash_dispatch or _slash.dispatch
     ctx = _slash.SlashContext(
