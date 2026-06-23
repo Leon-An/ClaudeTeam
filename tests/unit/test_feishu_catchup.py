@@ -442,15 +442,17 @@ def test_pending_lines_iso_time_compared_correctly_against_epoch_cursor():
     """The cursor stores epoch ms (set by record_decision from subscribe
     events), but list_recent returns ISO strings. The comparator must
     coerce both to the same scale."""
-    # 2026-05-03 18:50 local ≈ 1777805400000 ish
     history = [
         _msg_live("om_before", "2026-05-03 17:00"),
         _msg_live("om_after", "2026-05-03 19:00"),
     ]
     with isolated_env():
-        # cursor in epoch ms, between the two ISO times above
-        # 2026-05-03 18:00 local = ~1777801200000
-        catchup.write_cursor("om_cursor", "1777801200000")
+        # Derive the cursor from the SAME local-time parse the messages use, so
+        # the between-ness holds regardless of the runner's TZ. Hardcoding an
+        # absolute epoch made this pass at +0800 but fail under UTC (CI): the
+        # code parses naive ISO strings as LOCAL time, so the cursor must too.
+        cursor_ms = catchup._to_epoch_ms("2026-05-03 18:00")
+        catchup.write_cursor("om_cursor", str(cursor_ms))
         lines = catchup.pending_lines("oc_x", list_fn=lambda: history)
     parsed = [json.loads(l) for l in lines]
     ids = [p["event"]["message"]["message_id"] for p in parsed]
