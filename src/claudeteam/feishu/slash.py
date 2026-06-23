@@ -207,25 +207,33 @@ def _handle_team(args: str, ctx: SlashContext) -> dict:
     # take effect on the next /team without a router restart.
     team_agents, _, lazy_agents, _ = _live_agents()
 
+    # Fired agents (status="已停止" via `claudeteam fire`) have no pane;
+    # without this branch /team showed them as "🛑 CLI down" — same as a
+    # crashed agent — so operators couldn't tell intentional firing from a
+    # real failure. Split fired vs live, then probe all LIVE panes in ONE
+    # shared interval (not N×0.4s) so /team doesn't stall the router loop.
+    fired: dict[str, str] = {}
+    to_probe: dict[str, tmux.Target] = {}
+    for agent in team_agents:
+        status = local_facts.get_status(agent)
+        if status and status.get("status") == "已停止":
+            fired[agent] = (status.get("task") or status.get("note")
+                            or status.get("blocker") or "已停止")
+        else:
+            to_probe[agent] = tmux.Target(ctx.session, agent)
+    try:
+        states = pane_probe.probe_many(list(to_probe.values()))
+    except Exception:
+        states = {}
+
     rows = []
     tally: Counter[str] = Counter()
     for agent in team_agents:
-        # Fired agents (status="已停止" via `claudeteam fire`) have no pane;
-        # without this branch /team showed them as "🛑 CLI down" — same
-        # as a crashed agent — and operators couldn't tell intentional
-        # firing from a real failure.
-        status = local_facts.get_status(agent)
-        if status and status.get("status") == "已停止":
-            note = (status.get("task") or status.get("note")
-                    or status.get("blocker") or "已停止")
-            rows.append((agent, "🚫", f"已停止 ({note})"))
+        if agent in fired:
+            rows.append((agent, "🚫", f"已停止 ({fired[agent]})"))
             tally["🚫"] += 1
             continue
-        target = tmux.Target(ctx.session, agent)
-        try:
-            state = pane_probe.probe(target)
-        except Exception:
-            state = pane_probe.NO_WINDOW
+        state = states.get(to_probe[agent], pane_probe.NO_WINDOW)
         emoji, brief = _TEAM_STATE_GLYPH.get(state, ("🔘", state))
         # A never-woken lazy agent is a shell placeholder (probe DEAD /
         # NO_WINDOW) — normal before its first message arrives, so flip to

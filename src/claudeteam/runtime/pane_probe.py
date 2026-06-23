@@ -70,6 +70,17 @@ def changed_since(target: tmux.Target, baseline: str, *,
     return capture(target, lines=40) != baseline
 
 
+def _classify(fg: str, busy: bool) -> str:
+    """Foreground process + busy(motion) → state. Empty fg = no pane. A shell
+    that's churning is BUSY (a tool is running), not DEAD — only a static
+    shell prompt is DEAD."""
+    if not fg:
+        return NO_WINDOW
+    if _is_shell(fg):
+        return BUSY if busy else DEAD
+    return BUSY if busy else IDLE
+
+
 def probe(target: tmux.Target, *, interval_s: float = 0.4,
           run: Callable | None = None,
           capture: Callable | None = None,
@@ -81,8 +92,31 @@ def probe(target: tmux.Target, *, interval_s: float = 0.4,
     if not fg:
         return NO_WINDOW
     busy = changed(target, interval_s=interval_s, capture=capture, sleep=sleep)
-    if _is_shell(fg):
-        # A shell that's churning means something (a tool?) is still running —
-        # don't call it dead. Only a static shell prompt is a dead pane.
-        return BUSY if busy else DEAD
-    return BUSY if busy else IDLE
+    return _classify(fg, busy)
+
+
+def probe_many(targets, *, interval_s: float = 0.4,
+               run: Callable | None = None,
+               capture: Callable | None = None,
+               sleep: Callable | None = None) -> dict:
+    """Probe several panes sharing ONE `interval_s` sleep instead of N.
+
+    Reads every pane's foreground + a first capture, sleeps ONCE, reads the
+    second capture, classifies all. So N panes cost ~one interval, not N —
+    this is what keeps /team from blocking the router event loop for N×0.4s.
+    Returns {target: state}."""
+    run = run or tmux._default_run
+    capture = capture or tmux.capture_pane
+    sleep = sleep or time.sleep
+    targets = list(targets)
+    fg: dict = {}
+    before: dict = {}
+    for t in targets:
+        fg[t] = tmux.pane_command(t, run=run)
+        before[t] = capture(t, lines=40) if fg[t] else ""
+    sleep(interval_s)
+    out: dict = {}
+    for t in targets:
+        after = capture(t, lines=40) if fg[t] else ""
+        out[t] = _classify(fg[t], before[t] != after)
+    return out

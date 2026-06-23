@@ -74,6 +74,31 @@ def test_login_shell_prefix_is_recognised_as_shell():
                             capture=_cap(["% ", "% "]), sleep=_STILL) == pane_probe.DEAD
 
 
+# ── probe_many: N panes, ONE shared sleep (the /team latency fix) ──
+
+
+def test_probe_many_shares_one_sleep_and_classifies_all():
+    a, b, c = tmux.Target("S", "a"), tmux.Target("S", "b"), tmux.Target("S", "c")
+    fgs = {"a": "node", "b": "bash", "c": "node"}
+
+    def run(args, **kw):
+        win = args[args.index("-t") + 1].split(":")[-1]
+        return FakeProc(returncode=0, stdout=fgs.get(win, "") + "\n")
+
+    seqs = {"a": iter(["x", "x"]), "b": iter(["$", "$"]), "c": iter(["p", "q"])}
+
+    def cap(target, lines=40):
+        return next(seqs[target.window])
+
+    sleeps = []
+    out = pane_probe.probe_many([a, b, c], run=run, capture=cap,
+                                sleep=lambda s: sleeps.append(s))
+    assert out[a] == pane_probe.IDLE      # node + static
+    assert out[b] == pane_probe.DEAD      # shell + static
+    assert out[c] == pane_probe.BUSY      # node + moving
+    assert len(sleeps) == 1               # ONE shared interval for all 3 panes
+
+
 # ── changed_since (inject confirmation) ──────────────────────────
 
 

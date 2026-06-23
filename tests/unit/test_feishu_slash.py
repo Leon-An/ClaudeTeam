@@ -9,11 +9,12 @@ from claudeteam.runtime import teamctl as _teamctl
 
 
 def _probe_states(states=None, default=pane_probe.IDLE):
-    """Patch the marker-free `pane_probe.probe` (what /team now calls) to a
-    per-window state map. /team no longer scrapes pane text, so tests drive
-    the probe directly instead of faking capture buffers."""
+    """Patch the marker-free batched probe (`probe_many`, what /team now
+    calls) to a per-window state map. /team no longer scrapes pane text."""
     states = states or {}
-    return attr_patch(pane_probe, probe=lambda t: states.get(t.window, default))
+    return attr_patch(pane_probe,
+                      probe_many=lambda targets, **kw: {
+                          t: states.get(t.window, default) for t in targets})
 
 
 def _elements(reply):
