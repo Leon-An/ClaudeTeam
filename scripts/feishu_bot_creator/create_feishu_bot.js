@@ -62,6 +62,13 @@ const STATE_DIR = path.join(__dirname, '.state');
 
 const SCOPES_JSON = fs.readFileSync(SCOPES_FILE, 'utf-8').replace(/\s+/g, ' ').trim();
 
+// The drive browser is launched with a TCP CDP endpoint so the agent
+// fallback can attach to the SAME logged-in browser (connectOverCDP)
+// when a stage fails. Override the port with FEISHU_BOT_CDP_PORT if
+// 9222 collides with another chromium on the host.
+const CDP_PORT = parseInt(process.env.FEISHU_BOT_CDP_PORT || '9222', 10);
+const CDP_ENDPOINT = `http://127.0.0.1:${CDP_PORT}`;
+
 
 function log(msg) {
   console.log(`[${new Date().toLocaleTimeString()}] ${msg}`);
@@ -276,6 +283,87 @@ async function scrollToBottom(page) {
 
 // --- stages ---
 
+// Click the first button whose accessible name matches any of `names`.
+// Feishu re-labels buttons across releases (e.g. "Batch import/export
+// scopes" ↔ "Import/Export") — trying a few variants beats hard-failing
+// on one exact string when the only thing that changed is the wording.
+async function clickAnyButton(scope, names, opts = {}) {
+  const timeout = opts.timeout || 8000;
+  let lastErr;
+  for (const name of names) {
+    try {
+      await scope.getByRole('button', { name }).first().click({ timeout });
+      return name;
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error(`no button matched any of: ${names.join(' / ')}`);
+}
+
+// Robustly load `text` into the (single) Monaco editor inside `scope`.
+// Monaco is the most UI-drift-prone surface in the whole flow (the
+// import-scopes failure that bit us was a view-lines click going
+// invisible), so try the hardest-to-break strategy first and degrade:
+//   1. Monaco model API — window.monaco.editor.getModels()[0].setValue()
+//      bypasses the DOM entirely; survives any view-lines/textarea churn
+//   2. focus the hidden textarea.inputarea + clipboard Cmd+V
+//   3. force-click .view-lines to grab focus + keyboard.insertText
+//      (types it in — no clipboard permission needed)
+// Returns the winning strategy name; throws if the editor never holds
+// the payload (→ drive hands the stage to the agent fallback).
+async function fillMonaco(page, scope, text) {
+  const editor = scope.locator('.monaco-editor').first();
+  await editor.waitFor({ state: 'visible', timeout: 15000 });
+  await page.waitForTimeout(600);
+
+  const taLen = async () => {
+    try {
+      return await scope.locator('.monaco-editor textarea.inputarea').first()
+        .evaluate(el => el.value.length);
+    } catch (e) { return 0; }
+  };
+  const clear = async () => {
+    await page.keyboard.press('Meta+A').catch(() => {});
+    await page.keyboard.press('Backspace').catch(() => {});
+  };
+
+  // Strategy 1: Monaco model API (most robust — no DOM dependency)
+  const viaApi = await page.evaluate((t) => {
+    try {
+      const m = window.monaco;
+      const models = m && m.editor && m.editor.getModels ? m.editor.getModels() : [];
+      if (models && models.length) { models[0].setValue(t); return true; }
+    } catch (e) {}
+    return false;
+  }, text).catch(() => false);
+  if (viaApi && (await taLen()) >= 200) return 'monaco-api';
+
+  // Strategy 2: focus the real textarea + clipboard paste
+  try {
+    await scope.locator('.monaco-editor textarea.inputarea').first().focus({ timeout: 3000 });
+  } catch (e) {
+    await scope.locator('.monaco-editor .view-lines').first()
+      .click({ force: true, timeout: 5000 }).catch(() => {});
+  }
+  await clear();
+  await page.evaluate(async (t) => {
+    try { await navigator.clipboard.writeText(t); } catch (e) {}
+  }, text);
+  await page.keyboard.press('Meta+V');
+  await page.waitForTimeout(800);
+  if ((await taLen()) >= 200) return 'clipboard-paste';
+
+  // Strategy 3: type the payload straight in (no clipboard needed)
+  await clear();
+  await page.keyboard.insertText(text);
+  await page.waitForTimeout(500);
+  if ((await taLen()) >= 200) return 'insert-text';
+
+  throw new Error(
+    `import-scopes: Monaco editor never accepted the payload ` +
+    `(textarea <200 chars after monaco-api + paste + insertText). ` +
+    `Feishu UI likely changed — agent fallback should paste it by hand.`);
+}
+
 async function stage_create_app(page, _ctx, state) {
   log('Stage 1/7 create-app: creating custom app...');
   // Client-side check: bot name must be ≤32 chars. Feishu form validates
@@ -332,81 +420,36 @@ async function stage_add_bot(page, _ctx, state) {
 }
 
 async function stage_import_scopes(page, _ctx, state) {
-  // Opens "Batch import/export scopes" → Monaco editor → paste full JSON →
-  // "Next, Review New Scopes" → "Add".
+  // Opens "Batch import/export scopes" → load the JSON into the Monaco
+  // editor → "Next, Review New Scopes" → "Add". The editor load is the
+  // fragile part; fillMonaco() handles it with 3 fallback strategies
+  // (monaco-API setValue → focus textarea + Cmd+V → keyboard.insertText)
+  // and throws if none land, so drive can hand the stage to the agent.
   //
-  // The mechanism that actually works (gets 232/234 tenant scopes +
-  // nearly all user scopes into Monaco's model and reaches the review
-  // dialog as "Newly added scopes (232)"):
-  //
-  //   1. CLICK `.view-lines` (the visible text layer) with `force: true`
-  //      to bypass Playwright's aria-hidden actionability complaint.
-  //      Why click and not `.focus()` on the underlying textarea: a
-  //      programmatic focus on the hidden inputarea puts it in IME-only
-  //      mode, where Monaco renders synthetic edits in the visual layer
-  //      but won't update its underlying TextModel. A real click goes
-  //      through Monaco's full mouse-down → cursor-position → enter-edit
-  //      pipeline, putting the editor in a state where Cmd+V actually
-  //      runs the paste command on the model.
-  //   2. `Cmd+A` + `Backspace` to clear (Monaco's pre-fill is the bot's
-  //      current scope JSON; we want a clean slate).
-  //   3. `clipboard.writeText(SCOPES_JSON)` from page context → OS
-  //      clipboard.
-  //   4. `keyboard.press('Meta+v')` → Playwright synthesises Cmd+V at the
-  //      CDP level (`Input.dispatchKeyEvent` with isTrusted=true). Monaco
-  //      reads the OS clipboard via the paste handler and applies the
-  //      content via its INSERT command — model updates, dialog parses
-  //      the full JSON, review screen shows the full scope list.
-  //
-  // Path attempts that DON'T work (recorded so future maintainers don't
-  // lose another afternoon to them):
-  //   - synthetic `ClipboardEvent('paste', {clipboardData: dt})` dispatched
-  //     on the textarea — renders text in view-lines but doesn't go
-  //     through Monaco's command pipeline; model never updates.
-  //   - `keyboard.type(SCOPES_JSON, {delay:0})` — same outcome; ~4s typing
-  //     visible but model stays at pre-fill.
-  //   - `el.focus()` on textarea + `keyboard.press('Meta+v')` — focus
-  //     alone doesn't enter Monaco's edit state; same partial render
-  //     without model update.
+  // Monaco paste approaches that DON'T work (recorded so nobody re-loses
+  // an afternoon to them — keep them OUT of fillMonaco):
+  //   - synthetic `ClipboardEvent('paste', …)` on the textarea — renders
+  //     in view-lines but skips Monaco's command pipeline; model never updates
+  //   - `keyboard.type(json, {delay:0})` — same; ~4s of typing, model stays
+  //     at pre-fill (note: `keyboard.insertText` is different — it fires one
+  //     `insertText` input event Monaco's paste handler DOES process)
+  //   - bare `el.focus()` + Cmd+V — focus alone doesn't enter edit state
   log('Stage 3/7 import-scopes: importing ~480 permissions...');
   await gotoWithRetry(page, `https://open.feishu.cn/app/${state.appId}/auth`);
-  // Wait long enough for Monaco to fully render — 2s isn't enough on a
-  // freshly-created bot (the auth page boots a Monaco instance from
-  // scratch instead of restoring an already-warm one). The symptom: a
-  // `view-lines click` fails with "Element is not visible" even with
-  // force:true, because the .view-lines element hadn't reached its final
-  // DOM position yet (scrollIntoView fails on a still-mounting element).
-  // 5s clears it consistently.
-  await page.waitForTimeout(5000);
-  await page.getByRole('button', { name: 'Batch import/export scopes' }).click();
-  await page.waitForTimeout(2500);
+  // fillMonaco waits for the editor to be visible+editable, so the old
+  // fixed 5s "let Monaco mount" pad is no longer load-bearing — a short
+  // settle for the auth page's own render is enough.
+  await page.waitForTimeout(1500);
+  await clickAnyButton(page, [
+    'Batch import/export scopes',
+    'Batch import/export',
+    'Import/Export',
+  ]);
+  await page.waitForTimeout(2000);
   const dialog = page.locator('[role="dialog"]').first();
-  // force-click view-lines: aria-hidden on the layer makes Playwright's
-  // visibility check refuse without `force`, but the click itself works.
-  await dialog.locator('.monaco-editor .view-lines').first().click({ force: true });
-  await page.waitForTimeout(300);
-  await page.keyboard.press('Meta+a');
-  await page.waitForTimeout(200);
-  await page.keyboard.press('Backspace');
-  await page.waitForTimeout(300);
-  await page.evaluate(async (text) => {
-    await navigator.clipboard.writeText(text);
-  }, SCOPES_JSON);
-  await page.waitForTimeout(200);
-  await page.keyboard.press('Meta+v');
-  await page.waitForTimeout(1000);
-  // Quick correctness check: textarea.value should now hold a chunk of
-  // our payload. Empty/short = paste mechanism broke (Feishu UI changed
-  // again, focus lost, etc.) and clicking Next would submit stale data.
-  const taLen = await dialog.locator('.monaco-editor textarea.inputarea').first()
-    .evaluate(el => el.value.length);
-  if (taLen < 200) {
-    throw new Error(
-      `import-scopes: textarea has only ${taLen} chars after paste ` +
-      `(expected thousands). Monaco didn't accept Cmd+V — Feishu UI may ` +
-      `have changed; check stage_import_scopes mechanism.`);
-  }
-  await page.getByRole('button', { name: 'Next, Review New Scopes' }).click();
+  const method = await fillMonaco(page, dialog, SCOPES_JSON);
+  log(`  scopes payload loaded via ${method}`);
+  await clickAnyButton(dialog, ['Next, Review New Scopes', 'Next', 'Review New Scopes']);
   await page.waitForTimeout(2000);
   await page.getByRole('button', { name: 'Add', exact: true }).click();
   await page.waitForTimeout(3000);
@@ -770,14 +813,40 @@ async function stage_publish(page, _ctx, state) {
   log(`  tenant_token swap OK · token=${verify.tenant_access_token.slice(0, 12)}...`);
 }
 
+// Each stage carries enough metadata that, on failure, we can hand a
+// self-contained brief to the agent fallback: what to accomplish
+// (goal), where (url), and which doc section spells out the clicks
+// (doc). `url` is a function of appId because most stages live under
+// /app/<appId>/...; create-app has no appId yet.
 const STAGES = [
-  { id: 'create-app',    fn: stage_create_app,    summary: 'Create custom app, capture appId' },
-  { id: 'add-bot',       fn: stage_add_bot,       summary: 'Add Bot capability' },
-  { id: 'import-scopes', fn: stage_import_scopes, summary: 'Import ~480 permission scopes' },
-  { id: 'data-range',    fn: stage_data_range,    summary: 'Set data access range = All' },
-  { id: 'events',        fn: stage_events,        summary: 'Subscribe message events (persistent connection)' },
-  { id: 'callbacks',     fn: stage_callbacks,     summary: 'Enable card callback' },
-  { id: 'publish',       fn: stage_publish,       summary: 'Create version + publish' },
+  { id: 'create-app',    fn: stage_create_app,    summary: 'Create custom app, capture appId',
+    goal: 'Create an enterprise custom app (name + desc) and capture its App ID from the URL',
+    url: () => 'https://open.feishu.cn/app',
+    doc: 'Stage 1 — create-app' },
+  { id: 'add-bot',       fn: stage_add_bot,       summary: 'Add Bot capability',
+    goal: 'Add the Bot capability to the app so it can send cards / receive messages',
+    url: (id) => `https://open.feishu.cn/app/${id}/capability`,
+    doc: 'Stage 2 — add-bot' },
+  { id: 'import-scopes', fn: stage_import_scopes, summary: 'Import ~480 permission scopes',
+    goal: 'Batch-import the permission scopes from feishu_scopes.json (or at minimum the IM core scopes)',
+    url: (id) => `https://open.feishu.cn/app/${id}/auth`,
+    doc: 'Stage 3 — import-scopes' },
+  { id: 'data-range',    fn: stage_data_range,    summary: 'Set data access range = All',
+    goal: 'Set the data access range to "All"',
+    url: (id) => `https://open.feishu.cn/app/${id}/auth`,
+    doc: 'Stage 4 — data-range' },
+  { id: 'events',        fn: stage_events,        summary: 'Subscribe message events (persistent connection)',
+    goal: 'Set subscription mode to persistent connection and subscribe the message events (im.message.receive_v1)',
+    url: (id) => `https://open.feishu.cn/app/${id}/event`,
+    doc: 'Stage 5 — events' },
+  { id: 'callbacks',     fn: stage_callbacks,     summary: 'Enable card callback',
+    goal: 'Enable the card.action.trigger callback on persistent connection',
+    url: (id) => `https://open.feishu.cn/app/${id}/event`,
+    doc: 'Stage 6 — callbacks' },
+  { id: 'publish',       fn: stage_publish,       summary: 'Create version + publish',
+    goal: 'Create a version and publish it so the app goes live (and capture the App Secret)',
+    url: (id) => `https://open.feishu.cn/app/${id}/version`,
+    doc: 'Stage 7 — publish' },
 ];
 
 const STAGE_IDS = STAGES.map(s => s.id);
@@ -833,6 +902,54 @@ function clearCmd(appName) {
   try { fs.unlinkSync(cmdFilePath(appName)); } catch (e) {}
 }
 
+// --- agent failure handoff ---
+// When a stage's automation breaks (Feishu UI drift), drive doesn't
+// give up — it hands the stage to the agent. The handoff is two
+// artifacts the agent can consume without scraping the log:
+//   .state/<app>.<stage>.fail.png  — full-page screenshot of the
+//                                    failure (agent is multimodal: Read it)
+//   .state/<app>.failure.json      — structured brief: goal, target URL,
+//                                    doc section, cookie file, CDP endpoint
+// The agent attaches to the same browser via CDP (or opens its own with
+// the saved cookies), finishes the stage by hand, then `echo skip`.
+function failureFilePath(appName) {
+  return path.join(STATE_DIR, `${appName}.failure.json`);
+}
+
+function clearFailure(appName) {
+  try { fs.unlinkSync(failureFilePath(appName)); } catch (e) {}
+}
+
+async function writeFailureHandoff(page, state, stage, err) {
+  fs.mkdirSync(STATE_DIR, { recursive: true });
+  const shot = path.join(STATE_DIR, `${state.appName}.${stage.id}.fail.png`);
+  let shotPath = null;
+  try {
+    await page.screenshot({ path: shot, fullPage: true });
+    shotPath = shot;
+  } catch (e) {
+    // fullPage can fail on oversized/detached pages — fall back to viewport
+    try { await page.screenshot({ path: shot }); shotPath = shot; } catch (e2) {}
+  }
+  const currentUrl = (() => { try { return page.url(); } catch (e) { return null; } })();
+  const handoff = {
+    appName: state.appName,
+    appId: state.appId,
+    stage: stage.id,
+    goal: stage.goal,
+    targetUrl: stage.url ? stage.url(state.appId) : null,
+    currentUrl,
+    instructions: `docs/setup_feishu_bot.md → "${stage.doc}"`,
+    cookieFile: COOKIE_FILE,
+    cdpEndpoint: CDP_ENDPOINT,
+    screenshot: shotPath,
+    error: (err.message || '').split('\n').slice(0, 4).join(' '),
+    at: new Date().toISOString(),
+  };
+  try { fs.writeFileSync(failureFilePath(state.appName), JSON.stringify(handoff, null, 2)); } catch (e) {}
+  return handoff;
+}
+
 async function waitForCmd(appName, validCmds = ['next', 'redo', 'quit']) {
   const p = cmdFilePath(appName);
   log(`💤 Waiting for command at ${p}`);
@@ -881,13 +998,20 @@ Drive mode — RECOMMENDED entry point for AI agents:
                   the App Secret, writes it to .state/<name>.json,
                   and exits cleanly. The user only scans QR on first
                   ever run (cookies persist).
-                  Pauses ONLY when a stage fails — then the agent
-                  writes one of:
+                  Pauses ONLY when a stage fails. On failure drive
+                  auto-writes a handoff for the agent:
+                    .state/<name>.<stage>.fail.png  — page screenshot
+                    .state/<name>.failure.json      — goal/url/cookie/cdp
+                  and keeps the browser open on a CDP endpoint
+                  (default http://127.0.0.1:9222, FEISHU_BOT_CDP_PORT).
+                  The agent finishes that one stage — attach to the same
+                  browser via connectOverCDP, or open its own with the
+                  saved cookies — then writes one of:
                     echo skip            > .state/<name>.cmd
                     echo "redo <stage>"  > .state/<name>.cmd
                     echo quit            > .state/<name>.cmd
-                  - skip: agent fixed it manually in the open browser
-                  - redo: drive re-runs that stage
+                  - skip: agent finished the stage (CDP/cookie takeover)
+                  - redo: drive re-runs that stage's automation
                   - quit: close browser and exit
 
 Login only (rarely needed; drive auto-logs in):
@@ -918,7 +1042,15 @@ async function withBrowser(fn) {
     console.error('Error: playwright not installed. Run: npm install && npx playwright install chromium');
     process.exit(1);
   }
-  const browser = await chromium.launch({ headless: false });
+  // --remote-debugging-port exposes a TCP CDP endpoint alongside
+  // Playwright's own pipe, so the agent fallback can attach to this
+  // exact browser (already logged in, parked on the failed page) via
+  // chromium.connectOverCDP(CDP_ENDPOINT).
+  const browser = await chromium.launch({
+    headless: false,
+    args: [`--remote-debugging-port=${CDP_PORT}`],
+  });
+  log(`🔌 CDP endpoint: ${CDP_ENDPOINT} (agent fallback can attach here)`);
   const context = await browser.newContext();
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   try {
@@ -994,13 +1126,22 @@ async function cmd_drive(name, desc) {
       let stageFailed = false;
       try {
         await runStage(page, context, next, state);
+        clearFailure(name);  // succeeded → drop any stale handoff
       } catch (e) {
         stageFailed = true;
+        const h = await writeFailureHandoff(page, state, next, e);
         log(`❌ Stage [${next.id}] failed: ${e.message.split('\n')[0]}`);
-        log(`   Browser stays open. Fix the page manually then send:`);
-        log(`     'skip'        — you completed [${next.id}] by hand, mark done`);
-        log(`     'redo ${next.id}' — drive re-tries the same stage`);
-        log(`     'quit'        — close browser and exit`);
+        log(`   📸 screenshot: ${h.screenshot || '(capture failed)'}`);
+        log(`   📋 handoff:    ${failureFilePath(name)}`);
+        log(`   🤖 AGENT FALLBACK — finish THIS one stage, then 'skip':`);
+        log(`      1. Read the screenshot to see the live page state`);
+        log(`      2. Attach to THIS browser: chromium.connectOverCDP("${h.cdpEndpoint}")`);
+        log(`         (or open your own browser + load ${path.basename(COOKIE_FILE)})`);
+        log(`      3. Goal: ${h.goal}`);
+        log(`         Page: ${h.targetUrl || h.currentUrl}`);
+        log(`         Steps: ${h.instructions}`);
+        log(`      4. echo skip > ${cmdFilePath(name)}`);
+        log(`   (or 'redo ${next.id}' to retry automation · 'quit' to stop)`);
       }
       // Happy path: stage just succeeded → loop straight into the next
       // stage. Only block on a command file when something failed (or
@@ -1019,7 +1160,8 @@ async function cmd_drive(name, desc) {
         }
         state.lastError = null;
         saveState(state);
-        log(`⏭  Marked [${next.id}] as done (manual takeover).`);
+        clearFailure(name);
+        log(`⏭  Marked [${next.id}] as done (agent takeover).`);
         continue;
       }
       if (cmd.startsWith('redo ')) {
