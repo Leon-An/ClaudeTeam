@@ -1,12 +1,21 @@
 """Tests for runtime/config.py — team.json + runtime_config.json loading."""
 from __future__ import annotations
 
+import sys
+
 from helpers import env_patch, isolated_env
 
 from claudeteam.agents import adapter_for_agent
 from claudeteam.agents.codex_cli import CodexCliAdapter
 from claudeteam.agents.kimi_code import KimiCodeAdapter
 from claudeteam.runtime import config
+
+# 3.10 has no stdlib tomllib (added in 3.11); mirror the product code's fallback
+# so the round-trip-via-real-parse assertions below work on the 3.10 CI leg too.
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
 
 
 def _team_env(team_data, runtime_data=None):
@@ -497,7 +506,6 @@ def test_toml_remove_block_preserves_next_sections_comment():
     assert "# kimi: the moonshot worker" in out
     assert "[team.agents.kimi]" in out
     # still valid + parses to just kimi
-    import tomllib
     assert list(tomllib.loads(out)["team"]["agents"]) == ["kimi"]
 
 
@@ -514,7 +522,6 @@ def test_toml_format_value_escapes_control_chars_to_valid_toml():
     """REGRESSION: a multi-line value must serialize to a VALID
     single-line basic string (escaped newline), not a raw newline that makes
     the whole file unparseable."""
-    import tomllib
     out = config._toml_format_value("line1\nline2\twith tab\n")
     assert "\n" not in out  # no raw newline in the emitted literal
     assert out == '"line1\\nline2\\twith tab\\n"'
@@ -566,7 +573,6 @@ def test_fire_hire_roster_block_roundtrip_is_field_faithful():
     """Manager's requested assertion: after a fire(remove)→hire(restore) the
     agent's roster block is field-for-field identical to the archived one —
     including a multi-line notes value that broke the dict-reserialize path."""
-    import tomllib
     with _team_env({"session": "S", "agents": {}}) as tmp:
         _write_toml(tmp, _MULTILINE_TOML)
         with env_patch(CLAUDETEAM_CONFIG_FILE=str(tmp / "claudeteam.toml")):
