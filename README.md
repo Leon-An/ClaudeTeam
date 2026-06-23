@@ -125,37 +125,40 @@ container or via bind-mount).
 
 ## Quick start
 
-> **First**: create a Feishu app + add the bot to your group
-> ([see below](#feishu-bot-setup)). You'll need the `App ID`,
-> `App Secret`, and the `chat_id` of the group the bot is in.
+The only multi-step part is Feishu — hand it to a human once. You need three
+values: **App ID**, **App Secret**, and the **chat_id** of the group the bot
+is in. No app yet? → [Feishu bot setup](#feishu-bot-setup).
+
+Then run these top to bottom — no branching, nothing to `export`:
 
 ```bash
-git clone https://github.com/zylMozart/ClaudeTeam.git
-cd ClaudeTeam
-
-# Shell env (per terminal — add to ~/.zshrc to persist)
-export CLAUDETEAM_STATE_DIR="$PWD/state"
-export LARK_CLI_NO_PROXY=1
-export CLAUDETEAM_LARK_SEND_AS=bot
-
-# Install
-python3 -m venv .venv && source .venv/bin/activate
+# 1 — code + the `claudeteam` CLI (zero Python deps)
+git clone https://github.com/zylMozart/ClaudeTeam.git && cd ClaudeTeam
+python3 -m venv .venv && source .venv/bin/activate     # Python 3.10+
 pip install -e .
 
-# Config
-claudeteam init                  # writes claudeteam.toml
-$EDITOR claudeteam.toml          # set chat_id + agents
-claudeteam install-hooks         # claude-code slash commands
+# 2 — external tools on PATH (none are pip-installable):
+#       tmux · node + npx · lark-cli (npm i -g @larksuite/cli)
+#       · at least one agent CLI: claude / codex / kimi / gemini / qwen
 
-# Launch
+# 3 — config: generate, then set chat_id (+ App ID/Secret); agents have defaults
+claudeteam init                  # writes claudeteam.toml (send_as=bot, no_proxy=true preset)
+$EDITOR claudeteam.toml          # fill in chat_id
+claudeteam install-hooks         # claude-code slash hooks — run BEFORE `up`
+
+# 4 — launch + verify
 claudeteam up                    # tmux + agents + router + watchdog
-claudeteam health                # green/yellow/red snapshot
+claudeteam health                # expect all green
 ```
 
-Chat with the team in your Feishu group. Manager handles dispatch.
+Then in your Feishu group: send `/health`, then `@manager 你好` — manager
+replies in ~30 s. If `health` is red →
+[docs/DEPLOYMENT.md → Common failures](docs/DEPLOYMENT.md#common-failures).
 
-For detailed setup, Docker, multi-team isolation, and troubleshooting
-see **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
+> **No per-shell env vars needed.** `claudeteam init` writes `send_as` /
+> `no_proxy` into `claudeteam.toml`, and state defaults to `~/.claudeteam`.
+> Docker, multi-team isolation, and the full reference live in
+> **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
 
 ---
 

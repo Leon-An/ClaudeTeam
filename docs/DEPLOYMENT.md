@@ -144,35 +144,36 @@ gory details.
 
 ---
 
-## Host deploy (5 steps)
+## Host deploy (4 steps)
+
+No per-shell env exports — `claudeteam init` writes `[feishu] send_as = "bot"`
++ `no_proxy = true` into the toml, and state defaults to `~/.claudeteam`.
 
 ```bash
-# 1. shell env (per terminal — add to ~/.zshrc / ~/.bashrc to persist)
-cd /path/to/ClaudeTeam
-export CLAUDETEAM_STATE_DIR="$PWD/state"   # else state goes to ~/.claudeteam
-export LARK_CLI_NO_PROXY=1                 # required if HTTPS_PROXY is set
-export CLAUDETEAM_LARK_SEND_AS=bot         # bot identity for headless smoke;
-                                           # without it `say` defaults to user OAuth
-
-# 2. install (editable, in a venv — PEP 668 means no bare pip on macOS Homebrew)
+# 1. install (editable, in a venv — PEP 668 means no bare pip on macOS Homebrew)
 #    macOS note: /usr/bin/python3 is 3.9.6 — too old. Use brew/pyenv:
 #      brew install python@3.12 && /opt/homebrew/bin/python3.12 -m venv .venv
 #    Linux: python3 from your distro is usually fine if it's ≥3.10.
+cd /path/to/ClaudeTeam
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
 
-# 3. bootstrap config (writes claudeteam.toml in cwd)
+# 2. bootstrap config (writes claudeteam.toml in cwd, send_as/no_proxy preset)
 claudeteam init
-$EDITOR claudeteam.toml                    # set chat_id + add agents
+$EDITOR claudeteam.toml                    # set chat_id (+ App ID/Secret); agents have defaults
 
-# 4. install slash hooks BEFORE up (claude-code caches them at pane spawn)
+# 3. install slash hooks BEFORE up (claude-code caches them at pane spawn)
 claudeteam install-hooks                   # writes .claude/commands/<name>.md
 
-# 5. bring up the team
+# 4. bring up the team
 claudeteam up                              # tmux session + agents + router + watchdog
 claudeteam health                          # verify everything green/yellow
 ```
+
+> **Optional env** (rarely needed): `export CLAUDETEAM_STATE_DIR="$PWD/state"`
+> to keep state in the repo instead of `~/.claudeteam`; `export LARK_CLI_NO_PROXY=1`
+> only if an `HTTPS_PROXY` is set and you removed `no_proxy=true` from the toml.
 
 **Tear down:**
 
