@@ -65,13 +65,18 @@ def test_every_adapter_implements_required_methods():
 
 
 def test_default_submit_keys_are_enter_variants():
-    # base default lists Enter / C-m / C-j; ClaudeCode keeps it, Codex/Kimi prepend M-Enter
+    # base default lists Enter / C-m / C-j; ClaudeCode keeps it.
     cc = ClaudeCodeAdapter().submit_keys()
     assert cc[0] == "Enter"
-    for adapter in (CodexCliAdapter(), KimiCodeAdapter()):
-        keys = adapter.submit_keys()
-        assert keys[0] == "M-Enter"
-        assert "Enter" in keys
+    # Codex submits on plain Enter (M-Enter is unreliable under tmux; C-j is a
+    # newline, never a submit) → it leads with Enter and drops C-j.
+    codex = CodexCliAdapter().submit_keys()
+    assert codex[0] == "Enter"
+    assert "C-j" not in codex
+    # Kimi's TUI still commits the buffer on M-Enter.
+    kimi = KimiCodeAdapter().submit_keys()
+    assert kimi[0] == "M-Enter"
+    assert "Enter" in kimi
 
 
 def test_interrupt_keys_are_uniform_escape_across_every_cli():

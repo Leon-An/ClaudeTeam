@@ -106,6 +106,30 @@ def wait_until_ready(target: tmux.Target, adapter: CliAdapter, *,
     )
 
 
+def _wait_settled(target: tmux.Target, *, capture: Callable, sleep: Callable,
+                  max_checks: int = 6, interval_s: float = 0.4) -> bool:
+    """Block until the pane reads identical across one `interval_s` gap (the
+    CLI finished painting / animating its startup banner), or `max_checks`
+    elapse. Returns True if it settled, False if it timed out still moving.
+
+    Why this exists: codex paints its startup banner TWICE before the input
+    box is interactive. If we inject during that animation, two things break —
+    the paste lands in a not-yet-ready composer, AND the post-inject motion
+    check in `inject_and_confirm` reads the still-running banner redraw as
+    "the CLI is streaming a reply = submitted", so the re-nudge never fires
+    and the prompt sits unsubmitted (the "♥ never / initializing" bug).
+    Bounded so a CLI that never goes fully quiet still proceeds (no worse than
+    the pre-fix single inject)."""
+    prev = capture(target, lines=40)
+    for _ in range(max(1, max_checks)):
+        sleep(interval_s)
+        cur = capture(target, lines=40)
+        if cur == prev:
+            return True
+        prev = cur
+    return False
+
+
 def inject_and_confirm(target: tmux.Target, adapter: CliAdapter, text: str, *,
                        attempts: int = 3, settle_s: float = 1.0,
                        inject: Callable | None = None,
@@ -139,6 +163,13 @@ def inject_and_confirm(target: tmux.Target, adapter: CliAdapter, text: str, *,
     send_keys = send_keys or tmux.send_keys
     sleep = sleep or time.sleep
     submit_keys = adapter.submit_keys() or ["Enter"]
+
+    # Let the pane finish painting before injecting. Otherwise a CLI still
+    # animating its startup banner (codex draws it twice) gets the paste into a
+    # not-yet-interactive composer AND fools the motion check below into reading
+    # the redraw as "submitted" — so the re-nudge never fires and the prompt
+    # sits unsubmitted. Bounded; a never-quiet pane still proceeds.
+    _wait_settled(target, capture=capture, sleep=sleep)
 
     inject(target, text, submit_keys=submit_keys)
     # Some CLIs (kimi) read a re-sent submit key as an interrupt — they opt

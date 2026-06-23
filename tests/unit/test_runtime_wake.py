@@ -62,7 +62,8 @@ def test_inject_and_confirm_returns_when_pane_is_moving():
         tmux.Target("S", "w"), _ClaudeFake(), "hello",
         inject=lambda t, text, *, submit_keys=None: injects.append(text) or True,
         send_keys=lambda t, *k: sends.append(k),
-        capture=_capturer(["frame-a", "frame-b"]),   # changed → moving → submitted
+        # settle sees a static pane first, THEN the confirm sees motion
+        capture=_capturer(["calm", "calm", "frame-a", "frame-b"]),
         sleep=lambda s: None,
     )
     assert ok is True
@@ -78,12 +79,36 @@ def test_inject_and_confirm_renudges_then_confirms_motion():
         tmux.Target("S", "w"), _ClaudeFake(), "hi",
         inject=lambda t, text, *, submit_keys=None: True,
         send_keys=lambda t, *k: sends.append(k),
-        # 1st check: static (unsubmitted); after re-nudge: moving
-        capture=_capturer(["idle", "idle", "resp-1", "resp-2"]),
+        # settle (calm, calm); 1st check: static (unsubmitted); after re-nudge: moving
+        capture=_capturer(["calm", "calm", "idle", "idle", "resp-1", "resp-2"]),
         sleep=lambda s: None,
     )
     assert ok is True
     assert sends == [("Enter",)]   # re-nudged once with submit_keys[0]
+
+
+def test_inject_and_confirm_not_fooled_by_startup_banner_motion():
+    """Regression (codex first-wake): a pane still animating its startup banner
+    must NOT be read as 'submitted'. The pre-inject settle absorbs the banner
+    motion; the post-inject static then correctly triggers a re-nudge — instead
+    of the banner redraw faking a successful submit and leaving the prompt
+    unsent (the '♥ never / initializing' bug)."""
+    sends = []
+    captures = [
+        "banner-1", "banner-2",   # settle: banner still animating...
+        "stable",   "stable",     # settle: quiesced → safe to inject
+        "stable",   "stable",     # post-inject confirm: static → submit was eaten
+        "resp-1",   "resp-2",     # after the re-nudge: moving = submitted
+    ]
+    ok = wake.inject_and_confirm(
+        tmux.Target("S", "w"), _ClaudeFake(), "hi",
+        inject=lambda t, text, *, submit_keys=None: True,
+        send_keys=lambda t, *k: sends.append(k),
+        capture=_capturer(captures),
+        sleep=lambda s: None,
+    )
+    assert ok is True
+    assert sends == [("Enter",)]   # re-nudged once — not fooled by banner motion
 
 
 def test_inject_and_confirm_optout_adapter_injects_once_no_renudge():
