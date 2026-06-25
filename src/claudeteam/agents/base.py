@@ -45,6 +45,19 @@ class AuthSlots:
     login_token_env: str | None = None
 
 
+# Shared auth for the OpenAI-compatible workers (everything except claude-code /
+# codex / kimi). They take a custom API key via OPENAI_API_KEY — the `api_key`
+# tier (tier 3 of agent_auth's token > login > api_key). The *endpoint* itself is
+# NOT a credential and is read from `$OPENAI_BASE_URL` by the adapter, never
+# hardcoded. Returning this from `auth_slots()` makes the key flow through
+# runtime.agent_auth (resolved per-agent, conflicting vars blanked, sourced from
+# a private file) — the same path claude/codex use — instead of being baked into
+# the adapter. The operator points OPENAI_BASE_URL / OPENAI_API_KEY at whatever
+# provider they use (DeepSeek, OpenAI, a local server, …).
+OPENAI_COMPAT_AUTH = AuthSlots(
+    token_env=None, api_key_envs=("OPENAI_API_KEY",), login_credfile=None)
+
+
 class CliAdapter(ABC):
     @abstractmethod
     def spawn_cmd(self, agent: str, model: str) -> str:
