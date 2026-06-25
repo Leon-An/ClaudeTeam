@@ -176,15 +176,21 @@ def test_start_propagates_state_dir_into_pane_env():
     """REGRESSION: worker_cc's \`claudeteam say\` wrote to
     ~/.claudeteam/facts/logs.jsonl instead of the project state dir,
     because tmux send-keys spawned the CLI in a fresh shell that didn't
-    inherit CLAUDETEAM_STATE_DIR. Spawn line must prepend it."""
+    inherit CLAUDETEAM_STATE_DIR. The pane must SOURCE an env file that
+    sets it — not an inline KEY=value prefix, which leaked secrets into
+    the scrollback + the agent's context."""
     team = {"session": "T", "agents": {"w_cc": {"cli": "claude-code"}}}
     with _isolated_team(team) as tmp, _fake_tmux() as fake:
         run_cli(["start"])
         cmd = next(c[2] for c in fake["calls"] if c[0] == "spawn_agent")
-        # State dir from isolated_env points under tmp/state
-        assert "CLAUDETEAM_STATE_DIR=" in cmd
-        assert str(tmp / "state") in cmd
-        # IS_SANDBOX=1 still there (claude-code adapter prefix)
+        # env is sourced from a private file, not typed in as KEY=value
+        assert "CLAUDETEAM_STATE_DIR=" not in cmd
+        envfile = tmp / "state" / "spawn-env" / "w_cc.sh"
+        assert cmd.startswith(". ") and str(envfile) in cmd
+        body = envfile.read_text()
+        assert "CLAUDETEAM_STATE_DIR=" in body
+        assert str(tmp / "state") in body
+        # IS_SANDBOX=1 still there (claude-code adapter's own spawn_cmd)
         assert "IS_SANDBOX=1" in cmd
 
 

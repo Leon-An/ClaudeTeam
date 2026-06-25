@@ -19,13 +19,16 @@ Returns one of five outcome strings (callers render differently):
                   agent, keeps going for the rest of the team rather
                   than aborting the whole `claudeteam start`.
 
-Also home for `pane_env_prefix()` — the shell env-var prefix prepended
-to every spawn_cmd so worker agents inherit `CLAUDETEAM_STATE_DIR` and
-the Feishu env into their `claudeteam say` shell-outs.
+Also home for `build_spawn_command()` — wraps an adapter's spawn_cmd so the
+pane inherits `CLAUDETEAM_STATE_DIR`, the Feishu env, and the agent's
+credential by SOURCING a private mode-0600 file (written by `pane_env_prefix`
++ agent_auth), instead of typing `KEY=secret` into the pane where it would
+leak into the scrollback and the agent's own context.
 """
 from __future__ import annotations
 
 import json
+import os
 import shlex
 from pathlib import Path
 
@@ -54,6 +57,11 @@ _PROPAGATED_ENV = (
     "CLAUDETEAM_TEAM_FILE",
     "CLAUDETEAM_RUNTIME_CONFIG",
     "CLAUDETEAM_DEFAULT_MODEL",
+    # The OpenAI-compatible endpoint the worker CLIs point at (DeepSeek/OpenAI/
+    # a local server/…). Deployment config, not a credential, so it rides here;
+    # the per-agent API KEY goes through agent_auth instead. Propagated so panes
+    # see it reliably even off a stale tmux-server env.
+    "OPENAI_BASE_URL",
     "FEISHU_APP_ID",
     "FEISHU_APP_SECRET",
     "LARKSUITE_CLI_APP_ID",
@@ -360,6 +368,55 @@ def pane_env_prefix() -> str:
     return " ".join(parts)
 
 
+def _write_spawn_env_file(agent: str, assignments: str) -> Path | None:
+    """Write `assignments` (a `K=v K2=v2` shell-assignment string, secrets
+    and all) to a private mode-0600 file as a single `export …` line, so the
+    pane can `source` it instead of having the secrets typed in via send-keys.
+
+    Returns the file path, or None if the write fails — caller falls back to
+    the inline prefix so a disk hiccup never blocks a spawn.
+    """
+    path = paths.state_dir() / "spawn-env" / f"{agent}.sh"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # os.open with 0o600 so the secret file is never group/world-readable,
+        # not even for the window between create and a follow-up chmod.
+        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(f"export {assignments}\n")
+        os.chmod(path, 0o600)  # O_CREAT honours umask; re-assert if pre-existing
+        return path
+    except OSError:
+        return None
+
+
+def build_spawn_command(agent: str, adapter, spawn_cmd: str) -> str:
+    """Wrap `spawn_cmd` so the pane gets its env (per-agent credential +
+    propagated Feishu/state vars) by SOURCING a private mode-0600 file the
+    parent writes — never by typing `KEY=secret` into the pane.
+
+    The old `f"{spawn_env_prefix} {pane_env_prefix} {spawn_cmd}"` form was sent
+    verbatim through tmux send-keys, so the agent's OPENAI_API_KEY and the
+    deployment's FEISHU_APP_SECRET landed in the pane scrollback AND in the
+    agent's own LLM context. Sourcing keeps secrets off the wire. Bonus: the
+    sourced vars are `export`ed for the WHOLE command, so adapters that read
+    `$OPENAI_API_KEY` in a later `&&` clause (codewhale, hermes, trae) see it —
+    an inline `K=v cmd1 && cmd2` prefix only set K for cmd1.
+
+    Falls back to the inline prefix if the file can't be written (degraded but
+    never blocks a spawn).
+    """
+    from claudeteam.runtime import agent_auth
+    assignments = (f"{agent_auth.spawn_env_prefix(agent, adapter)} "
+                   f"{pane_env_prefix()}").strip()
+    if not assignments:
+        return spawn_cmd
+    envfile = _write_spawn_env_file(agent, assignments)
+    if envfile is None:
+        return f"{assignments} {spawn_cmd}"
+    return f". {shlex.quote(str(envfile))} && {spawn_cmd}"
+
+
 # Outcome strings returned by provision_pane. Callers print/log differently
 # (start uses loop-style "  → spawned", hire uses "✅ hired") so the helper
 # stays I/O-free and lets the caller render.
@@ -380,7 +437,8 @@ def provision_pane(agent: str, target: tmux.Target) -> str:
       1. Render + persist agent's identity.md (`agents/<name>/identity.md`).
       2. If agent is `lazy` in team.json: set status 待命, return LAZY.
       3. For codex CLI: ensure cwd is trusted in ~/.codex/config.toml.
-      4. Spawn the adapter's CLI in the pane (with pane_env_prefix).
+      4. Spawn the adapter's CLI in the pane (env sourced via
+         build_spawn_command, not typed in as a visible prefix).
       5. Wait up to 20s for the adapter's ready marker to appear.
       6. Inject the identity init prompt so the agent reads identity.md
          and reports for duty.
@@ -438,9 +496,7 @@ def provision_pane(agent: str, target: tmux.Target) -> str:
         import sys
         print(f"  ⚠️ {agent}: {e}", file=sys.stderr)
         return CONFIG_ERROR
-    from claudeteam.runtime import agent_auth
-    cmd = (f"{agent_auth.spawn_env_prefix(agent, adapter)} "
-           f"{pane_env_prefix()} {adapter.spawn_cmd(agent, model)}")
+    cmd = build_spawn_command(agent, adapter, adapter.spawn_cmd(agent, model))
     if not tmux.spawn_agent(target, cmd):
         return SPAWN_FAILED
     # 60s ready timeout (was 20s): fresh container claude panes go
