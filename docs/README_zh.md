@@ -76,7 +76,7 @@
 - **单接口路由** — 群里任何消息都只进 manager；员工不会直接收老板原话。Manager 是唯一调度入口。
 - **单一配置文件** — `claudeteam.toml`（Cargo 风格，可写注释），chat_id / agents / 模型 / 卡片色 / publish 过滤都在一起。
 - **`[chat.publish]` 过滤** — 按 sender→receiver 维度控可见性，静默噪声但保审计。
-- **多 CLI 混编** — Claude Code / Codex CLI / Kimi Code / Gemini CLI / Qwen Code 可以同队混跑。
+- **多 CLI 混编** — Claude Code / Codex / Kimi / Gemini / Qwen，外加七个 OpenAI 兼容员工（opencode / openclaw / pi / codewhale / hermes / trae / minimax）可以同队混跑。
 - **持久 memory** — agent 记忆扛得住 `/clear` 和 pane 重启，wake prompt 自动注入。
 - **看门狗** — daemon 崩了自动重生，进 cooldown 时飞书发红卡片报警。
 - **群里斜杠命令** — `/help /team /health /usage /tmux /send /compact /stop /clear /task`，外加运维三条 `/restart /shutdown /login`。
@@ -143,6 +143,17 @@ claudeteam health                # 查 green/yellow/red
 | Kimi Code | `kimi-code` | `uv tool install kimi-cli` |
 | Gemini CLI | `gemini-cli` | `npm i -g @google/gemini-cli` |
 | Qwen Code | `qwen-code` | `npm i -g qwen-code` |
+| MiniMax Mini-Agent | `minimax` | `uv tool install "git+https://github.com/MiniMax-AI/Mini-Agent.git"` |
+| opencode | `opencode` | `npm i -g opencode-ai` |
+| CodeWhale | `codewhale` | `npm i -g codewhale` |
+| OpenClaw | `openclaw` | `npm i -g openclaw` · 需 Node ≥ 22 |
+| Trae | `trae` | `uv tool install --with docker --with pexpect "git+https://github.com/bytedance/trae-agent.git"` |
+| Hermes | `hermes` | `curl -fsSL https://hermes-agent.nousresearch.com/install.sh \| bash -s -- --skip-setup` |
+| Pi | `pi` | `npm i -g @mariozechner/pi-coding-agent` |
+
+后七个是 **OpenAI 兼容**（BYOK）：用 `OPENAI_BASE_URL` + `OPENAI_API_KEY` 指到任意端点，
+API key 走和其它一样的 `token > login > api_key` 优先级。详见
+[DEPLOYMENT.md](DEPLOYMENT.md) 的 *Model backend per agent*。
 
 `claudeteam.toml` 例：
 

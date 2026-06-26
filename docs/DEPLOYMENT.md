@@ -303,6 +303,7 @@ session = "ClaudeTeam"                        # tmux session name
 
 [team.agents.manager]
 cli = "claude-code"                           # claude-code | codex-cli | gemini-cli | kimi-code | qwen-code
+                                              #   | minimax | opencode | codewhale | openclaw | trae | hermes | pi
 role = "团队主管"                             # rendered into identity.md
 model = "opus"
 specialty  = ["调度", "审阅"]                 # optional — manager sees this in dispatch prompt

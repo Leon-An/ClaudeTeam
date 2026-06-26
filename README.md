@@ -91,8 +91,9 @@ on the other end, not a bot wall.
   one place.
 - **`[chat.publish]` filter** — sender→receiver visibility per channel.
   Silence noisy traffic without losing the audit log.
-- **Multi-CLI** — Claude Code, Codex CLI, Kimi Code, Gemini CLI,
-  Qwen Code can all run in the same team.
+- **Multi-CLI** — Claude Code, Codex, Kimi, Gemini, Qwen, plus seven
+  OpenAI-compatible workers (opencode, openclaw, pi, codewhale, hermes,
+  trae, minimax) can all run in the same team.
 - **Durable memory** — each agent's memory survives `/clear` and pane
   respawn, auto-injected into the wake prompt.
 - **Per-agent space + shared brain** — every agent gets its own
@@ -115,7 +116,7 @@ on the other end, not a bot wall.
 | Python | 3.10+ | `pyproject.toml` pins it |
 | tmux | any | one window per agent |
 | Node + npx | 18+ | `lark-cli` is a node binary |
-| At least one CLI | latest | `claude` / `codex` / `kimi` / `gemini` / `qwen` |
+| At least one CLI | latest | `claude` / `codex` / `pi` / `opencode` / … — see the adapter table |
 | Feishu enterprise | — | custom app with `im:message` + WebSocket subscription |
 
 For Docker: just Docker 20.10+ and Compose v2 (CLIs come with the
@@ -139,7 +140,7 @@ pip install -e .
 
 # 2 — external tools on PATH (none are pip-installable):
 #       tmux · node + npx · lark-cli (npm i -g @larksuite/cli)
-#       · at least one agent CLI: claude / codex / kimi / gemini / qwen
+#       · at least one agent CLI: claude / codex / pi / opencode / … (see README adapter table)
 
 # 3 — config: generate, then set chat_id (+ App ID/Secret); agents have defaults
 claudeteam init                  # writes claudeteam.toml (send_as=bot, no_proxy=true preset)
@@ -173,6 +174,18 @@ Different agents can run different CLIs in the same team:
 | Kimi Code | `kimi-code` | `uv tool install kimi-cli` |
 | Gemini CLI | `gemini-cli` | `npm i -g @google/gemini-cli` |
 | Qwen Code | `qwen-code` | `npm i -g qwen-code` |
+| MiniMax Mini-Agent | `minimax` | `uv tool install "git+https://github.com/MiniMax-AI/Mini-Agent.git"` |
+| opencode | `opencode` | `npm i -g opencode-ai` |
+| CodeWhale | `codewhale` | `npm i -g codewhale` |
+| OpenClaw | `openclaw` | `npm i -g openclaw` · needs Node ≥ 22 |
+| Trae | `trae` | `uv tool install --with docker --with pexpect "git+https://github.com/bytedance/trae-agent.git"` |
+| Hermes | `hermes` | `curl -fsSL https://hermes-agent.nousresearch.com/install.sh \| bash -s -- --skip-setup` |
+| Pi | `pi` | `npm i -g @mariozechner/pi-coding-agent` |
+
+The last seven are **OpenAI-compatible** (BYOK) — point them at any endpoint with
+`OPENAI_BASE_URL` + `OPENAI_API_KEY`; the key resolves through the same
+`token > login > api_key` priority as the others. See
+[DEPLOYMENT.md](docs/DEPLOYMENT.md) → *Model backend per agent*.
 
 In `claudeteam.toml`:
 
