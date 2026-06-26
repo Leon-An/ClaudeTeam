@@ -12,10 +12,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from helpers import attr_patch, env_patch, isolated_env, tmux_patch
-from claudeteam.runtime import lifecycle, tmux, wake
+from claudeteam.runtime import lifecycle, paths, tmux, wake
 from claudeteam.runtime.lifecycle import (
     LAZY, READY, READY_NO_INIT, SPAWN_FAILED, CONFIG_ERROR,
-    pane_env_prefix, provision_pane,
+    build_spawn_command, pane_env_prefix, provision_pane,
 )
 from claudeteam.store import local_facts
 
@@ -133,7 +133,10 @@ def test_provision_ready_spawns_then_injects_init_prompt():
         assert snap["status"] == "进行中"
 
 
-def test_provision_ready_pane_env_prefix_baked_into_spawn_cmd():
+def test_provision_sources_env_from_file_never_inline():
+    """The spawn command sent to the pane must SOURCE the env file, not
+    carry `KEY=value` inline — otherwise secrets (FEISHU_APP_SECRET,
+    OPENAI_API_KEY) end up in the pane scrollback + the agent's context."""
     team = {"agents": {"a": {"cli": "claude-code"}}}
     spawn_calls = []
     with isolated_env(team=team), tmux_patch(
@@ -141,10 +144,40 @@ def test_provision_ready_pane_env_prefix_baked_into_spawn_cmd():
             inject=lambda *a, **kw: True), \
             attr_patch(wake, wait_until_ready=lambda *a, **kw: True):
         provision_pane("a", tmux.Target("S", "a"))
-    cmd = spawn_calls[0][1]
-    assert "CLAUDETEAM_STATE_DIR=" in cmd
-    # Adapter contributed the actual CLI spawn after the env prefix
-    assert "claude" in cmd
+        cmd = spawn_calls[0][1]
+        # env is sourced, NOT a visible KEY=value prefix
+        assert "CLAUDETEAM_STATE_DIR=" not in cmd
+        assert cmd.startswith(". ") and "spawn-env/a.sh" in cmd
+        assert "claude" in cmd  # adapter's real CLI spawn follows
+        # the actual env lives in a private file, off the wire
+        envfile = paths.state_dir() / "spawn-env" / "a.sh"
+        assert "CLAUDETEAM_STATE_DIR=" in envfile.read_text()
+
+
+def test_build_spawn_command_keeps_secrets_off_the_wire():
+    """build_spawn_command must keep the agent credential out of the
+    returned command string and write it to a mode-0600 file instead."""
+    import stat
+    from claudeteam.agents.base import AuthSlots
+
+    class _ApiKeyAdapter:
+        def auth_slots(self):
+            return AuthSlots(token_env=None,
+                             api_key_envs=("OPENAI_API_KEY",),
+                             login_credfile=None)
+
+    secret = "sk-DEADBEEF-not-a-real-key"
+    with isolated_env(team={"agents": {"w": {"cli": "x"}}}), \
+            env_patch(OPENAI_API_KEY=secret, FEISHU_APP_SECRET="feishu-shh"):
+        cmd = build_spawn_command("w", _ApiKeyAdapter(), "mycli --go")
+        assert secret not in cmd            # credential never inline
+        assert "feishu-shh" not in cmd      # Feishu secret never inline
+        assert cmd.startswith(". ") and cmd.endswith("&& mycli --go")
+        envfile = paths.state_dir() / "spawn-env" / "w.sh"
+        body = envfile.read_text()
+        assert secret in body and "feishu-shh" in body
+        mode = stat.S_IMODE(envfile.stat().st_mode)
+        assert mode == 0o600, oct(mode)     # not group/world readable
 
 
 # ── provision_pane: READY_NO_INIT ─────────────────────────────────
@@ -448,7 +481,10 @@ def _operator_cred(tmp: Path, rel: str, body: str) -> Path:
     return oper
 
 
-def test_seed_copies_codex_oauth_into_isolated_home():
+def test_seed_symlinks_codex_oauth_into_isolated_home():
+    """The agent's isolated CODEX_HOME gets a SYMLINK to the operator's
+    auth.json (not a copy), so an OAuth token refresh on the one shared file
+    propagates to every agent instead of drifting per agent."""
     from claudeteam.agents import claude_code
     team = {"agents": {"worker_codex": {"cli": "codex-cli"}}}
     with isolated_env(team=team) as tmp:
@@ -456,7 +492,11 @@ def test_seed_copies_codex_oauth_into_isolated_home():
         with env_patch(HOME=str(oper)):
             lifecycle._seed_cli_credentials("worker_codex", "codex-cli")
         dst = Path(claude_code.agent_home("worker_codex")) / ".codex" / "auth.json"
+        assert dst.is_symlink(), "expected a symlink, not a copy"
         assert dst.read_text() == '{"tokens":"oauth"}'
+        # a refresh on the shared file is seen through the link (the whole point)
+        (oper / ".codex" / "auth.json").write_text('{"tokens":"refreshed"}')
+        assert dst.read_text() == '{"tokens":"refreshed"}'
 
 
 def test_seed_resolves_package_name_alias():

@@ -21,6 +21,13 @@ def test_registry_lists_known_clis_plus_kimi_and_qwen_aliases():
         "claude-code", "codex-cli", "gemini-cli",
         "kimi-code", "kimi-cli",
         "qwen-code", "qwen-cli",
+        "minimax", "mini-agent",
+        "opencode",
+        "codewhale", "code-whale",
+        "openclaw",
+        "trae", "trae-cli",
+        "hermes",
+        "pi", "pi-cli",
     }
 
 

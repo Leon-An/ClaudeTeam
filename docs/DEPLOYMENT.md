@@ -328,6 +328,49 @@ See `src/claudeteam/runtime/tunables.py` for the cascade.
 
 ---
 
+## Model backend per agent (credentials + endpoint)
+
+The adapters are **provider-agnostic** — nothing about DeepSeek/OpenAI/etc. is
+baked into the code. You choose the backend through env + config:
+
+- **Credential** is resolved by `runtime/agent_auth` with a fixed priority:
+  **long-term token > interactive login > API key** (a higher one present
+  overrides the lower). Secrets live in a gitignored env file
+  (`$CLAUDETEAM_SECRETS_FILE`, default `<state_dir>/.env`) — or the process env
+  — never in `claudeteam.toml`. Per-agent overrides use `<AGENT>_<VAR>`
+  (e.g. `WORKER_PI_OPENAI_API_KEY`).
+  - **claude-code / codex / kimi**: their own token/login/api_key vars.
+  - **All other CLIs** (minimax, opencode, codewhale, openclaw, trae, hermes,
+    pi): the **API-key** tier — set `OPENAI_API_KEY`.
+- **Endpoint**: set `OPENAI_BASE_URL` to your OpenAI-compatible endpoint
+  (e.g. `https://api.openai.com/v1`, a self-hosted vLLM/Ollama URL, or
+  `https://api.deepseek.com/v1`). **Model**: the `model` field in each agent's
+  `[team.agents.<name>]`.
+- **Provider name** (only where a CLI needs one that selects an
+  OpenAI-compatible *chat/completions* client): override per CLI —
+  `CLAUDETEAM_TRAE_PROVIDER` (default `openrouter`),
+  `CLAUDETEAM_PI_PROVIDER` / `CLAUDETEAM_CODEWHALE_PROVIDER` (default `openai`).
+- The **claude-code manager on a non-Anthropic backend** uses the
+  Anthropic-compatible vars instead: `ANTHROPIC_BASE_URL` +
+  `ANTHROPIC_AUTH_TOKEN` (+ `ANTHROPIC_MODEL` / `ANTHROPIC_DEFAULT_*_MODEL`).
+
+Example (DeepSeek, via `docker -e` or the host shell):
+
+```bash
+OPENAI_BASE_URL=https://api.deepseek.com/v1
+OPENAI_API_KEY=sk-...                     # your DeepSeek key
+CLAUDETEAM_TRAE_PROVIDER=openrouter        # chat/completions client
+CLAUDETEAM_PI_PROVIDER=deepseek            # Pi's native DeepSeek provider
+CLAUDETEAM_CODEWHALE_PROVIDER=deepseek
+# manager (claude-code) on DeepSeek's Anthropic endpoint:
+ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
+ANTHROPIC_AUTH_TOKEN=sk-...
+```
+
+See each CLI's `tests/scenarios/<cli>.md` for its specifics.
+
+---
+
 ## Agents talking to each other: `send` vs `say`
 
 | Command | What it does | Reaches the worker's tmux pane? |

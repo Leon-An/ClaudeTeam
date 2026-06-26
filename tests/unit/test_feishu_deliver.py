@@ -278,9 +278,13 @@ def test_spawn_cmd_carries_resolved_auth_on_every_wake():
             wake_fn=fake_wake,
             session="S",
         )
-    assert len(captured) == 1
-    assert "CLAUDE_CODE_OAUTH_TOKEN=tok" in captured[0]     # token reached spawn
-    assert "ANTHROPIC_API_KEY=" in captured[0]              # api key blanked (token wins)
+        assert len(captured) == 1
+        # auth is SOURCED from a private file, never typed inline — no
+        # secret on the wire / in the agent's context.
+        assert "CLAUDE_CODE_OAUTH_TOKEN=tok" not in captured[0]
+        spawn_env = (paths.state_dir() / "spawn-env" / "worker_a.sh").read_text()
+        assert "CLAUDE_CODE_OAUTH_TOKEN=tok" in spawn_env   # token reached pane env
+        assert "ANTHROPIC_API_KEY=" in spawn_env            # api key blanked (token wins)
 
 
 def test_wake_fn_returning_false_still_attempts_inject():

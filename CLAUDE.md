@@ -124,6 +124,25 @@ fixture instead of a real subprocess.
   given their inputs.
 - **One file per `claudeteam` subcommand**: don't grow a single
   900-line multi-command file.
+- **Adapters are provider-agnostic — NEVER hardcode an endpoint, key,
+  provider, or model.**  This is a generic open-source project; the
+  operator chooses the model backend.  So in `agents/*.py`:
+  - **Credential** flows through `runtime/agent_auth` (priority
+    **token > login > api_key**; higher overrides lower).  Each adapter
+    declares `auth_slots()` — the OpenAI-compatible workers return
+    `base.OPENAI_COMPAT_AUTH` (the `api_key` tier reading
+    `OPENAI_API_KEY`); claude/codex/kimi have their own.  The resolved
+    key is sourced from a private file at spawn — never typed into the
+    pane (see `lifecycle.build_spawn_command`).
+  - **Endpoint** (`base_url`) comes from `$OPENAI_BASE_URL`, **model**
+    from the agent's `team.json` entry.  Don't invent a default model;
+    use the passed value.
+  - **Provider label**: where a CLI needs one that selects an
+    OpenAI-compatible (chat/completions) client, make it env-overridable
+    (e.g. `CLAUDETEAM_TRAE_PROVIDER`) with a documented default — don't
+    bake in a vendor name.
+  - DeepSeek / OpenAI / a local server are just *examples* set via the
+    deployment's env (`docker -e`) + `tests/scenarios/*.md`, never source.
 
 ## What NOT to do
 

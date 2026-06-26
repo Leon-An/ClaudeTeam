@@ -57,6 +57,10 @@ _FIRST_LAUNCH_DIALOG_MARKERS = (
     "Yes, I accept",                          # bypass-perms confirmation
     "Bypass Permissions mode",                # bypass-perms banner
     "Choose an option:",                      # generic onboarding prompt
+    "Press Enter to continue",                # claude v2.1+ security notes; codewhale welcome (step 1/3)
+    "trust this folder",                      # claude per-folder trust dialog (default = "Yes, I trust")
+    "Press 1-7 to choose",                    # codewhale wizard language picker (step 2/3)
+    "Press Enter to open",                    # codewhale wizard "open the workspace" (step 3/3)
 )
 
 
