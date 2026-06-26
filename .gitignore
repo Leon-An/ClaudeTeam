@@ -18,8 +18,8 @@ dist/
 /projects/
 /share/
 /state/
-# scripts/feishu_bot_creator/ is checked in (Playwright bot creator);
-# its own .gitignore handles node_modules + cookies. Allow this dir.
+# scripts/feishu_channel/ is checked in (the @larksuite/channel sidecar);
+# its own .gitignore handles node_modules. Allow this dir.
 # Watch git status when adding under scripts/ so stray local state
 # files don't sneak in.
 .claude/scheduled_tasks.lock

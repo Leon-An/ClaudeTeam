@@ -390,6 +390,33 @@ def chat_id() -> str:
     return load_runtime_config().get("chat_id", "")
 
 
+def set_chat_id(value: str) -> tuple[bool, str]:
+    """Persist the top-level `chat_id` — written by `feishu connect` after the
+    bot auto-creates the team group. Replaces claudeteam.toml's top-level
+    `chat_id = "..."` value in place (preserving its trailing comment), falling
+    back to runtime_config.json when toml isn't the active config. Resets the
+    tunables cache so a same-process read sees the new value. Idempotent."""
+    import re
+    from claudeteam.runtime import paths, tunables
+    cf = paths.config_file()
+    if cf.exists():
+        text = cf.read_text(encoding="utf-8")
+        pat = re.compile(r'^(chat_id\s*=\s*)"[^"]*"(.*)$', re.MULTILINE)
+        new_text, n = pat.subn(lambda m: f'{m.group(1)}"{value}"{m.group(2)}', text)
+        if n == 0:  # no chat_id line present — prepend one
+            new_text = f'chat_id = "{value}"\n' + text
+        try:
+            cf.write_text(new_text, encoding="utf-8")
+        except OSError as e:
+            return (False, f"cannot write {cf}: {e}")
+        tunables.reset_cache()
+        return (True, f"set chat_id in {cf}")
+    rc = load_runtime_config()
+    rc["chat_id"] = value
+    save_runtime_config(rc)
+    return (True, f"set chat_id in {runtime_config_file()}")
+
+
 def lark_profile() -> str:
     """Resolve the lark-cli profile name. Priority: env > toml > legacy json."""
     if env := env_str("LARK_CLI_PROFILE"):

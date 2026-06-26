@@ -179,29 +179,29 @@ def test_respawn_falls_back_to_devnull_when_log_file_open_fails():
 
 
 _PS_HEADER = "  PID  PPID COMMAND\n"
-# Realistic mac/linux ps snapshot. The orphan-root after a SIGKILL'd
-# router is the `npm exec @larksuite/cli` process (it had npx as parent;
-# npx already exited, so it reparents to launchd/init when router dies).
-# Its child node binary keeps the orphan as parent (PPID != 1) until
-# the orphan exits, so it doesn't directly count as orphan-root.
+# Realistic mac/linux ps snapshot. After a SIGKILL'd router, the Feishu
+# event-ingress sidecar (`node …/feishu_channel/sidecar.js run`) reparents to
+# launchd/init (PPID 1). A descendant (worker) keeps the sidecar as parent
+# (PPID != 1), so it doesn't count as an orphan-root.
 _PS_REAL_SAMPLE = _PS_HEADER + (
     "    1     0 /sbin/launchd\n"
     "  100     1 /usr/libexec/UserEventAgent\n"
-    "95773     1 npm exec @larksuite/cli --profile test-live-a event +subscribe --as bot\n"
-    "96397 95773 node /Users/x/.npm/_npx/.../lark-cli --profile test-live-a event +subscribe --as bot\n"
-    "98765     1 npm exec @larksuite/cli --profile test-live-b event +subscribe --as bot\n"
+    "95773     1 node /app/scripts/feishu_channel/sidecar.js run\n"
+    "96397 95773 node /app/scripts/feishu_channel/sidecar.js run\n"
+    "98765     1 node /home/u/proj/scripts/feishu_channel/sidecar.js run\n"
     "99999     1 some-other-daemon --foo\n"
 )
 
 
-def test_list_orphan_pids_finds_lark_subscribe_with_ppid_one():
-    """Orphan-detection sees only PPID=1 lark-cli +subscribe processes
-    (not their non-orphan descendants, not unrelated daemons)."""
+def test_list_orphan_pids_finds_sidecar_run_with_ppid_one():
+    """Orphan-detection sees only PPID=1 sidecar `run` processes (not their
+    non-orphan descendants, not unrelated daemons). Uses the production
+    markers so the test tracks the source constant."""
+    from claudeteam.runtime.watchdog import _ROUTER_SUBSCRIBE_MARKERS
     fake = _FakeRun(stdout=_PS_REAL_SAMPLE)
-    pids = list_orphan_pids(("@larksuite/cli", "+subscribe"), run=fake)
-    # Both 95773 (team A) and 98765 (team B) are orphan-root npm-exec
-    # processes whose parent reparented to launchd. 96397 has PPID 95773
-    # so it's not an orphan-root. 100 and 99999 don't carry both markers.
+    pids = list_orphan_pids(_ROUTER_SUBSCRIBE_MARKERS, run=fake)
+    # 95773 and 98765 are PPID=1 sidecar orphans; 96397 has PPID 95773 so it's
+    # not an orphan-root; 100 and 99999 don't carry both markers.
     assert sorted(pids) == [95773, 98765]
 
 
@@ -239,7 +239,7 @@ def test_list_orphan_pids_skips_malformed_lines():
 
 
 def test_reap_orphans_sigterms_each_orphan():
-    spec = _spec(orphan_markers=("@larksuite/cli", "+subscribe"))
+    spec = _spec(orphan_markers=("feishu_channel/sidecar.js", "run"))
     fake_run = _FakeRun(stdout=_PS_REAL_SAMPLE)
     killed: list[tuple[int, int]] = []
     n = reap_orphans(spec, run=fake_run,
@@ -252,7 +252,7 @@ def test_reap_orphans_sigterms_each_orphan():
 def test_reap_orphans_tolerates_lookup_and_permission_errors():
     """Process exited between scan and kill, OR runs as a different uid:
     just count it as not-reaped, never raise."""
-    spec = _spec(orphan_markers=("@larksuite/cli", "+subscribe"))
+    spec = _spec(orphan_markers=("feishu_channel/sidecar.js", "run"))
     fake_run = _FakeRun(stdout=_PS_REAL_SAMPLE)
 
     def angry_kill(pid, sig):
@@ -276,7 +276,7 @@ def test_reap_orphans_returns_zero_for_empty_markers():
 def test_respawn_invokes_reap_before_spawning_when_markers_present():
     """The reap must happen BEFORE Popen — otherwise the new daemon's
     subscribe would race with the orphan's subscribe for events."""
-    spec = _spec(orphan_markers=("@larksuite/cli", "+subscribe"))
+    spec = _spec(orphan_markers=("feishu_channel/sidecar.js", "run"))
     order: list[str] = []
     respawn(spec,
             popen=lambda *a, **k: order.append("popen") or object(),
@@ -465,11 +465,11 @@ def test_default_specs_includes_router_pointing_at_state_dir():
         router = next(s for s in specs if s.name == "router")
         assert str(router.pid_file).startswith(str(tmp))
         assert router.spawn_cmd == ["claudeteam", "router"]
-        # router spec ships with orphan-reap markers so the watchdog
-        # reaps stale lark-cli +subscribe processes left by a SIGKILL'd
-        # predecessor before respawning.
-        assert "@larksuite/cli" in router.orphan_markers
-        assert "+subscribe" in router.orphan_markers
+        # router spec ships with orphan-reap markers so the watchdog reaps a
+        # stale Feishu-ingress sidecar (`node …/feishu_channel/sidecar.js run`)
+        # left by a SIGKILL'd predecessor before respawning.
+        assert "feishu_channel/sidecar.js" in router.orphan_markers
+        assert "run" in router.orphan_markers
 
 
 def test_all_known_specs_router_has_orphan_markers_watchdog_does_not():

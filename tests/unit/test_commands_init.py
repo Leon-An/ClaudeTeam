@@ -188,3 +188,46 @@ def test_init_template_passes_tomllib_parse():
         assert "limits" in cfg
         assert "router" in cfg
         assert "feishu" in cfg
+
+
+# ── first-run hook: init drives `feishu connect` (replaces bot-creator) ───────
+
+
+def test_init_default_runs_feishu_connect():
+    """On an interactive TTY, fresh init with no creds drops into the QR
+    registration automatically. The harness has no real terminal, so the
+    `_should_autoconnect` TTY gate is patched True to exercise the path."""
+    from helpers import attr_patch
+    from claudeteam.commands import feishu, init
+    called = []
+    with isolated_env(), env_patch(FEISHU_APP_ID=None), \
+            attr_patch(init, _should_autoconnect=lambda *a: True), \
+            attr_patch(feishu, main=lambda argv: called.append(list(argv)) or 0):
+        rc, out, _ = run_cli(["init"])
+    assert rc == 0
+    assert called == [["connect"]]
+
+
+def test_init_no_connect_skips_registration_and_prints_step():
+    """--no-connect (CI / scripted) must NOT launch the interactive scan, but
+    still tells the operator the command to run later."""
+    from helpers import attr_patch
+    from claudeteam.commands import feishu
+    called = []
+    with isolated_env(), env_patch(FEISHU_APP_ID=None), \
+            attr_patch(feishu, main=lambda argv: called.append(list(argv)) or 0):
+        rc, out, _ = run_cli(["init", "--no-connect"])
+    assert rc == 0
+    assert called == []
+    assert "feishu connect" in out
+
+
+def test_init_skips_connect_when_creds_already_present():
+    from helpers import attr_patch
+    from claudeteam.commands import feishu
+    called = []
+    with isolated_env(), env_patch(FEISHU_APP_ID="cli_existing"), \
+            attr_patch(feishu, main=lambda argv: called.append(list(argv)) or 0):
+        rc, _, _ = run_cli(["init"])
+    assert rc == 0
+    assert called == []

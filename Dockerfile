@@ -161,6 +161,15 @@ COPY src/ ./src/
 
 RUN pip install --no-cache-dir -e .
 
+# The Feishu Channel sidecar (scripts/feishu_channel) — the event ingress
+# (`sidecar.js run`) AND the `claudeteam feishu connect` registration flow that
+# replaces the old host-only Playwright bot-creator. Bake its node_modules so
+# both work offline in the container. Path matches lark.sidecar_path()'s
+# repo-relative resolution (/app/scripts/feishu_channel/sidecar.js).
+COPY scripts/feishu_channel/ ./scripts/feishu_channel/
+RUN cd scripts/feishu_channel \
+    && npm install --omit=dev --silent --no-fund --no-audit
+
 # Defaults so a fresh container has a sensible state layout. Override
 # any of these at run time via `docker run -e CLAUDETEAM_STATE_DIR=...`
 # or compose `environment:` if you want a different layout.

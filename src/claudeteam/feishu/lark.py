@@ -50,6 +50,72 @@ _TENANT_TOKEN_CACHE = os.path.join(
 _TENANT_TOKEN_REFRESH_BUFFER_S = 60   # refetch when within 60s of expiry
 
 
+# ── app credentials (written by `feishu connect`) ────────────────────
+# Single source of truth for the registered Feishu app: a 0600 file in the
+# state dir. `feishu connect` writes it after the QR register; both consumers
+# read it back through the resolvers below — the sidecar ingress (subprocess_env
+# injects FEISHU_APP_ID/SECRET) and lark-cli egress (the tenant-token fetch).
+# This replaces the old host-keychain-vs-Docker-.env split with one file that
+# works identically in both. Env vars still take precedence (advanced override).
+def app_creds_file():
+    from claudeteam.runtime import paths
+    return paths.state_file("feishu_app.json")
+
+
+def load_app_creds() -> dict:
+    """Read the persisted app creds. Returns {} if absent/unreadable."""
+    try:
+        with open(app_creds_file(), "r", encoding="utf-8") as fh:
+            data = json.loads(fh.read())
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def save_app_creds(*, app_id: str, app_secret: str,
+                   owner_open_id: str = "", tenant: str = "feishu") -> None:
+    """Persist app creds 0600. Created owner-only and O_NOFOLLOW (it holds a
+    secret; same hardening as the tenant-token cache)."""
+    from claudeteam.runtime import paths
+    paths.ensure_state_dir()
+    path = app_creds_file()
+    payload = json.dumps({
+        "app_id": app_id, "app_secret": app_secret,
+        "owner_open_id": owner_open_id, "tenant": tenant,
+    }).encode("utf-8")
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    try:
+        os.write(fd, payload)
+    finally:
+        os.close(fd)
+    os.chmod(path, 0o600)  # tighten if it pre-existed
+
+
+def _resolve_app_id_secret() -> tuple[str, str]:
+    """App id + secret with env precedence, falling back to the creds file.
+    Empty strings when nothing supplies them."""
+    app_id = env_str("FEISHU_APP_ID") or env_str("LARKSUITE_CLI_APP_ID")
+    app_secret = (env_str("FEISHU_APP_SECRET")
+                  or env_str("LARKSUITE_CLI_APP_SECRET"))
+    if not (app_id and app_secret):
+        creds = load_app_creds()
+        app_id = app_id or str(creds.get("app_id", ""))
+        app_secret = app_secret or str(creds.get("app_secret", ""))
+    return app_id, app_secret
+
+
+def sidecar_path():
+    """Path to the Feishu Channel sidecar (`scripts/feishu_channel/sidecar.js`)
+    — used for both the `run` event ingress (router) and `feishu connect`.
+    Override the directory with CLAUDETEAM_FEISHU_SIDECAR_DIR; otherwise
+    repo-relative to this package."""
+    from pathlib import Path
+    override = env_str("CLAUDETEAM_FEISHU_SIDECAR_DIR")
+    base = (Path(override) if override
+            else Path(__file__).resolve().parents[3] / "scripts" / "feishu_channel")
+    return base / "sidecar.js"
+
+
 def _fetch_tenant_token(app_id: str, app_secret: str) -> dict | None:
     """POST app_id+app_secret → Feishu tenant_access_token endpoint.
 
@@ -116,9 +182,7 @@ def _ensure_tenant_token(*, fetch: Callable | None = None,
             return str(cached["token"])
     except (OSError, _json.JSONDecodeError, ValueError):
         pass
-    app_id = env_str("FEISHU_APP_ID") or env_str("LARKSUITE_CLI_APP_ID")
-    app_secret = (env_str("FEISHU_APP_SECRET")
-                  or env_str("LARKSUITE_CLI_APP_SECRET"))
+    app_id, app_secret = _resolve_app_id_secret()
     if not (app_id and app_secret):
         return None
     fresh = (fetch or _fetch_tenant_token)(app_id, app_secret)
@@ -186,14 +250,26 @@ def subprocess_env() -> dict[str, str]:
         # Propagate all three together; if app_id/secret aren't available
         # in env, skip injection and let lark-cli's profile/keychain
         # path take over.
-        app_id = (env_str("LARKSUITE_CLI_APP_ID")
-                  or env_str("FEISHU_APP_ID"))
-        app_secret = (env_str("LARKSUITE_CLI_APP_SECRET")
-                      or env_str("FEISHU_APP_SECRET"))
+        app_id, app_secret = _resolve_app_id_secret()
         if app_id and app_secret:
             env["LARKSUITE_CLI_TENANT_ACCESS_TOKEN"] = token
             env["LARKSUITE_CLI_APP_ID"] = app_id
             env["LARKSUITE_CLI_APP_SECRET"] = app_secret
+            # The sidecar ingress reads FEISHU_APP_ID/SECRET; pin them to the
+            # same resolved app so a state-file-only deploy (no env creds) still
+            # reaches `sidecar.js run` and FEISHU_*/LARKSUITE_* never disagree.
+            env["FEISHU_APP_ID"] = app_id
+            env["FEISHU_APP_SECRET"] = app_secret
+            # Point lark-cli at a ClaudeTeam-owned config dir so a stale global
+            # ~/.lark-cli/config.json (e.g. a different app from a prior
+            # `lark-cli config init`) can't hijack egress — with no config
+            # there, lark-cli authenticates off the injected token+app_id (the
+            # app `feishu connect` registered). Only when we HAVE creds; a
+            # pure-keychain host deploy (token is None) keeps the global dir.
+            from claudeteam.runtime import paths
+            cfg_dir = paths.state_file("lark-cli")
+            cfg_dir.mkdir(parents=True, exist_ok=True)
+            env["LARKSUITE_CLI_CONFIG_DIR"] = str(cfg_dir)
     return env
 
 

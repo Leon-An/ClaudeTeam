@@ -8,8 +8,8 @@
 触发器一律是真实用户在绑定群里发消息——**斜杠必须出现在消息开头**。
 `@bot /team` 不会触发，单独的 `/team` 才会。在单元层面用
 `subscribe.process_lines` 喂构造事件做 handler 覆盖也可以，但要在
-跑日志里写明「构造事件」，这种方式不证明 lark-cli +subscribe 长连接
-路径是通的。
+跑日志里写明「构造事件」，这种方式不证明 `scripts/feishu_channel/sidecar.js run`
+的 WebSocket 长连接入站路径是通的。
 
 ## 只读命令
 
@@ -120,8 +120,10 @@ DROP `bot_self`，避免回声循环。
 
 本机部署不走容器路径，而是依赖 macOS keychain。两套机制：
 
-1. **bot 凭证**：keychain 里 service `lark-cli-credentials`，account `<app_id>`。
-   首次部署 `lark-cli config init` 写入即可
+1. **bot 凭证（App ID/Secret）**：`claudeteam feishu connect` 扫码后写进
+   `state/feishu_app.json`（0600）；出站发卡靠 `feishu/lark.py:subprocess_env()`
+   从这个文件注入 `FEISHU_APP_ID/SECRET` + tenant token。见
+   [feishu_connect.md](feishu_connect.md)
 2. **user 凭证**（用于 `--as user` 模拟用户发消息）：keychain 里 service
    `lark-cli-credentials`，account `<user_open_id>`。设备授权流程见
    [host_smoke.md](host_smoke.md) 第 2 节

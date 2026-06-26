@@ -8,145 +8,36 @@ multi-team isolation, and common failures.
 Whether you're a human reading this or an AI agent driving the
 deployment, the flow is the same:
 
-1. **Feishu app** — ask the user whether they already have an
-   enterprise custom app + bot. If **yes**, just collect `App ID`,
-   `App Secret`, and the `chat_id` of the group the bot is in. If
-   **no**, drive [`scripts/feishu_bot_creator/`](../scripts/feishu_bot_creator/)
-   in **drive mode**. The user logs in once (QR scan); after that
-   the agent runs all 7 stages without further user involvement.
-   Browser stays open the whole time — no re-launch between stages.
-
-   ```bash
-   cd scripts/feishu_bot_creator
-   npm install                                          # one-time
-   # drive does login + all 7 stages in ONE chromium session,
-   # AUTO-ADVANCING through every stage — no per-stage input on the
-   # happy path. It exits when publish completes.
-   node create_feishu_bot.js drive <bot-name> "<description>" \
-     > /tmp/drive.log 2>&1 &
-   # First run prompts the user to scan QR (~30 s); cookies persist.
-
-   # The .state/<bot>.cmd file is ONLY for failure recovery: if a stage
-   # hard-fails, drive stops, drops a handoff (screenshot + failure.json),
-   # keeps the browser on CDP, and waits — then you steer with one of:
-   echo skip             > .state/<bot-name>.cmd   # you fixed it in the browser → mark done + continue
-   echo "redo events"    > .state/<bot-name>.cmd   # re-run a stage
-   echo quit             > .state/<bot-name>.cmd   # stop
-   ```
-
-   `skip` is the key escape hatch when a Playwright selector breaks
-   on a Feishu UI update — fix the page in the open browser
-   yourself, then `skip` to advance. (The happy path needs none of
-   these — they only come up when a stage fails.)
-
-   Per-stage details (what Playwright does, equivalent manual UI,
-   how to recover) are in [`setup_feishu_bot.md`](setup_feishu_bot.md).
-   For a screenshot-heavy click-by-click guide aimed at human
-   operators (recommended for first-timers on the Feishu open
-   platform), see
-   [`setup_feishu_bots_guide.pdf`](setup_feishu_bots_guide.pdf).
-
-   After `publish`, read `App ID` + `App Secret` from the Feishu open
-   platform's **Credentials & Basic Info** page (the bot creator's
-   `.state/<bot-name>.json` also has them).
-
-2. **Get the bot into a Feishu group**. Self-built apps cannot be
-   invited to existing groups via API, but they CAN create new ones —
-   pick whichever fits your flow:
-
-   **Path A — bot creates an empty group, you join via share link**
-   (preferred for agent-driven setup; only mobile click is "Join group"):
-   ```bash
-   # bot creates the group + sets itself as group manager. chat_id +
-   # share_link both come back in stdout.
-   lark-cli im +chat-create --as bot --type public \
-     --name "ClaudeTeam-test" \
-     --description "ClaudeTeam smoke" \
-     --set-bot-manager
-   ```
-   Open the returned `share_link` (`applink.feishu.cn/...`) on Feishu
-   mobile and tap **Join Group**. Bot is already in (creator); user is
-   in (joined); the `chat_id` from the same response goes into your
-   `claudeteam.toml`.
-
-   > Older docs / `lark-cli ≤1.0.25` used `+chats-create --body '{...}'`
-   > and a separate `+chats-link`. As of 1.0.26 both renamed: `+chat-create`
-   > (singular) takes flat `--name` / `--description` / `--type` flags, and
-   > the share link is part of `+chat-create`'s response — `+chats-link`
-   > is gone.
-
-   **Path B — manual add to an existing group** (if you want to drop
-   the bot into a group that already exists). On Feishu **mobile or
-   desktop**:
-   1. Open the target group → group settings (⚙️).
-   2. **群机器人 / Bots** → **添加机器人 / Add bot**.
-   3. Search by the App name you used in the bot creator → confirm.
-   4. Capture the chat_id from any shell with `lark-cli` user OAuth:
-      ```bash
-      lark-cli im +chat-search --query "<group name>" --as user
-      ```
-
-   Either way, paste the resulting `chat_id` (`oc_...`) into your
-   `claudeteam.toml` in step 4 below. Skip this step entirely and every
-   `claudeteam say` will fail with `code=230001 invalid receive_id`.
-
-3. **Pick host or Docker** — Docker is the simpler path (no Python on
-   the host, just `docker compose`). Host is faster iteration but
-   needs Python 3.10+, tmux, and the agent CLIs locally. Sections
-   below cover both.
-
-4. **Config** — set the `chat_id` (+ agents) in `claudeteam.toml`.
-   Bot credentials are **not** stored in the toml (it has no App
-   ID/Secret field): on **host** they come from `lark-cli`'s config
-   — set once by `lark-cli config init`, secret kept in the OS
-   keychain — so the only required edit is `chat_id`. Only **Docker**
-   puts `FEISHU_APP_ID`/`FEISHU_APP_SECRET` in `.env`. `claudeteam init`
-   generates a starter `claudeteam.toml` with three default agents
-   (`manager` running Claude Code + `worker_cc` running Claude Code +
-   `worker_codex` running Codex CLI) — keep them for a quick first
-   smoke or edit before launch.
-
-5. **Launch** — `claudeteam up` then `claudeteam health` should be all
-   green.
-
-6. **Hand the boss the join link, then verify.** This last mile can't
-   be automated: the bot can't receive its own messages, so only a real
-   human (boss) message in the group exercises the inbound path. Whoever
-   drives the deploy (human or agent) must hand the user two things:
-   1. the group **join link** — the `share_link` (`applink.feishu.cn/...`)
-      returned by `+chat-create` in step 2 (Path A); for a pre-existing
-      group, send the boss the group link out-of-band instead;
-   2. the two test messages.
-
-   The boss opens the link on Feishu **mobile → Join Group**, then sends
-   `/health` (zero-LLM card) and `@manager 你好` (manager replies ~30 s).
-   **Seeing the manager reply is the e2e green light.** Confirm inbound
-   landed with `claudeteam health` — its `inbound:` line flips from
-   "none observed yet" to "last event …" once your message routes.
-
-7. **If anything goes red**, see [Common failures](#common-failures)
-   at the bottom — it covers Claude OAuth stale, container env not
-   picked up, lark WebSocket drop, codex update prompt, etc.
+1. **Feishu app + group** — run `claudeteam feishu connect` (or `claudeteam init`, which calls it) and scan the QR. One scan creates the app, grants its IM scopes + message event, auto-creates the team group with you in it, and saves the App creds (`state/feishu_app.json`, 0600) + `chat_id` (`claudeteam.toml`). Already have an app? Put its App ID / Secret / chat_id into those files (or `.env` for Docker) and skip the scan.
+2. **Host or Docker** — Docker is simplest (`docker compose`, no host Python); host iterates faster but needs Python 3.10+, tmux, and the agent CLIs locally. Both are covered below.
+3. **Config** — `feishu connect` already wrote `chat_id`; `claudeteam init` generated the rest of `claudeteam.toml` with three default agents (`manager` + `worker_cc` on Claude Code, `worker_codex` on Codex). Keep them for a quick smoke or edit `[team.agents.*]` first. (Bot creds live in `state/feishu_app.json`, never the toml; only Docker/advanced deploys override via `FEISHU_APP_ID`/`FEISHU_APP_SECRET` in `.env`.)
+4. **Launch** — `claudeteam up`, then `claudeteam health` (expect all green).
+5. **Verify (autonomous — no human)** — on a fresh `up` the manager runs a team roll-call: it announces in the group, summons every worker, and each worker reports back. Verification passes when you see the manager's summons plus every worker reporting.
+6. **If anything goes red** — see [Common failures](#common-failures): Claude OAuth stale, container env not picked up, WebSocket drop, codex update prompt, etc.
 
 ---
 
 ## Prerequisites
 
-| Requirement     | Version | Why                                                              |
-| --------------- | ------- | ---------------------------------------------------------------- |
-| Python          | 3.10+   | `pyproject.toml` pins `requires-python = ">=3.10"`               |
-| `python3-venv`  | apt pkg | **Debian/Ubuntu only**: not bundled with system `python3`. Without it `python3 -m venv .venv` errors `ensurepip is not available`. Install: `sudo apt install -y python3.12-venv` (match your python3 minor version). |
-| tmux            | any     | every agent runs in its own tmux window                          |
-| Node.js + npx   | 18+     | `lark-cli` is a node binary; `npx` is the install fallback       |
-| At least one CLI| latest  | `claude` / `codex` / `kimi` / `gemini` / `qwen` (whichever your team uses) |
-| Feishu (Lark)   | any     | enterprise app with `im:message` permission + WebSocket subscription |
 
-**Feishu app setup**: easiest path is the bundled Playwright auto-creator
-in [`scripts/feishu_bot_creator/`](../scripts/feishu_bot_creator/) — one
-command to create + permission + subscribe + publish a bot. Manual
-walkthrough at [`docs/setup_feishu_bot.md`](setup_feishu_bot.md).
+| Requirement      | Version | Why                                                                                                                                                                                                                   |
+| ---------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Python           | 3.10+   | `pyproject.toml` pins `requires-python = ">=3.10"`                                                                                                                                                                    |
+| `python3-venv`   | apt pkg | **Debian/Ubuntu only**: not bundled with system `python3`. Without it `python3 -m venv .venv` errors `ensurepip is not available`. Install: `sudo apt install -y python3.12-venv` (match your python3 minor version). |
+| tmux             | any     | every agent runs in its own tmux window                                                                                                                                                                               |
+| Node.js + npx    | 18+     | `lark-cli` (egress) + the `scripts/feishu_channel/` sidecar (registration + ingress) are node                                                                                                                         |
+| At least one CLI | latest  | `claude` / `codex` / `kimi` / `gemini` / `qwen` (whichever your team uses)                                                                                                                                            |
+| Feishu (Lark)    | any     | enterprise tenant; `claudeteam feishu connect` creates the app + grants `im:message` + WebSocket event                                                                                                          |
+
+
+**Feishu app setup**: run `claudeteam feishu connect` (or just
+`claudeteam init`, which calls it) and scan the QR — one device-flow scan
+creates the app, grants the IM scopes + message event, auto-creates the
+team group, and saves the creds to `state/feishu_app.json`. See the
+[Bringing up a team](#bringing-up-a-team-end-to-end) walkthrough above.
 
 Optional but recommended:
+
 - `lark-cli` installed globally (`npm i -g @larksuite/cli`) — saves
   ~250 ms per invocation vs the `npx` fallback.
 
@@ -154,10 +45,12 @@ Optional but recommended:
 
 ## Two deployment modes
 
-| Mode    | When                                                | Notes |
-| ------- | --------------------------------------------------- | ----- |
-| **Host**   | macOS / Linux dev machine, you want fast iteration | `lark-cli` OAuth in your shell keychain, agent state under `./state/` |
-| **Docker** | Headless / CI / multi-team isolation              | Image bundles Python + tmux + node; CLIs (claude/codex/...) you install yourself in a derived image, OR bind-mount the host binary |
+
+| Mode       | When                                               | Notes                                                                                                                              |
+| ---------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| **Host**   | macOS / Linux dev machine, you want fast iteration | `lark-cli` OAuth in your shell keychain, agent state under `./state/`                                                              |
+| **Docker** | Headless / CI / multi-team isolation               | Image bundles Python + tmux + node; CLIs (claude/codex/...) you install yourself in a derived image, OR bind-mount the host binary |
+
 
 Pick one and stick with it for a given Feishu chat — running both
 against the same chat causes lark to silently split events between
@@ -169,7 +62,8 @@ gory details.
 ## Host deploy (4 steps)
 
 No per-shell env exports — `claudeteam init` writes `[feishu] send_as = "bot"`
-+ `no_proxy = true` into the toml, and state defaults to `~/.claudeteam`.
+
+- `no_proxy = true` into the toml, and state defaults to `~/.claudeteam`.
 
 ```bash
 # 1. install (editable, in a venv — PEP 668 means no bare pip on macOS Homebrew)
@@ -186,9 +80,15 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
 
-# 2. bootstrap config (writes claudeteam.toml in cwd, send_as/no_proxy preset)
+# 2. bootstrap config + register the bot (writes claudeteam.toml in cwd,
+#    send_as/no_proxy preset). On an interactive TTY `init` then runs
+#    `feishu connect` — scan the QR to create the app, auto-create the
+#    team group, and save creds to state/feishu_app.json + chat_id to the
+#    toml. Pass --no-connect to skip; it's also skipped if creds exist.
 claudeteam init
-$EDITOR claudeteam.toml                    # set chat_id only — host bot creds come from lark-cli config, not the toml; agents have defaults
+# $EDITOR claudeteam.toml                   # usually nothing to set — chat_id is
+                                            # already written; just edit agents if you want
+                                            # (run `claudeteam feishu connect` by hand if you skipped it)
 
 # 3. install slash hooks BEFORE up (claude-code caches them at pane spawn)
 claudeteam install-hooks                   # writes .claude/commands/<name>.md
@@ -227,7 +127,10 @@ hosts) so the container can reuse your Claude OAuth.
 > the Server section is missing when the daemon's down.
 
 ```bash
-# 1. fill credentials (gitignored)
+# 1. fill credentials (gitignored). In Docker the app creds come from the
+#    env (it OVERRIDES state/feishu_app.json) — supply a pre-existing app's
+#    FEISHU_APP_ID + FEISHU_APP_SECRET, or register one first on a host with
+#    `claudeteam feishu connect` and copy its state/feishu_app.json values.
 cp .env.example .env
 $EDITOR .env                    # FEISHU_APP_ID + FEISHU_APP_SECRET
 
@@ -237,12 +140,15 @@ mkdir -p ~/.claude
 security find-generic-password -s "Claude Code-credentials" -w \
   > ~/.claude/.credentials.json
 
-# 3. build the image and start the container
+# 3. build the image and start the container (the image bakes the
+#    scripts/feishu_channel sidecar's node_modules for ingress)
 docker compose build
 docker compose up -d
 
-# 4. bootstrap config inside the container (output lands in ./team-data/)
-docker compose exec --workdir /data claudeteam claudeteam init
+# 4. bootstrap config inside the container (output lands in ./team-data/).
+#    --no-connect because the QR scan is a host/TTY step; the app creds
+#    come from .env in Docker.
+docker compose exec --workdir /data claudeteam claudeteam init --no-connect
 $EDITOR team-data/claudeteam.toml    # set chat_id + agents
 
 # 5. launch the team + verify
@@ -253,13 +159,13 @@ docker compose exec claudeteam tmux attach -t ClaudeTeam   # see panes; Ctrl+B d
 ```
 
 > **macOS subscribe stalls (handled automatically):**
-> lark-cli 1.0.23 on macOS — both Docker Desktop (`network_mode: host`
-> partially emulated) and host-native — has a known WebSocket subscribe
-> silent-drop: the subscribe child stays alive but stops delivering
-> events. The router's `_watch_subscribe_health` thread detects this
-> via the `router.stale_event_threshold_s` deadline and self-SIGTERMs
-> for a watchdog respawn; catchup-on-restart then refetches the missed
-> events from Feishu's REST API.
+> On macOS — both Docker Desktop (`network_mode: host` partially
+> emulated) and host-native — the WebSocket event stream can silent-drop:
+> the sidecar child stays alive but stops delivering events. The router's
+> `_watch_subscribe_health` thread detects this via the
+> `router.stale_event_threshold_s` deadline and self-SIGTERMs for a
+> watchdog respawn; catchup-on-restart then refetches the missed events
+> from Feishu's REST API.
 >
 > The default threshold is **platform-aware**: Darwin → 120 s, Linux →
 > 600 s. Linux WebSocket is stable so the looser default avoids
@@ -270,13 +176,15 @@ docker compose exec claudeteam tmux attach -t ClaudeTeam   # see panes; Ctrl+B d
 
 **Compose mounts (read `docker-compose.yml` for the full list):**
 
-| Host path                              | Container path                          | Purpose |
-| -------------------------------------- | --------------------------------------- | ------- |
-| `./src/`                               | `/app/src/`                             | Hot-reload: edit on host, container picks up next invocation |
-| `./team-data/`                         | `/data/`                                | `claudeteam.toml` + state survives `docker compose down` |
-| `~/.lark-cli/config.json`              | `/root/.lark-cli/config.json`           | OAuth profile reused (file mount only — locks/ stays container-private to avoid host/container fcntl contention) |
-| `~/.claude/.credentials.json`          | `/root/.claude/.credentials.json`       | Claude OAuth (RW so token refreshes persist back) |
-| `~/.codex` / `~/.kimi`                 | `/root/.codex` / `/root/.kimi`          | Per-CLI credentials |
+
+| Host path                     | Container path                    | Purpose                                                                                                          |
+| ----------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `./src/`                      | `/app/src/`                       | Hot-reload: edit on host, container picks up next invocation                                                     |
+| `./team-data/`                | `/data/`                          | `claudeteam.toml` + state survives `docker compose down`                                                         |
+| `~/.lark-cli/config.json`     | `/root/.lark-cli/config.json`     | OAuth profile reused (file mount only — locks/ stays container-private to avoid host/container fcntl contention) |
+| `~/.claude/.credentials.json` | `/root/.claude/.credentials.json` | Claude OAuth (RW so token refreshes persist back)                                                                |
+| `~/.codex` / `~/.kimi`        | `/root/.codex` / `/root/.kimi`    | Per-CLI credentials                                                                                              |
+
 
 The base image deliberately does **not** bake in `claude` / `codex` /
 `kimi` — each has its own auth and license. Derive from `claudeteam:dev`
@@ -335,25 +243,25 @@ The adapters are **provider-agnostic** — nothing about DeepSeek/OpenAI/etc. is
 baked into the code. You choose the backend through env + config:
 
 - **Credential** is resolved by `runtime/agent_auth` with a fixed priority:
-  **long-term token > interactive login > API key** (a higher one present
-  overrides the lower). Secrets live in a gitignored env file
-  (`$CLAUDETEAM_SECRETS_FILE`, default `<state_dir>/.env`) — or the process env
-  — never in `claudeteam.toml`. Per-agent overrides use `<AGENT>_<VAR>`
-  (e.g. `WORKER_PI_OPENAI_API_KEY`).
+**long-term token > interactive login > API key** (a higher one present
+overrides the lower). Secrets live in a gitignored env file
+(`$CLAUDETEAM_SECRETS_FILE`, default `<state_dir>/.env`) — or the process env
+— never in `claudeteam.toml`. Per-agent overrides use `<AGENT>_<VAR>`
+(e.g. `WORKER_PI_OPENAI_API_KEY`).
   - **claude-code / codex / kimi**: their own token/login/api_key vars.
   - **All other CLIs** (minimax, opencode, codewhale, openclaw, trae, hermes,
-    pi): the **API-key** tier — set `OPENAI_API_KEY`.
+  pi): the **API-key** tier — set `OPENAI_API_KEY`.
 - **Endpoint**: set `OPENAI_BASE_URL` to your OpenAI-compatible endpoint
-  (e.g. `https://api.openai.com/v1`, a self-hosted vLLM/Ollama URL, or
-  `https://api.deepseek.com/v1`). **Model**: the `model` field in each agent's
-  `[team.agents.<name>]`.
+(e.g. `https://api.openai.com/v1`, a self-hosted vLLM/Ollama URL, or
+`https://api.deepseek.com/v1`). **Model**: the `model` field in each agent's
+`[team.agents.<name>]`.
 - **Provider name** (only where a CLI needs one that selects an
-  OpenAI-compatible *chat/completions* client): override per CLI —
-  `CLAUDETEAM_TRAE_PROVIDER` (default `openrouter`),
-  `CLAUDETEAM_PI_PROVIDER` / `CLAUDETEAM_CODEWHALE_PROVIDER` (default `openai`).
+OpenAI-compatible *chat/completions* client): override per CLI —
+`CLAUDETEAM_TRAE_PROVIDER` (default `openrouter`),
+`CLAUDETEAM_PI_PROVIDER` / `CLAUDETEAM_CODEWHALE_PROVIDER` (default `openai`).
 - The **claude-code manager on a non-Anthropic backend** uses the
-  Anthropic-compatible vars instead: `ANTHROPIC_BASE_URL` +
-  `ANTHROPIC_AUTH_TOKEN` (+ `ANTHROPIC_MODEL` / `ANTHROPIC_DEFAULT_*_MODEL`).
+Anthropic-compatible vars instead: `ANTHROPIC_BASE_URL` +
+`ANTHROPIC_AUTH_TOKEN` (+ `ANTHROPIC_MODEL` / `ANTHROPIC_DEFAULT_*_MODEL`).
 
 Example (DeepSeek, via `docker -e` or the host shell):
 
@@ -374,11 +282,13 @@ See each CLI's `tests/scenarios/<cli>.md` for its specifics.
 
 ## Agents talking to each other: `send` vs `say`
 
-| Command | What it does | Reaches the worker's tmux pane? |
-| ------- | ------------ | ------------------------------- |
-| `claudeteam send <to> <from> <msg>` | Append a row to local `inbox.json` | **No** — only `claudeteam inbox <to>` reads it |
-| `claudeteam say <agent> "<msg>" --to <role>` | Post into Feishu chat (subject to `[chat.publish]`) | Only if router relays it back |
-| Feishu group → router → `deliver.apply` | Inbound chat → inbox row + tmux pane inject | **Yes** — the only path that wakes a worker |
+
+| Command                                      | What it does                                        | Reaches the worker's tmux pane?                |
+| -------------------------------------------- | --------------------------------------------------- | ---------------------------------------------- |
+| `claudeteam send <to> <from> <msg>`          | Append a row to local `inbox.json`                  | **No** — only `claudeteam inbox <to>` reads it |
+| `claudeteam say <agent> "<msg>" --to <role>` | Post into Feishu chat (subject to `[chat.publish]`) | Only if router relays it back                  |
+| Feishu group → router → `deliver.apply`      | Inbound chat → inbox row + tmux pane inject         | **Yes** — the only path that wakes a worker    |
+
 
 **Always pass `--to`** on `say`. `--to user` = answering the boss;
 `--to manager` = internal progress; `--to worker_<name>` = peer ping.
@@ -415,21 +325,23 @@ exports as one shell-evaluable line if you switch shells often.
 
 After `claudeteam install-hooks`, the manager pane recognises these:
 
-| Slash | What it does |
-| ----- | ------------ |
-| `/help`     | List all slash commands (card) |
-| `/team`     | All agents' live pane state (marker-free probe) |
-| `/health`   | Server CPU / memory / disk card |
-| `/usage`    | Token/credit usage (claude ccusage / codex / kimi) |
-| `/tmux [agent] [N]` | Capture last N lines of an agent's pane |
-| `/send <agent> <msg>` | Inject a message into the agent's pane |
-| `/compact [agent]`    | Compact the CLI's context (gemini/qwen send `/compress`) + scheduled re-identify |
-| `/stop [agent]`       | Interrupt the agent's current action (sends Esc; pane stays alive) |
-| `/clear <agent>`      | `/clear` the CLI + re-inject identity (rehire shape) |
-| `/task [all]`         | Read-only task kanban |
-| `/shutdown [confirm]` | Take agent panes offline, keep router/watchdog for `/restart` (two-step) |
-| `/restart`            | Restart the whole team (≈ down→up) |
-| `/login <cli> [agent]`| Trigger a CLI's re-auth; surfaces the verification URL/code (gated by `controls.allow_*`) |
+
+| Slash                  | What it does                                                                              |
+| ---------------------- | ----------------------------------------------------------------------------------------- |
+| `/help`                | List all slash commands (card)                                                            |
+| `/team`                | All agents' live pane state (marker-free probe)                                           |
+| `/health`              | Server CPU / memory / disk card                                                           |
+| `/usage`               | Token/credit usage (claude ccusage / codex / kimi)                                        |
+| `/tmux [agent] [N]`    | Capture last N lines of an agent's pane                                                   |
+| `/send <agent> <msg>`  | Inject a message into the agent's pane                                                    |
+| `/compact [agent]`     | Compact the CLI's context (gemini/qwen send `/compress`) + scheduled re-identify          |
+| `/stop [agent]`        | Interrupt the agent's current action (sends Esc; pane stays alive)                        |
+| `/clear <agent>`       | `/clear` the CLI + re-inject identity (rehire shape)                                      |
+| `/task [all]`          | Read-only task kanban                                                                     |
+| `/shutdown [confirm]`  | Take agent panes offline, keep router/watchdog for `/restart` (two-step)                  |
+| `/restart`             | Restart the whole team (≈ down→up)                                                        |
+| `/login <cli> [agent]` | Trigger a CLI's re-auth; surfaces the verification URL/code (gated by `controls.allow_`*) |
+
 
 Boss can also send these from chat — they zero-LLM dispatch through
 the router, no manager round-trip.
@@ -438,16 +350,14 @@ the router, no manager round-trip.
 
 ## Verifying the deploy
 
-After `claudeteam up` returns green:
+**Autonomous e2e check (no human input):** on a fresh `claudeteam up` the manager runs a team roll-call — it announces in the group, summons every worker, and each worker reports back. The deploy is green when you see the manager's summons plus a report from every non-retired worker in the group.
 
-1. Send `/health` in the Feishu group → expect a card listing every
-   agent + the router + watchdog as green.
-2. Send `/team` → expect each agent's heartbeat fresh (♥ < 30 s).
-3. Talk to the team in chat: `@manager` + a simple task. Manager
-   should reply within 30 s, and if the task involves dispatch, you
-   should see worker `say` cards land in the group.
+Optional manual probes (you type these in the group):
+1. `/health` → a card listing every agent + router + watchdog as green.
+2. `/team` → each agent's heartbeat fresh (♥ < 30 s).
+3. `@manager` + a task → manager replies < 30 s and (if it dispatches) worker `say` cards land in the group.
 
-If any of those fail, see "Common failures" below.
+If any fail, see [Common failures](#common-failures) below.
 
 ---
 
@@ -485,21 +395,20 @@ idle chat the live WebSocket goes quiet; the router self-SIGTERMs via
 refetches anything missed from Feishu's REST API. The recovery loop *is*
 the design. Two log shapes distinguish the cases:
 
-- `ℹ️ no live events for Ns — rotating subscribe (none inbound yet this
-  session …)` — idle, no traffic yet. Expected; ignore.
+- `ℹ️ no live events for Ns — rotating subscribe (none inbound yet this session …)` — idle, no traffic yet. Expected; ignore.
 - `⚠️ live events stopped after Ns idle …` — events WERE flowing and
-  stopped. More notable (esp. on Linux, where the WS is meant to be
-  stable).
+stopped. More notable (esp. on Linux, where the WS is meant to be
+stable).
 
 **Don't trust the log to tell you inbound works — it never prints "I
 received your message".** The at-a-glance truth is `claudeteam health`'s
 `inbound:` line ("none observed yet" → "last event …") plus one real
 human message in the group (see the verify step above). If the `⚠️`
-variant is *constant*, check for a second `lark-cli +subscribe` stealing
+variant is *constant*, check for a second sidecar WebSocket stealing
 events (host vs container, or a stale orphan):
 
 ```bash
-ps -ef | grep -E "lark-cli.*subscribe" | grep -v grep
+ps -ef | grep -E "feishu_channel/sidecar\.js run" | grep -v grep
 ```
 
 ### Manager loops on the same anchored message after `claudeteam up`
@@ -521,14 +430,14 @@ or a session you forgot you had) holds onto its original global env.
 your launching shell's.
 
 The lifecycle prefix now embeds `FEISHU_APP_ID/SECRET` +
-`LARKSUITE_CLI_APP_*` + `CLAUDETEAM_STATE_DIR` directly into each
+`LARKSUITE_CLI_APP_`* + `CLAUDETEAM_STATE_DIR` directly into each
 spawn-cmd, so this should no longer trigger from a clean state. If you
 still see it, the orphan-tmux trap is the cause:
 
 ```bash
 # 1. surface stale tmux servers + orphan ClaudeTeam daemons
 tmux ls 2>/dev/null
-ps -ef | grep -E "claudeteam (router|watchdog)|lark-cli.*subscribe" | grep -v grep
+ps -ef | grep -E "claudeteam (router|watchdog)|feishu_channel/sidecar\.js" | grep -v grep
 
 # 2. clean up
 claudeteam down                           # graceful local stop
@@ -542,30 +451,24 @@ claudeteam up
 tmux show-environment -g | grep -E "FEISHU_APP_ID|CLAUDETEAM_STATE_DIR"  # verify
 ```
 
-### `lark-cli config init` rejects with "credentials are provided externally"
+### `say` / sidecar can't find App credentials
 
-Symptom (lark-cli 1.0.26+):
-```
-"error": "config" is not supported: credentials are provided externally
-        and do not support interactive management
-```
-Triggered by running `lark-cli config init …` while `FEISHU_APP_ID` /
-`FEISHU_APP_SECRET` (or `LARKSUITE_CLI_*`) are exported in the shell.
-lark-cli treats those env vars as an "external provider" signal and
-disables local config writes — but `~/.lark-cli/config.json` is still
-required for downstream `+chat-create --as bot` / subscribe to fetch a
-tenant token.
-
-Workaround: scrub the env for that one call only:
+Symptom: outbound cards fail to send, or the sidecar exits at startup
+complaining it has no app id/secret. Creds resolve from a single source:
+`state/feishu_app.json` (written by `claudeteam feishu connect`, mode
+0600), which `feishu/lark.py:subprocess_env()` reads to inject
+`FEISHU_APP_ID`/`FEISHU_APP_SECRET` + a tenant token into **both** the
+sidecar (ingress) and lark-cli (egress).
 
 ```bash
-echo -n "$FEISHU_APP_SECRET" | env -i HOME="$HOME" PATH="$PATH" \
-  LARK_CLI_NO_PROXY=1 \
-  lark-cli config init --app-id "$FEISHU_APP_ID" \
-                       --app-secret-stdin --brand feishu
+ls -l state/feishu_app.json          # expect mode -rw------- (0600)
 ```
-Once init has written `~/.lark-cli/config.json`, your normal shell
-(env vars present) can call lark-cli without further gymnastics.
+
+If the file is missing, re-run `claudeteam feishu connect` and re-scan.
+For Docker / advanced deploys, the env (`FEISHU_APP_ID` /
+`FEISHU_APP_SECRET`, or `LARKSUITE_CLI_*`) **overrides** the file — make
+sure those are set in `.env` and visible inside the container
+(`docker compose exec claudeteam env | grep FEISHU_APP_ID`).
 
 ### `worker_codex` shows "pane up but CLI not ready yet"
 
@@ -581,21 +484,23 @@ claudeteam reidentify worker_codex
 
 ## Operator-friendly entry points
 
-| Command | Purpose |
-| ------- | ------- |
-| `claudeteam up` / `down` | Bring team up / take it down |
-| `claudeteam health` | One-shot status (binaries, env, tmux, daemons, cursor, memory) |
-| `claudeteam team` | Each agent's state + ♥ heartbeat |
-| `claudeteam peek <agent> [N]` | Pane snapshot for the 5-min check-in cadence |
-| `claudeteam reidentify [<agent> \| --all]` | Re-inject identity.md (after prompt change) |
-| `claudeteam usage [--days N]` | ccusage wrapper for claude-code agents |
-| `claudeteam say <agent> "<msg>" --to <role>` | Post as agent into the chat |
-| `claudeteam remember <agent> <kind> "<note>"` | Write durable memory (auto-injected on next pane wake) |
-| `claudeteam remember <agent> <kind> "<note>" --team` | Write **shared team experience** (every agent sees it on wake) |
-| `claudeteam recall [<agent> \| --team]` | Read per-agent memory, or the shared team experience |
-| `claudeteam remember <agent> <kind> "<note>" --team --update <E-n>` | Edit a shared experience entry in place |
-| `claudeteam forget --team [--id <E-n>]` | Retire one shared entry (or wipe the pool with `--yes`) |
-| `claudeteam switch <team-dir>` | Print env exports for multi-team UX |
+
+| Command                                                             | Purpose                                                        |
+| ------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `claudeteam up` / `down`                                            | Bring team up / take it down                                   |
+| `claudeteam health`                                                 | One-shot status (binaries, env, tmux, daemons, cursor, memory) |
+| `claudeteam team`                                                   | Each agent's state + ♥ heartbeat                               |
+| `claudeteam peek <agent> [N]`                                       | Pane snapshot for the 5-min check-in cadence                   |
+| `claudeteam reidentify [<agent> | --all]`                           | Re-inject identity.md (after prompt change)                    |
+| `claudeteam usage [--days N]`                                       | ccusage wrapper for claude-code agents                         |
+| `claudeteam say <agent> "<msg>" --to <role>`                        | Post as agent into the chat                                    |
+| `claudeteam remember <agent> <kind> "<note>"`                       | Write durable memory (auto-injected on next pane wake)         |
+| `claudeteam remember <agent> <kind> "<note>" --team`                | Write **shared team experience** (every agent sees it on wake) |
+| `claudeteam recall [<agent> | --team]`                              | Read per-agent memory, or the shared team experience           |
+| `claudeteam remember <agent> <kind> "<note>" --team --update <E-n>` | Edit a shared experience entry in place                        |
+| `claudeteam forget --team [--id <E-n>]`                             | Retire one shared entry (or wipe the pool with `--yes`)        |
+| `claudeteam switch <team-dir>`                                      | Print env exports for multi-team UX                            |
+
 
 `claudeteam --help` lists everything grouped by section.
 
@@ -631,14 +536,12 @@ order — read it before making changes.
 The project is under active development — we **respond within 12 hours**.
 
 - 🐛 **GitHub issue** — open one at
-  [zylMozart/ClaudeTeam/issues](https://github.com/zylMozart/ClaudeTeam/issues/new/choose).
-  Include OS, deploy mode (host vs Docker), and the failing command's
-  output (or `/tmp/drive*.log` for bot creator stalls).
+[zylMozart/ClaudeTeam/issues](https://github.com/zylMozart/ClaudeTeam/issues/new/choose).
+Include OS, deploy mode (host vs Docker), and the failing command's
+output (for `feishu connect` issues, the sidecar's stderr).
 - 💬 **WeChat community group** — scan the QR below (refreshed weekly).
 
-<p align="center">
-  <img src="media/wechat-community-qr.png" alt="WeChat community QR code" width="240" />
-</p>
+
 
 If you're an AI agent driving a deploy and a step fails after a real
 attempt at recovery, surface this section to the user — there's a

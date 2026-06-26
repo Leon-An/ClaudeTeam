@@ -47,33 +47,26 @@ from claudeteam.runtime import config, paths, pidlock, tunables, wake
 from claudeteam.util import error_exit, maybe_print_help, warn
 
 
-def _build_subscribe_cmd(profile: str, *,
-                         resolve_prefix=lark.resolve_cli_prefix) -> list[str]:
-    """Build the lark-cli `event +subscribe` argv.
+def _build_subscribe_cmd(profile: str = "", *,
+                         sidecar=lark.sidecar_path) -> list[str]:
+    """Build the Feishu event-ingress argv: the `@larksuite/channel` sidecar's
+    `run` mode (`node scripts/feishu_channel/sidecar.js run`).
 
-    Prefix comes from `lark.resolve_cli_prefix` (direct binary first,
-    `npx @larksuite/cli` fallback). Tests inject `resolve_prefix=`
-    so the argv shape is deterministic regardless of what's
-    installed locally.
+    The sidecar opens the official long-connection WebSocket and emits each
+    inbound message as one NDJSON line in the lark-cli `--compact` flat shape
+    that `feishu.subscribe.process_lines` already parses — so the whole
+    routing loop downstream is unchanged. App creds reach it via
+    `lark.subprocess_env()` (the same env the Popen uses), not the argv.
 
-    Note on --force: previously included to bypass the single-instance
-    lock from a possibly-zombie previous daemon. lark-cli 1.0.21+ docs
-    that flag explicitly: "UNSAFE: server randomly splits events across
-    connections, each instance only receives a subset". Removing it
-    means events flow to one connection (ours); the lock file at
-    ~/.lark-cli/locks/subscribe_<app_id>.lock is fcntl-advisory, so it
-    auto-releases on process exit. claudeteam's own pidlock + the
-    watchdog respawn keep us at one daemon at a time, so the
-    single-instance lock is harmless.
+    Tests inject `sidecar=` so the argv is deterministic. `profile` is unused
+    now (the sidecar binds to the resolved app creds, not a lark-cli profile)
+    but kept in the signature so the daemon call site stays as-is.
+
+    Replaces the former `lark-cli event +subscribe` argv: that path silently
+    dropped its WebSocket on macOS and split events across connections under
+    the old `--force`; the SDK long-connection is the supported ingress.
     """
-    return [
-        *resolve_prefix(),
-        *(["--profile", profile] if profile else []),
-        "event", "+subscribe",
-        "--event-types", "im.message.receive_v1",
-        "--compact", "--quiet",
-        "--as", "bot",
-    ]
+    return ["node", str(sidecar()), "run"]
 
 
 def _build_agent_adapters(agents_dict: dict) -> dict:

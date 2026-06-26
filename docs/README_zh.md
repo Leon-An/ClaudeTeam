@@ -101,34 +101,37 @@ Docker 部署：只要 Docker 20.10+ 和 Compose v2（CLI 跟容器一起带，�
 
 ## 快速开始
 
-> **第一步**：建一个飞书 App + 把机器人加进群（[见下文](#飞书机器人配置)），拿到 `App ID` / `App Secret` / 群 `chat_id`。
+唯一的交互步骤是一次性 **扫码**：`claudeteam init` 会建好飞书 App、自动建团队群、
+把你拉进群——不用进开发者后台、不用到处复制 App ID。（→ [飞书机器人配置](#飞书机器人配置)）
+
+然后从上到下跑完即可，没有分支、不用 `export`：
 
 ```bash
-git clone https://github.com/zylMozart/ClaudeTeam.git
-cd ClaudeTeam
-
-# 当前 shell 环境 (写进 ~/.zshrc 永久化)
-export CLAUDETEAM_STATE_DIR="$PWD/state"
-export LARK_CLI_NO_PROXY=1
-export CLAUDETEAM_LARK_SEND_AS=bot
-
-# 安装
-python3 -m venv .venv && source .venv/bin/activate
+# 1 — 代码 + `claudeteam` CLI（零 Python 依赖）
+git clone https://github.com/zylMozart/ClaudeTeam.git && cd ClaudeTeam
+python3 -m venv .venv && source .venv/bin/activate     # Python 3.10+
 pip install -e .
 
-# 配置
-claudeteam init                  # 写 claudeteam.toml
-$EDITOR claudeteam.toml          # 填 chat_id 和 agents
-claudeteam install-hooks         # 装 claude-code 斜杠命令钩子
+# 2 — PATH 上的外部工具（都不是 pip 能装的）：
+#       tmux · node + npx · lark-cli (npm i -g @larksuite/cli)
+#       · 至少一个 agent CLI：claude / codex / pi / opencode / …（见适配表）
 
-# 启动
-claudeteam up                    # tmux + agents + router + watchdog
-claudeteam health                # 查 green/yellow/red
+# 3 — 配置 + 注册机器人：先生成配置，再扫码注册 bot
+claudeteam init                  # 写 claudeteam.toml，然后跑 `feishu connect`：
+                                 #   在飞书里扫码 → App 建好、团队群自动建好并把你拉进去、
+                                 #   App 凭证 + chat_id 自动保存
+claudeteam install-hooks         # claude-code 斜杠命令钩子——要在 `up` 之前装
+
+# 4 — 启动 + 验证
+claudeteam up                    # tmux + agents + router + watchdog；全员进群报到
+claudeteam health                # 期望全绿
 ```
 
-之后在飞书群里跟团队对话即可，由 manager 派活。
+之后在飞书群里发 `/health`，再 `@manager 你好`——manager 约 30 秒内回。
 
-详细安装、Docker 部署、多团队隔离、故障排查见 **[docs/DEPLOYMENT.md](DEPLOYMENT.md)**。
+> **不用每个 shell 设环境变量。** `claudeteam init` 把 `send_as` / `no_proxy`
+> 写进 `claudeteam.toml`，state 默认落在 `~/.claudeteam`。Docker、多团队隔离、
+> 完整参考见 **[docs/DEPLOYMENT.md](DEPLOYMENT.md)**。
 
 ---
 
@@ -176,57 +179,31 @@ role = "策划员工"
 
 ## 飞书机器人配置
 
-ClaudeTeam 需要一个飞书自建应用 + 一组权限 + 事件订阅 + 卡片回调。两条路：
-
-### 自动化 (推荐)
-
-附带的 Playwright 脚本会建 App、加 Bot、批量导入 ~480 条权限、订阅事件 (持久连接 + 消息事件)、开卡片 callback、发布版本。两种模式：
+一条命令、一次**扫码**——不用开发者后台、不用 Playwright。`claudeteam init`
+首次部署时会自动跑它，你也可以单独跑：
 
 ```bash
-cd scripts/feishu_bot_creator
-npm install               # 顺带装 playwright chromium
-
-# 一次性扫码登录
-node create_feishu_bot.js login
+claudeteam feishu connect        # 扫描终端里渲染出来的二维码
 ```
 
-**Drive 模式 (推荐 agent 用)** — `drive` 是单入口：开一次 chromium，没 cookies 就让用户扫码，然后跑第一个未完成 stage 后等 agent 下一步指令。整个 7 stage 浏览器不重启。
+这一次扫码（基于官方
+[`@larksuite/channel`](https://www.npmjs.com/package/@larksuite/channel) SDK
+的 RFC-8628 设备授权流程）会：
 
-```bash
-# drive 跑后台。第一次扫码 ~30s，cookies 持久化，下次跳过。
-node create_feishu_bot.js drive my-bot "我的 ClaudeTeam 机器人" \
-  > /tmp/drive.log 2>&1 &
+1. **建好**一个开启了机器人能力的飞书 PersonalAgent 应用，
+2. **授予**它要用的 IM 权限 + 消息事件——只有不支持一次性开通的租户上才会
+   再弹一个 *授权权限* 二维码，
+3. **自动建好**团队群并**把你（扫码人）拉进去**，
+4. **保存** App 凭证到 `state/feishu_app.json`（权限 0600）+ 新的 `chat_id`
+   写进 `claudeteam.toml`。
 
-# Agent 看 /tmp/drive.log + .state/my-bot.json，每 stage 完后用：
-echo next             > scripts/feishu_bot_creator/.state/my-bot.cmd
-echo skip             > scripts/feishu_bot_creator/.state/my-bot.cmd
-echo "redo events"    > scripts/feishu_bot_creator/.state/my-bot.cmd
-echo quit             > scripts/feishu_bot_creator/.state/my-bot.cmd
-```
+之后 `claudeteam up` 把全员带进这个群——每个成员发一张「报到」卡片。二维码 +
+授权链接直接渲染到终端，不用手动复制任何东西。
 
-命令含义：
-- `next` — 跑下一个未完成 stage (顺利路径)
-- `skip` — agent 已经**在浏览器里手动**完成当前失败的 stage，标完成后下一个 (UI 改版踩坑的逃生口)
-- `redo <stage-id>` — 取消该 stage 完成标记，下次重跑
-- `quit` — 关浏览器退出
-
-7 个 stage 顺序：`create-app → add-bot → import-scopes → data-range → events → callbacks → publish`。每个 stage 的 Playwright 操作 / 手动等价 / 失败恢复都写在 [`docs/setup_feishu_bot.md`](setup_feishu_bot.md)。
-
-**Unattended 模式** — 一口气跑完 7 stage 不等 agent。仅在 selector 完全可信时用 (重建已知好的 bot / 批量建测试 App)：
-
-```bash
-node create_feishu_bot.js create my-bot "我的 ClaudeTeam 机器人"
-node create_feishu_bot.js batch bots.json     # [{name, description}, ...]
-```
-
-完工后把 `App ID` + `App Secret` 填进 `.env` (Docker) 或 `claudeteam.toml`，加上群 `chat_id`。
-
-### 手动
-
-两个版本任选：
-
-- [`docs/setup_feishu_bot.md`](setup_feishu_bot.md) — 文字版 walkthrough，跟自动化同样 7 stage，方便快速浏览。
-- [`docs/setup_feishu_bots_guide.pdf`](setup_feishu_bots_guide.pdf) — 截图密集 click-by-click 人类版指南，第一次接触飞书开放平台时友好。
+> 底层：`scripts/feishu_channel/` 下一个薄薄的 sidecar 包了 `@larksuite/channel`
+> SDK（跟
+> [zarazhangrui/lark-channel-bridge](https://github.com/zarazhangrui/feishu-claude-code-bridge)
+> 用的是同一个），注册和 WebSocket 事件入站都走它。
 
 ---
 
@@ -235,8 +212,6 @@ node create_feishu_bot.js batch bots.json     # [{name, description}, ...]
 | 文档 | 内容 |
 | --- | --- |
 | [`docs/DEPLOYMENT.md`](DEPLOYMENT.md) | Host + Docker 部署 / 配置 schema / 多团队隔离 / 故障排查 |
-| [`docs/setup_feishu_bot.md`](setup_feishu_bot.md) | 飞书机器人创建 — 文字版 (跟自动化同 7 stage) |
-| [`docs/setup_feishu_bots_guide.pdf`](setup_feishu_bots_guide.pdf) | 飞书机器人创建 — 截图人类版 |
 | [`CLAUDE.md`](../CLAUDE.md) | 改代码前的内部规范 |
 
 ---

@@ -23,77 +23,41 @@ from claudeteam.commands.router import (
 )
 
 
-# Stub `resolve_prefix` so test argv doesn't depend on whether lark-cli
-# is on the test runner's PATH. Real production resolution is tested in
-# tests/unit/test_feishu_lark.py.
-_STUB_PREFIX = lambda: ["FAKE-LARK-CLI"]
+# Stub the sidecar path so test argv doesn't depend on the repo layout.
+_STUB_SIDECAR = lambda: "/fake/scripts/feishu_channel/sidecar.js"
 
 
-# ── _build_subscribe_cmd ──────────────────────────────────────────
+# ── _build_subscribe_cmd (Channel SDK sidecar ingress) ─────────────
 
 
-def test_build_cmd_with_profile_inserts_profile_flag():
-    cmd = _build_subscribe_cmd("test-live-a", resolve_prefix=_STUB_PREFIX)
-    assert cmd[0] == "FAKE-LARK-CLI"
-    assert "--profile" in cmd and "test-live-a" in cmd
-    # --profile must come BEFORE the "event" subcommand (lark-cli
-    # parses global flags before subcommand args)
-    profile_idx = cmd.index("--profile")
-    event_idx = cmd.index("event")
-    assert profile_idx < event_idx
+def test_build_cmd_launches_sidecar_run():
+    """Ingress is `node <repo>/scripts/feishu_channel/sidecar.js run` — the
+    @larksuite/channel sidecar that emits the same --compact NDJSON shape
+    process_lines already parses. Replaced the old lark-cli `event +subscribe`
+    argv (which silently dropped its WebSocket on macOS)."""
+    cmd = _build_subscribe_cmd("ignored-profile", sidecar=_STUB_SIDECAR)
+    assert cmd == ["node", "/fake/scripts/feishu_channel/sidecar.js", "run"]
 
 
-def test_build_cmd_uses_lark_resolve_cli_prefix():
-    """REGRESSION: subscribe argv must come from
-    `lark.resolve_cli_prefix` (direct binary preferred). Hardcoded
-    `npx @larksuite/cli` paid the package-lookup overhead on every
-    router restart for nothing — the direct-binary work that saved
-    ~250-500 ms per one-shot call had missed this hot path."""
+def test_build_cmd_uses_lark_sidecar_path_by_default():
+    """Default sidecar path comes from `lark.sidecar_path()` so one resolver
+    (honoring CLAUDETEAM_FEISHU_SIDECAR_DIR) feeds both the ingress and
+    `feishu connect`."""
     from claudeteam.feishu import lark
     cmd = _build_subscribe_cmd("")
-    expected = lark.resolve_cli_prefix()
-    assert cmd[:len(expected)] == expected
+    assert cmd == ["node", str(lark.sidecar_path()), "run"]
 
 
-def test_build_cmd_without_profile_omits_profile_flag():
-    """No profile passed → no --profile in the argv (lark-cli falls back
-    to its default profile)."""
-    cmd = _build_subscribe_cmd("", resolve_prefix=_STUB_PREFIX)
-    assert "--profile" not in cmd
-
-
-def test_build_cmd_filters_to_im_message_receive():
-    """Only inbound text-style chat events; lark-cli has many other event
-    types we don't want firing the router."""
-    cmd = _build_subscribe_cmd("", resolve_prefix=_STUB_PREFIX)
-    assert "--event-types" in cmd
-    et_idx = cmd.index("--event-types")
-    assert cmd[et_idx + 1] == "im.message.receive_v1"
-
-
-def test_build_cmd_uses_compact_quiet_bot_identity():
-    """REGRESSION: --compact gets the JSON shape we parse; --quiet
-    drops banner noise; --as bot uses the app's im:message scope
-    rather than user OAuth (which expires)."""
-    cmd = _build_subscribe_cmd("", resolve_prefix=_STUB_PREFIX)
-    for flag in ("--compact", "--quiet"):
-        assert flag in cmd, f"missing {flag}"
-    as_idx = cmd.index("--as")
-    assert cmd[as_idx + 1] == "bot"
-
-
-def test_build_cmd_does_NOT_use_force_anymore():
-    """REGRESSION: --force is "UNSAFE: server randomly splits events
-    across connections, each instance only receives a subset" per
-    lark-cli 1.0.21 docs. Was almost certainly a contributor to the
-    silent event loss the catchup fix papered over.
-    The single-instance lock at ~/.lark-cli/locks/subscribe_<app>.lock
-    is fcntl-advisory and auto-releases on process exit; claudeteam's
-    own pidlock keeps us at one router at a time so collision is
-    impossible in practice."""
-    cmd = _build_subscribe_cmd("", resolve_prefix=_STUB_PREFIX)
-    assert "--force" not in cmd, (
-        "--force re-introduced; will cause silent event sharding")
+def test_build_cmd_no_larkcli_subscribe_argv():
+    """REGRESSION: the lark-cli `event +subscribe` path is deleted — none of
+    its args may leak back in. The sidecar binds to the resolved app creds via
+    env (lark.subprocess_env), not the argv, so there is no --profile / --as /
+    --event-types / --force / +subscribe / --compact on the command line."""
+    cmd = _build_subscribe_cmd("", sidecar=_STUB_SIDECAR)
+    joined = " ".join(cmd)
+    for stale in ("+subscribe", "--force", "--event-types",
+                  "--as", "--compact", "--profile"):
+        assert stale not in joined, f"stale lark-cli arg {stale!r} re-introduced"
 
 
 # ── main() early validations ─────────────────────────────────────

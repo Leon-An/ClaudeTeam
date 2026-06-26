@@ -16,6 +16,13 @@
 （`tests/unit/test_*.py` 用 mock 自动跑）。这里只放需要真飞书 + 真 tmux +
 真 CLI 联动才能验证的剧本。
 
+## 前置：第一次部署先注册 bot
+
+→ **[feishu_connect.md](feishu_connect.md)**
+
+一次扫码（`claudeteam init` 自动跑 `feishu connect`）建好飞书 App + 团队群 +
+落凭证，并验证 `sidecar.js run` 事件入站通了。host_smoke 默认你已跑过本篇。
+
 ## 入口：刚部署完想 1 分钟过一遍
 
 → **[host_smoke.md](host_smoke.md)**

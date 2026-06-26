@@ -302,12 +302,12 @@ def _claudeteam_spec(name: str, pid_file: Path, *,
     )
 
 
-# Markers identifying an orphaned lark-cli `event +subscribe` chain
-# left behind when a previous router daemon was SIGKILL'd before its
-# SIGTERM handler could reap the subscribe group. The npm-exec parent
-# of the chain reparents to PID 1; matching it (rather than the deeper
-# node/lark-cli children) reaps the entire group on SIGTERM.
-_ROUTER_SUBSCRIBE_MARKERS = ("@larksuite/cli", "+subscribe")
+# Markers identifying an orphaned Feishu event-ingress process — the
+# `@larksuite/channel` sidecar's `run` mode (`node …/feishu_channel/sidecar.js
+# run`) — left behind when a previous router daemon was SIGKILL'd before its
+# SIGTERM handler could reap the subscribe group. Reparents to PID 1; both
+# substrings must appear (AND match) so we don't reap an unrelated node proc.
+_ROUTER_SUBSCRIBE_MARKERS = ("feishu_channel/sidecar.js", "run")
 
 
 def default_specs() -> list[ProcessSpec]:

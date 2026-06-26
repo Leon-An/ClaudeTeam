@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import subprocess
 
-from helpers import CallRecorder, FakeProc, env_patch
+from helpers import CallRecorder, FakeProc, attr_patch, env_patch, isolated_env
 from claudeteam.feishu import lark
 
 
@@ -664,3 +664,96 @@ def test_subprocess_env_skips_token_when_no_app_id_resolvable():
             env = lark.subprocess_env()
         assert "LARKSUITE_CLI_TENANT_ACCESS_TOKEN" not in env
         assert "LARKSUITE_CLI_APP_ID" not in env
+
+
+# ── app creds state file (written by `feishu connect`, read by subprocess_env) ──
+
+
+def test_save_load_app_creds_roundtrip_is_0600():
+    import os, stat
+    with isolated_env():
+        lark.save_app_creds(app_id="cli_a", app_secret="s",
+                            owner_open_id="ou_x", tenant="lark")
+        assert lark.load_app_creds() == {
+            "app_id": "cli_a", "app_secret": "s",
+            "owner_open_id": "ou_x", "tenant": "lark"}
+        mode = stat.S_IMODE(os.stat(lark.app_creds_file()).st_mode)
+        assert mode == 0o600, f"creds file is {oct(mode)}, must be 0600"
+
+
+def test_load_app_creds_absent_returns_empty():
+    with isolated_env():
+        assert lark.load_app_creds() == {}
+
+
+def test_resolve_app_id_secret_env_wins_over_file():
+    with isolated_env():
+        lark.save_app_creds(app_id="cli_file", app_secret="sfile")
+        with env_patch(FEISHU_APP_ID="cli_env", FEISHU_APP_SECRET="senv"):
+            assert lark._resolve_app_id_secret() == ("cli_env", "senv")
+
+
+def test_resolve_app_id_secret_falls_back_to_creds_file():
+    with isolated_env():
+        lark.save_app_creds(app_id="cli_file", app_secret="sfile")
+        with env_patch(FEISHU_APP_ID=None, FEISHU_APP_SECRET=None,
+                       LARKSUITE_CLI_APP_ID=None, LARKSUITE_CLI_APP_SECRET=None):
+            assert lark._resolve_app_id_secret() == ("cli_file", "sfile")
+
+
+def test_subprocess_env_injects_creds_from_state_file():
+    """A state-file-only deploy (no env creds) still reaches `sidecar.js run`:
+    subprocess_env pins FEISHU_* + LARKSUITE_CLI_* to the registered app and
+    propagates the token. (_ensure_tenant_token stubbed — no network/cache.)"""
+    with isolated_env():
+        lark.save_app_creds(app_id="cli_f", app_secret="sf")
+        with env_patch(FEISHU_APP_ID=None, FEISHU_APP_SECRET=None,
+                       LARKSUITE_CLI_APP_ID=None, LARKSUITE_CLI_APP_SECRET=None,
+                       LARK_CLI_NO_PROXY="0"), \
+                attr_patch(lark, _ensure_tenant_token=lambda **k: "tk-file"):
+            env = lark.subprocess_env()
+    assert env["FEISHU_APP_ID"] == "cli_f"
+    assert env["LARKSUITE_CLI_APP_ID"] == "cli_f"
+    assert env["LARKSUITE_CLI_TENANT_ACCESS_TOKEN"] == "tk-file"
+
+
+def test_sidecar_path_respects_env_override():
+    with env_patch(CLAUDETEAM_FEISHU_SIDECAR_DIR="/opt/x"):
+        assert str(lark.sidecar_path()) == "/opt/x/sidecar.js"
+
+
+def test_sidecar_path_default_is_repo_relative():
+    with env_patch(CLAUDETEAM_FEISHU_SIDECAR_DIR=None):
+        p = lark.sidecar_path()
+        assert p.name == "sidecar.js"
+        assert p.parent.name == "feishu_channel"
+
+
+def test_subprocess_env_isolates_lark_cli_config_dir_when_creds_present():
+    """With creds resolved, lark-cli is pointed at a ClaudeTeam-owned config
+    dir so a stale global ~/.lark-cli/config.json can't hijack egress."""
+    import os
+    with isolated_env():
+        lark.save_app_creds(app_id="cli_f", app_secret="sf")
+        with env_patch(FEISHU_APP_ID=None, FEISHU_APP_SECRET=None,
+                       LARKSUITE_CLI_APP_ID=None, LARKSUITE_CLI_APP_SECRET=None,
+                       LARK_CLI_NO_PROXY="0"), \
+                attr_patch(lark, _ensure_tenant_token=lambda **k: "tk"):
+            env = lark.subprocess_env()
+        # assert inside the with — the dir lives under the isolated state dir,
+        # which TemporaryDirectory removes on exit.
+        assert env["LARKSUITE_CLI_CONFIG_DIR"].endswith("/lark-cli")
+        assert os.path.isdir(env["LARKSUITE_CLI_CONFIG_DIR"])
+
+
+def test_subprocess_env_keeps_global_config_dir_without_creds():
+    """No resolvable creds (pure-keychain host) → don't override the config dir
+    (lark-cli's own keychain path takes over)."""
+    with isolated_env(), \
+            env_patch(FEISHU_APP_ID=None, FEISHU_APP_SECRET=None,
+                      LARKSUITE_CLI_APP_ID=None, LARKSUITE_CLI_APP_SECRET=None,
+                      LARKSUITE_CLI_TENANT_ACCESS_TOKEN=None,
+                      LARKSUITE_CLI_CONFIG_DIR=None), \
+            attr_patch(lark, _ensure_tenant_token=lambda **k: None):
+        env = lark.subprocess_env()
+    assert "LARKSUITE_CLI_CONFIG_DIR" not in env

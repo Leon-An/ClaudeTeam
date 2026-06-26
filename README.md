@@ -126,9 +126,9 @@ container or via bind-mount).
 
 ## Quick start
 
-The only multi-step part is Feishu — hand it to a human once. You need three
-values: **App ID**, **App Secret**, and the **chat_id** of the group the bot
-is in. No app yet? → [Feishu bot setup](#feishu-bot-setup).
+The only interactive step is a one-time **QR scan**: `claudeteam init` creates
+the Feishu app, auto-creates your team's group chat, and adds you — no developer
+console, no copying App IDs around. (→ [Feishu bot setup](#feishu-bot-setup).)
 
 Then run these top to bottom — no branching, nothing to `export`:
 
@@ -142,13 +142,14 @@ pip install -e .
 #       tmux · node + npx · lark-cli (npm i -g @larksuite/cli)
 #       · at least one agent CLI: claude / codex / pi / opencode / … (see README adapter table)
 
-# 3 — config: generate, then set chat_id (+ App ID/Secret); agents have defaults
-claudeteam init                  # writes claudeteam.toml (send_as=bot, no_proxy=true preset)
-$EDITOR claudeteam.toml          # fill in chat_id
+# 3 — config + bot: generate config, then scan a QR to register the bot
+claudeteam init                  # writes claudeteam.toml, then runs `feishu connect`:
+                                 #   scan the QR in Feishu → app created, team group
+                                 #   auto-created with you in it, App creds + chat_id saved
 claudeteam install-hooks         # claude-code slash hooks — run BEFORE `up`
 
 # 4 — launch + verify
-claudeteam up                    # tmux + agents + router + watchdog
+claudeteam up                    # tmux + agents + router + watchdog; crew reports into the group
 claudeteam health                # expect all green
 ```
 
@@ -208,82 +209,31 @@ role = "策划员工"
 
 ## Feishu bot setup
 
-ClaudeTeam needs a Feishu enterprise custom app (bot) with the right
-permissions, event subscriptions, and callbacks. Two ways to set it up:
-
-### Automated (recommended)
-
-The bundled Playwright script creates and fully configures a Feishu
-bot — app creation, bot capability, ~480 permission scopes, event
-subscriptions (persistent connection + message events), card
-callbacks, and version publishing. It runs in two modes:
+One command, one **QR scan** — no developer console, no Playwright. `claudeteam
+init` runs this automatically on first set-up; you can also run it on its own:
 
 ```bash
-cd scripts/feishu_bot_creator
-npm install               # also installs playwright chromium (postinstall)
-
-# One-time login (scan QR code with Feishu mobile)
-node create_feishu_bot.js login
+claudeteam feishu connect        # scan the QR rendered in the terminal
 ```
 
-**Drive mode (recommended for agents)** — `drive` is the single
-entry point: it opens chromium **once**, asks the user to scan QR if
-no saved cookies, then **auto-advances through all 7 stages** and exits
-when publish completes. Browser stays open the whole time. The `.cmd`
-commands below are **only for failure recovery** — the happy path needs
-none of them.
+That single scan (an RFC-8628 device-flow via the official
+[`@larksuite/channel`](https://www.npmjs.com/package/@larksuite/channel) SDK):
 
-```bash
-# Start drive in the background. If first run, user scans QR (~30 s);
-# cookies persist so subsequent drives skip this. Then it runs all 7
-# stages on its own.
-node create_feishu_bot.js drive my-bot "My ClaudeTeam bot" \
-  > /tmp/drive.log 2>&1 &
+1. **creates** a Feishu PersonalAgent app with the bot capability enabled,
+2. **grants** the IM scopes + message event it needs — an extra *approve-scopes*
+   QR appears only on tenants without one-scan provisioning,
+3. **auto-creates** your team's group chat and **adds you** (the scanner),
+4. **saves** the App creds (`state/feishu_app.json`, mode 0600) + the new
+   `chat_id` into `claudeteam.toml`.
 
-# Agent watches /tmp/drive.log + .state/my-bot.json. ONLY if a stage
-# hard-fails does drive stop and wait — then steer with one of:
-echo skip             > scripts/feishu_bot_creator/.state/my-bot.cmd
-echo "redo events"    > scripts/feishu_bot_creator/.state/my-bot.cmd
-echo next             > scripts/feishu_bot_creator/.state/my-bot.cmd
-echo quit             > scripts/feishu_bot_creator/.state/my-bot.cmd
-```
+Then `claudeteam up` brings the crew into that group — each member posts a
+"reporting in" card. The QR + authorization link render straight to the
+terminal; nothing to copy by hand.
 
-Command meanings (failure-recovery only — happy path auto-advances):
-- `skip` — agent finished the current failed stage **manually in the
-  open browser**; mark it done and move on (key escape hatch when
-  Feishu UI changes break a Playwright selector)
-- `next` — advance to the next stage without marking the current done
-- `redo <stage-id>` — un-mark that stage so the next iteration re-runs it
-- `quit` — close browser and exit
-
-Stages: `create-app → add-bot → import-scopes → data-range → events
-→ callbacks → publish`. Each one is described in
-[`docs/setup_feishu_bot.md`](docs/setup_feishu_bot.md) — what
-Playwright does, the equivalent manual UI steps, and how to recover
-if a stage fails.
-
-**Unattended mode** — runs all 7 stages straight through without
-agent involvement. Use only when you trust the selectors fully
-(e.g. recreating a known-good bot, or batching across many test apps):
-
-```bash
-node create_feishu_bot.js create my-bot "My ClaudeTeam bot"
-node create_feishu_bot.js batch bots.json     # [{name, description}, ...]
-```
-
-When done, paste the `App ID` + `App Secret` into your `.env` (Docker)
-or `claudeteam.toml`, plus the `chat_id` of the group the bot was
-added to.
-
-### Manual
-
-Two flavours, pick whichever you prefer:
-
-- [`docs/setup_feishu_bot.md`](docs/setup_feishu_bot.md) — text walkthrough,
-  same 7 stages as the auto-creator, easy to skim.
-- [`docs/setup_feishu_bots_guide.pdf`](docs/setup_feishu_bots_guide.pdf) —
-  screenshot-heavy click-by-click guide for human operators (great if
-  it's your first time touching the Feishu open platform).
+> Under the hood: a thin sidecar at `scripts/feishu_channel/` wraps the
+> `@larksuite/channel` SDK (the same one
+> [zarazhangrui/lark-channel-bridge](https://github.com/zarazhangrui/feishu-claude-code-bridge)
+> is built on) for both registration and the WebSocket event ingress.
 
 ---
 
@@ -292,8 +242,6 @@ Two flavours, pick whichever you prefer:
 | Doc | What's in it |
 | --- | ------------ |
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Host + Docker setup, config schema, multi-team isolation, troubleshooting |
-| [`docs/setup_feishu_bot.md`](docs/setup_feishu_bot.md) | Feishu bot creation — text walkthrough (same 7 stages as the auto-creator) |
-| [`docs/setup_feishu_bots_guide.pdf`](docs/setup_feishu_bots_guide.pdf) | Feishu bot creation — screenshot-heavy guide for human operators |
 | [`CLAUDE.md`](CLAUDE.md) | Building rules — read before changing code |
 
 ---

@@ -590,3 +590,45 @@ def test_fire_hire_roster_block_roundtrip_is_field_faithful():
             # verbatim fidelity: alignment + multi-line block survived
             assert "cli        = \"kimi-code\"" in text
             assert 'notes = """' in text
+
+
+# ── set_chat_id (written by `feishu connect` after auto-creating the group) ────
+
+
+def test_set_chat_id_writes_toml_in_place_preserving_comment():
+    import os
+    from pathlib import Path
+    from claudeteam.runtime import tunables
+    with isolated_env():
+        cf = Path(os.environ["CLAUDETEAM_CONFIG_FILE"])
+        cf.write_text('chat_id      = ""                  # the group\n',
+                      encoding="utf-8")
+        tunables.reset_cache()
+        ok, _ = config.set_chat_id("oc_new")
+        assert ok
+        text = cf.read_text(encoding="utf-8")
+        assert 'chat_id      = "oc_new"' in text
+        assert "# the group" in text            # trailing comment preserved
+        assert config.chat_id() == "oc_new"     # same-process read sees it
+
+
+def test_set_chat_id_prepends_when_no_chat_id_line():
+    import os
+    from pathlib import Path
+    from claudeteam.runtime import tunables
+    with isolated_env():
+        cf = Path(os.environ["CLAUDETEAM_CONFIG_FILE"])
+        cf.write_text('[team]\nsession = "S"\n', encoding="utf-8")
+        tunables.reset_cache()
+        ok, _ = config.set_chat_id("oc_z")
+        assert ok
+        assert config.chat_id() == "oc_z"
+
+
+def test_set_chat_id_falls_back_to_runtime_json_without_toml():
+    # isolated_env pins CONFIG_FILE at a non-existent toml → json fallback path.
+    with isolated_env():
+        ok, msg = config.set_chat_id("oc_json")
+        assert ok
+        assert "runtime_config" in msg
+        assert config.chat_id() == "oc_json"
