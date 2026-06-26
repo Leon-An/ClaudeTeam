@@ -258,8 +258,9 @@ def _ensure_claude_agent_home(agent: str) -> None:
         _mark_project_trusted(claude_json, Path.cwd())
 
 
-# Per-CLI OAuth/credential file to copy from the operator HOME into the
-# agent's isolated HOME so HOME isolation (Wave 2) doesn't log the CLI out.
+# Per-CLI OAuth/credential file to SYMLINK from the operator HOME into the
+# agent's isolated HOME so HOME isolation doesn't log the CLI out — and so a
+# token refresh propagates to the one shared file (no per-agent drift).
 # Keyed by the adapter's process_name() so the package-name aliases
 # (kimi-cli / qwen-cli) collapse onto one entry. Value:
 #   (rel  — path of the cred file under HOME, identical on both sides,
@@ -281,9 +282,10 @@ _CLI_CRED_SEEDS: dict[str, tuple[str, str | None]] = {
 
 
 def _seed_cli_credentials(agent: str, cli: str) -> None:
-    """Copy the operator's OAuth credential file for `cli` into the agent's
+    """Symlink the operator's OAuth credential file for `cli` into the agent's
     isolated HOME, so the per-agent `HOME=<agent_home>` (codex: `CODEX_HOME`)
-    doesn't strand the CLI at a fresh, logged-out state dir.
+    doesn't strand the CLI at a fresh, logged-out state dir — and a token
+    refresh propagates to the one shared file instead of drifting per agent.
 
     Best-effort throughout — any of these silently skips, never aborting the
     provision:
@@ -310,15 +312,17 @@ def _seed_cli_credentials(agent: str, cli: str) -> None:
     from claudeteam.agents.claude_code import agent_home as _agent_home
     src = Path.home() / rel
     dst = Path(_agent_home(agent)) / rel
-    if dst.exists() or not _path_readable(src):
-        return
-    try:
-        data = src.read_bytes()
-    except OSError:
+    if dst.exists() or dst.is_symlink() or not _path_readable(src):
         return
     try:
         dst.parent.mkdir(parents=True, exist_ok=True)
-        dst.write_bytes(data)
+        # Symlink, NOT copy: the agent reads the ONE shared credential file, so
+        # an OAuth token refresh propagates to every agent and the operator —
+        # no per-agent drift, no rotating-refresh logout. (Matches multica's
+        # codex handling.) claude is the deliberate exception: it atomic-writes
+        # credentials, which would replace this link with a stale private file
+        # → 401, so it is copied in _ensure_claude_agent_home instead.
+        dst.symlink_to(src)
     except OSError:
         pass
 

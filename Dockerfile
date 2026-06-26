@@ -32,9 +32,15 @@ RUN apt-get update \
         procps \
         libdbus-1-3 \
         xz-utils \
-    && rm -rf /var/lib/apt/lists/*
+        ripgrep \
+        fd-find \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf "$(command -v fdfind)" /usr/local/bin/fd
 # `libdbus-1-3`: CodeWhale's prebuilt binary links it at runtime.
 # `xz-utils`: unpack the Node tarball below.
+# `ripgrep` + `fd` (symlinked from Debian's fdfind): on PATH so pi finds them
+# and does NOT download fd/rg into each per-agent ~/.pi/agent/bin — which N
+# concurrent pi instances would otherwise race to write (verified).
 # nodejs/npm are NOT from apt — Debian trixie ships Node 20, but openclaw
 # requires Node >= 22. We drop the official Node 22 tarball into /usr/local
 # instead (provides node + npm; the other npm-global CLIs run fine on 22).
@@ -135,7 +141,14 @@ RUN export PATH="$HOME/.local/bin:$PATH" \
 # Hermes (Nous Research). Use the venv installer with --skip-setup (avoids
 # the interactive setup prompt). Do NOT pass --no-venv: it produces a
 # self-exec'ing /usr/local/bin/hermes wrapper that hangs forever.
-RUN curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup \
+# The installer git-clones its repo, which intermittently fails with a TLS/RPC
+# error on a flaky network — retry a few times so one hiccup doesn't sink the
+# whole build. (A harmless "ffmpeg not found" prints because apt lists were
+# cleaned; hermes runs text-only without it.)
+RUN for i in 1 2 3 4; do \
+        curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup \
+        && command -v hermes && break || { echo "hermes install attempt $i failed; retrying"; sleep 5; }; \
+    done \
     && command -v hermes
 
 WORKDIR /app

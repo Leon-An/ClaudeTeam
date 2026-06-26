@@ -481,7 +481,10 @@ def _operator_cred(tmp: Path, rel: str, body: str) -> Path:
     return oper
 
 
-def test_seed_copies_codex_oauth_into_isolated_home():
+def test_seed_symlinks_codex_oauth_into_isolated_home():
+    """The agent's isolated CODEX_HOME gets a SYMLINK to the operator's
+    auth.json (not a copy), so an OAuth token refresh on the one shared file
+    propagates to every agent instead of drifting per agent."""
     from claudeteam.agents import claude_code
     team = {"agents": {"worker_codex": {"cli": "codex-cli"}}}
     with isolated_env(team=team) as tmp:
@@ -489,7 +492,11 @@ def test_seed_copies_codex_oauth_into_isolated_home():
         with env_patch(HOME=str(oper)):
             lifecycle._seed_cli_credentials("worker_codex", "codex-cli")
         dst = Path(claude_code.agent_home("worker_codex")) / ".codex" / "auth.json"
+        assert dst.is_symlink(), "expected a symlink, not a copy"
         assert dst.read_text() == '{"tokens":"oauth"}'
+        # a refresh on the shared file is seen through the link (the whole point)
+        (oper / ".codex" / "auth.json").write_text('{"tokens":"refreshed"}')
+        assert dst.read_text() == '{"tokens":"refreshed"}'
 
 
 def test_seed_resolves_package_name_alias():
