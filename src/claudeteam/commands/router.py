@@ -1,9 +1,9 @@
 """`claudeteam router`
 
-Long-running event subscriber: spawns `lark-cli event +subscribe`
-(direct binary preferred, npx fallback — see
-`feishu/lark.resolve_cli_prefix`) and feeds each NDJSON line into
-the routing loop (`feishu/subscribe.process_lines`).
+Long-running event subscriber: spawns the `@larksuite/channel` sidecar
+(`node scripts/feishu_channel/sidecar.js run`, the official WebSocket →
+NDJSON ingress) and feeds each NDJSON line into the routing loop
+(`feishu/subscribe.process_lines`).
 
 Boot order:
   1. Validate chat_id + agents (fast-fail BEFORE pidlock so up.py
@@ -13,7 +13,7 @@ Boot order:
   3. Replay `pending_lines(chat_id)` to backfill anything received
      while the daemon was down (catchup-on-restart cursor).
   4. Spawn the subscribe subprocess in its own session (so
-     SIGTERMing the daemon kills the entire npx → node → lark-cli
+     SIGTERMing the daemon kills the entire node sidecar
      tree via killpg).
   5. Spawn a daemon thread that polls the subscribe child's exit
      code every ~20s and self-SIGTERMs when it dies (lark-cli

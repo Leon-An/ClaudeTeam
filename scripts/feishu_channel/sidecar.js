@@ -19,9 +19,6 @@
 //                                                  flat shape process_lines parses.
 //   • (new) team group bootstrap → `create-group`  channel.createChat, inviting
 //                                                  the QR scanner (the owner).
-//   • (new) scope top-up         → `grant-scope`   incremental re-auth URL for an
-//                                                  existing app when `addons` were
-//                                                  ignored (platform gray-scale).
 //
 // Convention: stdout = the machine channel (one JSON object per one-shot mode,
 // NDJSON stream for `run`); stderr = human logs (QR, status, errors). Never mix.
@@ -51,11 +48,15 @@ function openBrowser(url) {
 //   im:message             — read inbound message content
 //   im:message.group_msg   — deliver un-@'d group chatter (crews talk freely)
 //   im:chat                — create the team group + invite the owner
+//   application:...self_manage — read the app's own scopes (the `scopes` verify)
+//                            + resolve its owner to invite (create-group); a fresh
+//                            app can't self-read without it
 const TENANT_SCOPES = [
   "im:message:send_as_bot",
   "im:message",
   "im:message.group_msg",
   "im:chat",
+  "application:application:self_manage",
 ];
 const TENANT_EVENTS = ["im.message.receive_v1"];
 const ADDONS = { scopes: { tenant: TENANT_SCOPES }, events: { items: { tenant: TENANT_EVENTS } } };
@@ -103,25 +104,14 @@ async function doRegister() {
   log("✅ 应用已创建并授权，凭据已输出（stdout）。");
 }
 
-// ── grant-scope: incremental re-auth for an EXISTING app (addons fallback) ────
-async function doGrantScope() {
-  const { appId } = appCreds();
-  log("→ 扫码 / 打开链接，确认 ClaudeTeam 需要的新权限（增量授权）：");
-  const r = await registerApp({
-    source: "claudeteam",
-    appId,                                         // update this app's config (shows a diff)
-    addons: ADDONS,
-    onQRCodeReady: renderQR,
-  });
-  emit({ event: "scope_granted", client_id: r.client_id });
-  log("✅ 权限已更新。");
-}
-
 // ── scopes: report the app's currently-granted tenant scopes ──────────────────
 // getAppInfo() only surfaces owner/name, so (like the bridge's app-scope.ts) we
-// read the scope list off the raw node-sdk client. Lets `feishu connect` decide
-// whether grant-scope is needed instead of guessing (addons silently no-op on
-// tenants without the gray-scale).
+// read the scope list off the raw node-sdk client. Lets `feishu connect` verify
+// the required scopes actually landed (the guided flow's gate) / warn when a
+// PersonalAgent lacks group_msg (--quick). NOTE: this self-read itself needs
+// `application:application:self_manage`, so a fresh app returns [] until that
+// scope is granted + the version published/approved — callers treat [] as
+// "unknown", not "none".
 async function doScopes() {
   const { appId, appSecret } = appCreds();
   const channel = createLarkChannel({ appId, appSecret });
@@ -160,7 +150,22 @@ async function doCreateGroup() {
 // ── run: official WebSocket channel → NDJSON on stdout ────────────────────────
 async function doRun() {
   const { appId, appSecret } = appCreds();
-  const channel = createLarkChannel({ appId, appSecret });
+  // ClaudeTeam routes EVERY group message to the manager (the whole
+  // "no @ → manager" UX). The SDK's policy DEFAULTS to requireMention:true,
+  // which silently drops un-@'d group messages *before* our `on("message")`
+  // handler (reason "no_mention") — so without this the boss must @bot for
+  // anything. Override it: deliver all group messages, honor @all broadcasts,
+  // and accept DMs. (Receiving un-@'d msgs still also needs the app's
+  // `im:message.group_msg` scope; this is the SDK-side half of the gate.)
+  // NB: SDK safety defaults are left as-is — it silently drops messages whose
+  // create_time is >30 min old. That's only reachable via an in-process WS
+  // reconnect replaying a stale buffered event; the Python catchup path recovers
+  // real backlog on daemon restart independently, so we accept the default rather
+  // than widen it and risk replaying stale history.
+  const channel = createLarkChannel({
+    appId, appSecret,
+    policy: { requireMention: false, respondToMentionAll: true, dmMode: "open" },
+  });
 
   channel.on("message", (msg) => {
     // NormalizedMessage → the flat lark-cli --compact shape. content is
@@ -193,18 +198,17 @@ async function doRun() {
 
 const MODES = {
   register: doRegister,
-  "grant-scope": doGrantScope,
   scopes: doScopes,
   "create-group": doCreateGroup,
   run: doRun,
 };
 // One-shot modes resolve and must exit (createLarkChannel keeps timers/sockets
 // alive); only `run` stays up, held by its WebSocket + heartbeat interval.
-const ONESHOT = new Set(["register", "grant-scope", "scopes", "create-group"]);
+const ONESHOT = new Set(["register", "scopes", "create-group"]);
 const mode = process.argv[2];
 const fail = (e) => {
   log("✗", e instanceof LarkChannelError ? `${e.code}: ${e.message}` : (e?.stack || e?.message || e));
   process.exit(1);
 };
 if (MODES[mode]) MODES[mode]().then(() => { if (ONESHOT.has(mode)) process.exit(0); }).catch(fail);
-else { log("usage: sidecar.js register | grant-scope | scopes | create-group | run"); process.exit(2); }
+else { log("usage: sidecar.js register | scopes | create-group | run"); process.exit(2); }

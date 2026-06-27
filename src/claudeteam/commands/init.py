@@ -35,7 +35,7 @@ _DEFAULT_TOML_TEMPLATE = """\
 # 优先级: env > 本文件 > 代码硬编码默认
 
 # ── 部署常量 ────────────────────────────────────────────────
-chat_id      = ""                         # 由 `claudeteam feishu connect` 扫码建群后自动写入
+chat_id      = ""                         # 由 `claudeteam feishu connect` 注册建群后自动写入
 lark_profile = ""                         # lark-cli profile 名, 空字符串走默认
 default_model = "opus"                    # team.json agent 没指定 model 时回退到这里
 # App ID / App Secret 不写在这里：`feishu connect` 写入 state/feishu_app.json (0600)，
@@ -252,9 +252,10 @@ def main(argv: list[str]) -> int:
     # First-run bot registration — replaces the old manual Playwright
     # bot-creator + `lark-cli config init`. Unless creds already exist or
     # --no-connect (CI / scripted), drop straight into `feishu connect`
-    # (QR scan → app + group + creds + chat_id). `up` is deliberately NOT the
-    # hook: it's idempotent / headless / watchdog-driven, so an interactive
-    # scan there would break restarts. `init` is the one-time interactive entry.
+    # (guided self-built app → scopes → group + creds + chat_id). `up` is
+    # deliberately NOT the hook: it's idempotent / headless / watchdog-driven,
+    # so an interactive prompt there would break restarts. `init` is the
+    # one-time interactive entry.
     from claudeteam.feishu import lark as _lark
     have_creds = bool(_lark.load_app_creds().get("app_id")
                       or env_str("FEISHU_APP_ID"))
@@ -272,7 +273,11 @@ def main(argv: list[str]) -> int:
 
     print("Next:")
     if not have_creds:  # --no-connect: register later, by hand
-        print("  - claudeteam feishu connect  # 扫码注册机器人 + 自动建群（替代旧流程）")
+        print("  - claudeteam feishu connect  # 引导注册自建应用 + 建群（--quick 走扫码个人版）")
+    else:  # creds came from env (Docker .env) — but the group/chat_id still isn't set
+        print("  - 设置 chat_id：把团队群的 chat_id 填进 claudeteam.toml")
+        print("      （没有群？在一台能开浏览器的机器上跑 `claudeteam feishu connect` 建群，")
+        print("       把输出的 oc_... 复制进来——`up` 没有 chat_id 会直接报错）")
     print("  - claudeteam install-hooks   # write .claude/commands/*.md")
     print(f"  - claudeteam up              # tmux session '{session}' + router + watchdog")
     print("  - claudeteam health          # verify green")

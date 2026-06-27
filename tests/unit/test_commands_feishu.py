@@ -1,15 +1,20 @@
-"""Tests for `claudeteam feishu connect` — the automatic bot-registration flow.
+"""Tests for `claudeteam feishu connect`.
+
+Two modes:
+  • default = guided self-built app (prompts for App ID/Secret, hands a permission
+    deep-link, verifies im:message.group_msg landed, creates the group).
+  • --quick = one-scan PersonalAgent device flow (warns if group_msg can't be had).
 
 The node sidecar (network + interactive QR) is the one thing we can't run in a
-unit test, so we stub `feishu._run_sidecar` with a recorder that returns canned
-per-mode JSON (exactly what the real sidecar emits on stdout). That lets us
-assert the orchestration: creds persisted 0600, chat_id written to the toml, and
-`grant-scope` invoked ONLY when the default scopes don't already cover sending.
+unit test, so we stub `feishu._run_sidecar` with a recorder that returns the
+canned per-mode JSON the real sidecar emits, and inject `prompt=` for the
+guided flow's console inputs.
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import os
-import stat
 from pathlib import Path
 
 from helpers import attr_patch, isolated_env, run_cli
@@ -19,16 +24,15 @@ from claudeteam.runtime import config, tunables
 
 
 class _SidecarStub:
-    """Stand-in for `feishu._run_sidecar`. Records modes called and returns the
-    JSON each sidecar mode emits. `granted` controls the scopes mode so a test
-    can drive the grant-scope branch."""
+    """Stand-in for `feishu._run_sidecar`. Records modes called + returns the
+    JSON each sidecar mode emits. `granted` drives the scopes check."""
 
     def __init__(self, *, granted, register=...):
         self.calls: list[str] = []
         self.granted = list(granted)
         self._register = (
-            {"event": "registered", "client_id": "cli_new",
-             "client_secret": "sek", "owner_open_id": "ou_me", "tenant": "feishu"}
+            {"event": "registered", "client_id": "cli_new", "client_secret": "sek",
+             "owner_open_id": "ou_me", "tenant": "feishu"}
             if register is ... else register)
 
     def __call__(self, mode, *, extra_env=None):
@@ -36,106 +40,137 @@ class _SidecarStub:
         return {
             "register": self._register,
             "scopes": {"event": "scopes", "granted": self.granted},
-            "grant-scope": {"event": "scope_granted", "client_id": "cli_new"},
             "create-group": {"event": "group_created", "chat_id": "oc_new",
                              "invited": "ou_me"},
         }.get(mode)
 
 
-def _toml_with_empty_chat_id(tmp: Path) -> None:
-    """Seed the isolated claudeteam.toml with a top-level chat_id line for
-    set_chat_id to replace in place."""
+def _seed_toml() -> None:
     Path(os.environ["CLAUDETEAM_CONFIG_FILE"]).write_text(
         'chat_id = ""\n[team]\nsession = "S"\n', encoding="utf-8")
     tunables.reset_cache()
 
 
-def _connect_with(stub: _SidecarStub, tmp: Path):
+def _stub_sidecar(stub, tmp):
     sidecar = tmp / "sidecar.js"
     sidecar.write_text("// stub", encoding="utf-8")
-    with attr_patch(feishu, _run_sidecar=stub,
-                    _sidecar_path=lambda: sidecar,
-                    _ensure_node_deps=lambda d: True):
-        return run_cli(["feishu", "connect"])
+    return attr_patch(feishu, _run_sidecar=stub, _sidecar_path=lambda: sidecar,
+                      _ensure_node_deps=lambda d: True)
 
 
-# ── happy path: default scopes already cover sending → no grant-scope ─────────
+def _run_guided(stub, tmp, inputs):
+    """Drive the guided flow with scripted console inputs; suppress its prints."""
+    it = iter(inputs)
+    with _stub_sidecar(stub, tmp), contextlib.redirect_stdout(io.StringIO()):
+        return feishu._connect_guided([], prompt=lambda *a: next(it))
 
 
-def test_connect_persists_creds_and_chat_id():
-    stub = _SidecarStub(granted={"im:message:send_as_bot", "im:chat:create"})
+# ── guided (default): self-built app + group_msg verify ───────────────────────
+
+
+def test_guided_persists_creds_and_chat_id():
+    stub = _SidecarStub(granted={"im:message:send_as_bot", "im:message.group_msg"})
     with isolated_env(team={"agents": {"manager": {"cli": "claude-code"}}}) as tmp:
-        _toml_with_empty_chat_id(tmp)
-        rc, out, err = _connect_with(stub, tmp)
-        assert rc == 0, err
+        _seed_toml()
+        rc = _run_guided(stub, tmp, ["cli_self", "selfsecret", ""])
+        assert rc == 0
         creds = lark.load_app_creds()
-        assert creds["app_id"] == "cli_new"
-        assert creds["app_secret"] == "sek"
-        assert creds["owner_open_id"] == "ou_me"
+        assert creds["app_id"] == "cli_self" and creds["app_secret"] == "selfsecret"
         assert config.chat_id() == "oc_new"
-        # send scope present → grant-scope skipped
+        # guided does NOT register (no device flow); it verifies scopes + groups
+        assert stub.calls == ["scopes", "create-group"]
+        # creds file is 0600
+        import stat
+        assert stat.S_IMODE(os.stat(lark.app_creds_file()).st_mode) == 0o600
+
+
+def test_guided_aborts_when_group_msg_missing():
+    """The sensitive scope didn't land (deep-link not confirmed / not published) →
+    abort before creating the group, with a clear message."""
+    stub = _SidecarStub(granted={"im:message:send_as_bot"})  # no group_msg
+    with isolated_env(team={"agents": {"manager": {"cli": "claude-code"}}}) as tmp:
+        _seed_toml()
+        rc = _run_guided(stub, tmp, ["cli_self", "sek", ""])
+        assert rc != 0
+        assert "scopes" in stub.calls and "create-group" not in stub.calls
+        assert config.chat_id() == ""
+
+
+def test_guided_aborts_on_empty_app_id():
+    stub = _SidecarStub(granted={"im:message.group_msg"})
+    with isolated_env(team={"agents": {"manager": {"cli": "claude-code"}}}) as tmp:
+        _seed_toml()
+        rc = _run_guided(stub, tmp, ["", ""])  # empty App ID
+        assert rc != 0
+        assert lark.load_app_creds() == {}
+        assert stub.calls == []  # never touched the sidecar
+
+
+def test_guided_warns_but_proceeds_when_scopes_unreadable():
+    """A brand-new app can't self-read its scopes yet — that needs
+    `application:application:self_manage` + publish/approval, so the read comes
+    back empty. Treat empty as 'unknown', NOT 'missing': warn and still create the
+    group, instead of dead-ending a correctly-set-up app. (Regression guard for the
+    scope-verify dead-end where an empty read was misread as 'scopes missing'.)"""
+    stub = _SidecarStub(granted=[])  # empty granted → _granted_scopes returns None
+    with isolated_env(team={"agents": {"manager": {"cli": "claude-code"}}}) as tmp:
+        _seed_toml()
+        rc = _run_guided(stub, tmp, ["cli_self", "sek", ""])
+        assert rc == 0
+        assert config.chat_id() == "oc_new"   # group created despite unreadable scopes
+        assert stub.calls == ["scopes", "create-group"]
+
+
+def test_connect_rejects_unknown_flag():
+    """Both guided + quick gate on reject_extra_args (canonical command shape)."""
+    stub = _SidecarStub(granted={"im:message.group_msg"})
+    with isolated_env(team={"agents": {"manager": {"cli": "claude-code"}}}) as tmp:
+        _seed_toml()
+        with _stub_sidecar(stub, tmp):
+            rc, _, err = run_cli(["feishu", "connect", "--quick", "--bogus"])
+        assert rc != 0
+        assert stub.calls == []  # rejected before any sidecar call
+
+
+# ── --quick: PersonalAgent device flow ────────────────────────────────────────
+
+
+def test_quick_persists_creds_and_chat_id():
+    stub = _SidecarStub(granted={"im:message:send_as_bot", "im:message.group_msg"})
+    with isolated_env(team={"agents": {"manager": {"cli": "claude-code"}}}) as tmp:
+        _seed_toml()
+        with _stub_sidecar(stub, tmp):
+            rc, out, err = run_cli(["feishu", "connect", "--quick"])
+        assert rc == 0, err
+        assert lark.load_app_creds()["app_id"] == "cli_new"
+        assert config.chat_id() == "oc_new"
         assert stub.calls == ["register", "scopes", "create-group"]
 
 
-def test_connect_writes_creds_file_0600():
-    stub = _SidecarStub(granted={"im:message:send_as_bot"})
+def test_quick_warns_when_group_msg_missing_but_still_groups():
+    """--quick is lenient: a PersonalAgent can't get group_msg, so it warns the
+    boss they'll need to @bot in groups, but still finishes the setup."""
+    stub = _SidecarStub(granted={"im:message:send_as_bot"})  # no group_msg
     with isolated_env(team={"agents": {"manager": {"cli": "claude-code"}}}) as tmp:
-        _toml_with_empty_chat_id(tmp)
-        _connect_with(stub, tmp)
-        mode = stat.S_IMODE(os.stat(lark.app_creds_file()).st_mode)
-        assert mode == 0o600, f"creds file is {oct(mode)}, must be 0600"
+        _seed_toml()
+        with _stub_sidecar(stub, tmp):
+            rc, out, _ = run_cli(["feishu", "connect", "--quick"])
+        assert rc == 0
+        assert "@bot" in out
+        assert config.chat_id() == "oc_new"
+        assert stub.calls == ["register", "scopes", "create-group"]
 
 
-# ── fallback: send scope missing → grant-scope runs before create-group ───────
-
-
-def test_connect_runs_grant_scope_when_send_scope_missing():
-    stub = _SidecarStub(granted={"im:message:readonly"})  # no send_as_bot
-    with isolated_env(team={"agents": {"manager": {"cli": "claude-code"}}}) as tmp:
-        _toml_with_empty_chat_id(tmp)
-        rc, _, err = _connect_with(stub, tmp)
-        assert rc == 0, err
-        assert stub.calls == ["register", "scopes", "grant-scope", "create-group"]
-
-
-# ── failures abort cleanly, nothing persisted ────────────────────────────────
-
-
-def test_connect_aborts_when_register_fails():
+def test_quick_aborts_when_register_fails():
     stub = _SidecarStub(granted=set(), register=None)
     with isolated_env(team={"agents": {"manager": {"cli": "claude-code"}}}) as tmp:
-        _toml_with_empty_chat_id(tmp)
-        rc, _, err = _connect_with(stub, tmp)
+        _seed_toml()
+        with _stub_sidecar(stub, tmp):
+            rc, _, _ = run_cli(["feishu", "connect", "--quick"])
         assert rc != 0
-        assert lark.load_app_creds() == {}        # no creds written
-        assert config.chat_id() == ""             # chat_id untouched
+        assert lark.load_app_creds() == {}
+        assert config.chat_id() == ""
         assert stub.calls == ["register"]
-
-
-def test_connect_aborts_when_group_creation_fails():
-    """register succeeds (creds saved) but create-group returns nothing → the
-    command errors and leaves chat_id empty rather than half-writing it."""
-    def runner(mode, *, extra_env=None):
-        runner.calls.append(mode)
-        return {
-            "register": {"client_id": "cli_new", "client_secret": "sek",
-                         "owner_open_id": "ou_me", "tenant": "feishu"},
-            "scopes": {"granted": ["im:message:send_as_bot"]},
-            "create-group": None,
-        }.get(mode)
-    runner.calls = []
-
-    with isolated_env(team={"agents": {"manager": {"cli": "claude-code"}}}) as tmp:
-        _toml_with_empty_chat_id(tmp)
-        sidecar = tmp / "sidecar.js"
-        sidecar.write_text("// stub", encoding="utf-8")
-        with attr_patch(feishu, _run_sidecar=runner,
-                        _sidecar_path=lambda: sidecar,
-                        _ensure_node_deps=lambda d: True):
-            rc, _, _ = run_cli(["feishu", "connect"])
-        assert rc != 0
-        assert lark.load_app_creds().get("app_id") == "cli_new"  # register persisted
-        assert config.chat_id() == ""                            # group failed → no chat_id
 
 
 # ── dispatch ─────────────────────────────────────────────────────────────────

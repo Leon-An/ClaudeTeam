@@ -22,7 +22,7 @@
   Multiple coding agents running in tmux, coordinated through a Feishu group chat. The boss talks to a <b>manager</b> agent; the manager dispatches workers, watches their panes, and summarises back. Everything is auditable on disk; nothing depends on a remote DB.
 </p>
 
-> **One-click deploy — paste this prompt to your coding agent
+> **Deploy by pasting this to your coding agent
 > (Claude Code, Codex, Kimi, Gemini, Qwen, …):**
 >
 > ```
@@ -117,7 +117,7 @@ on the other end, not a bot wall.
 | tmux | any | one window per agent |
 | Node + npx | 18+ | `lark-cli` is a node binary |
 | At least one CLI | latest | `claude` / `codex` / `pi` / `opencode` / … — see the adapter table |
-| Feishu enterprise | — | custom app with `im:message` + WebSocket subscription |
+| Feishu enterprise | — | a **self-built app** for the bot — `im:message.group_msg` + long-connection events |
 
 For Docker: just Docker 20.10+ and Compose v2 (CLIs come with the
 container or via bind-mount).
@@ -126,10 +126,10 @@ container or via bind-mount).
 
 ## Quick start
 
-The only interactive step is one click: `claudeteam init` opens your browser to
-authorize, then creates
-the Feishu app, auto-creates your team's group chat, and adds you — no developer
-console, no copying App IDs around. (→ [Feishu bot setup](#feishu-bot-setup).)
+`claudeteam init` walks you through registering a **self-built Feishu app**
+(企业自建应用) — the only kind that can receive un-@'d group messages — handing you
+a one-click link to grant every scope at once, then auto-creating your team's
+group chat. (→ [Feishu bot setup](#feishu-bot-setup).)
 
 Then run these top to bottom — no branching, nothing to `export`:
 
@@ -143,10 +143,12 @@ pip install -e .
 #       tmux · node + npx · lark-cli (npm i -g @larksuite/cli)
 #       · at least one agent CLI: claude / codex / pi / opencode / … (see README adapter table)
 
-# 3 — config + bot: generate config, then authorize the bot in your browser
+# 3 — config + bot: generate config, then register the Feishu app (guided)
 claudeteam init                  # writes claudeteam.toml, then runs `feishu connect`:
-                                 #   a browser opens → click approve → app + team group
-                                 #   created with you in it, App creds + chat_id saved
+                                 #   create a self-built app → paste App ID/Secret → click the
+                                 #   one-click permission link → publish; it verifies the scopes,
+                                 #   creates your team group, saves creds + chat_id.
+                                 #   DM / @bot only? → `claudeteam feishu connect --quick` (one QR scan)
 claudeteam install-hooks         # claude-code slash hooks — run BEFORE `up`
 
 # 4 — launch + verify
@@ -154,8 +156,8 @@ claudeteam up                    # tmux + agents + router + watchdog; crew repor
 claudeteam health                # expect all green
 ```
 
-Then in your Feishu group: send `/health`, then `@manager 你好` — manager
-replies in ~30 s. If `health` is red →
+Then in your Feishu group: send `/health`, then just `你好` (no `@` needed —
+plain messages go to the manager) — manager replies in ~30 s. If `health` is red →
 [docs/DEPLOYMENT.md → Common failures](docs/DEPLOYMENT.md#common-failures).
 
 > **No per-shell env vars needed.** `claudeteam init` writes `send_as` /
@@ -210,29 +212,39 @@ role = "策划员工"
 
 ## Feishu bot setup
 
-One command, **one click** — a browser opens to the Feishu auth page (no developer
-console, no Playwright). `claudeteam init` runs this on first set-up; or run it directly:
+ClaudeTeam talks through a **self-built app (企业自建应用)** — the only kind Feishu
+lets receive **un-@'d group messages** (the sensitive `im:message.group_msg`
+scope, needed for plain text + slash commands + catchup). `claudeteam init` runs
+this on first set-up; or run it directly:
 
 ```bash
-claudeteam feishu connect        # opens your browser to authorize (or scan the QR)
+claudeteam feishu connect        # guided: register a self-built app, grant scopes, create the group
 ```
 
-That single scan (an RFC-8628 device-flow via the official
-[`@larksuite/channel`](https://www.npmjs.com/package/@larksuite/channel) SDK):
+It walks you through it — the command does the verifying + group creation; you do
+these console steps once:
 
-1. **creates** a Feishu PersonalAgent app with the bot capability enabled,
-2. **grants** the IM scopes + message event it needs — an extra *approve-scopes*
-   QR appears only on tenants without one-scan provisioning,
-3. **auto-creates** your team's group chat and **adds you** (the scanner),
-4. **saves** the App creds (`state/feishu_app.json`, mode 0600) + the new
-   `chat_id` into `claudeteam.toml`.
+1. **Create the app** — <https://open.feishu.cn/app> → 创建企业自建应用 → add the
+   **机器人 (bot)** capability → copy the **App ID + App Secret** and paste them when prompted.
+2. **Grant scopes in one click** — it prints a permission deep-link with all 7
+   scopes (incl `im:message.group_msg`) pre-selected → open it → 确认.
+3. **Event** — 事件与回调 → 订阅方式 = **使用长连接** → add the **接收消息** event.
+4. **Publish** — 应用发布 → 创建版本 → 申请发布 → **批准** (tenant admins approve
+   their own version instantly; personal-edition apps skip review).
+5. Press **Enter** — it verifies `im:message.group_msg` landed, **creates your
+   team group**, and saves App creds (`state/feishu_app.json`, 0600) + `chat_id`
+   into `claudeteam.toml`.
 
-Then `claudeteam up` brings the crew into that group — each member posts a
-"reporting in" card. The QR + authorization link render straight to the
-terminal; nothing to copy by hand.
+Then `claudeteam up` brings the crew into that group and the manager runs a roll-call.
 
-> Under the hood: a thin sidecar at `scripts/feishu_channel/` wraps the
-> `@larksuite/channel` SDK (the same one
+> **`--quick` (one-scan, DM/@bot-only):** `claudeteam feishu connect --quick`
+> registers a **PersonalAgent** app via a single QR scan (RFC-8628 device-flow) —
+> zero console clicks, but Feishu won't grant it `im:message.group_msg`, so in
+> groups users must `@` the bot. Fine for DM-only use.
+
+> Under the hood: a thin sidecar at `scripts/feishu_channel/` wraps the official
+> [`@larksuite/channel`](https://www.npmjs.com/package/@larksuite/channel) SDK
+> (the same one
 > [zarazhangrui/lark-channel-bridge](https://github.com/zarazhangrui/feishu-claude-code-bridge)
 > is built on) for both registration and the WebSocket event ingress.
 

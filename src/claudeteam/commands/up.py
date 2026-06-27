@@ -88,11 +88,11 @@ def main(argv: list[str]) -> int:
     # Preflight: the router can't subscribe / the crew can't report in without a
     # registered bot + group. `up` stays non-interactive (it runs on restarts /
     # watchdog respawns), so point at `feishu connect` rather than dropping into
-    # a QR scan here.
+    # the guided registration here.
     if not config.chat_id():
         return error_exit(
             "❌ 未配置飞书机器人 / 群（chat_id 为空）。\n"
-            "   先运行 `claudeteam feishu connect` 扫码注册机器人并自动建群，"
+            "   先运行 `claudeteam feishu connect` 引导注册自建应用并自动建群，"
             "再 `claudeteam up`。")
 
     # Fresh bring-up (session didn't exist yet) → the manager runs the roll-call
