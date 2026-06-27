@@ -31,15 +31,23 @@ const emit = (o) => process.stdout.write(JSON.stringify(o) + "\n");
 
 // Best-effort: open the auth URL in the operator's default browser so they can
 // just click "authorize" instead of scanning a QR with their phone. Silent
-// no-op on a headless host (xdg-open with no $DISPLAY just fails) or when
-// CLAUDETEAM_NO_BROWSER is set (CI / scripted runs).
+// no-op on a headless host (the opener may be absent or fail with no $DISPLAY)
+// or when CLAUDETEAM_NO_BROWSER is set (CI / scripted runs).
 function openBrowser(url) {
   if (process.env.CLAUDETEAM_NO_BROWSER) return;
   const [cmd, args] =
     process.platform === "darwin" ? ["open", [url]]
     : process.platform === "win32" ? ["cmd", ["/c", "start", "", url]]
     : ["xdg-open", [url]];
-  try { spawn(cmd, args, { stdio: "ignore", detached: true }).unref(); } catch {}
+  try {
+    const child = spawn(cmd, args, { stdio: "ignore", detached: true });
+    // A missing opener (no xdg-open in a slim/Docker image) makes spawn emit an
+    // async 'error' event — NOT a sync throw — so try/catch alone leaves it
+    // unhandled and crashes Node mid-registration. Swallow it: the QR + URL are
+    // already printed, so the auto-open is pure convenience.
+    child.on("error", () => {});
+    child.unref();
+  } catch {}
 }
 
 // Scopes/events ClaudeTeam needs, pre-filled into the scan confirm page via

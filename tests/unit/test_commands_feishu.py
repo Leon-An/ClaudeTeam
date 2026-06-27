@@ -132,6 +132,18 @@ def test_connect_rejects_unknown_flag():
         assert stub.calls == []  # rejected before any sidecar call
 
 
+def test_connect_aborts_cleanly_on_eof_non_tty():
+    # REGRESSION (dogfood #4): a piped / non-TTY invocation makes the guided
+    # flow's input() raise EOFError. connect must abort rc=1 with a friendly
+    # message, not dump an EOFError traceback through the generic cli handler.
+    def boom(*_a, **_k):
+        raise EOFError
+    with attr_patch(feishu, _connect_guided=boom):
+        rc, _, err = run_cli(["feishu", "connect"])
+    assert rc == 1
+    assert "已取消" in err or "非交互" in err
+
+
 # ── --quick: PersonalAgent device flow ────────────────────────────────────────
 
 

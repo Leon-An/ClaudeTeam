@@ -120,8 +120,9 @@ and `claudeteam health` is green.
 **Compose mounts** (full list in `docker-compose.yml`): `./team-data/`→`/data/`
 (config + state), `~/.claude/.credentials.json` (Claude OAuth, RW so refreshes
 persist), `~/.codex`/`~/.kimi` (per-CLI creds), `./src/`→`/app/src/` (hot-reload).
-The base image deliberately does **not** bake in `claude`/`codex`/`kimi` — derive
-from `claudeteam:dev` and install what you need, or bind-mount the host binary.
+The base image bakes in `claude`, `codex`, `kimi` (plus `pi`/`hermes`); `gemini`
+and `qwen` are **not** included — derive from `claudeteam:dev` and install those,
+or bind-mount the host binary.
 
 ---
 

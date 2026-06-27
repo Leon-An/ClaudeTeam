@@ -32,8 +32,16 @@ from claudeteam.util import (
 )
 
 
-USAGE = ("usage: claudeteam feishu connect [--quick] [--group-name NAME] "
-         "[--tenant feishu|lark]")
+USAGE = (
+    "usage: claudeteam feishu connect [--quick] [--group-name NAME] "
+    "[--tenant feishu|lark]\n"
+    "  Register a Feishu/Lark bot for this team + auto-create the team group.\n"
+    "  (default)  guided 自建应用: paste App ID/Secret from the console; full\n"
+    "             perms — un-@'d group messages reach the manager, slash, catchup.\n"
+    "  --quick    one-scan device-flow QR (zero console) but the group needs @bot\n"
+    "             and catchup is limited.\n"
+    "  --group-name NAME     name for the auto-created group (default: ClaudeTeam).\n"
+    "  --tenant feishu|lark  .cn (default) or .com.")
 
 # Scopes a working ClaudeTeam bot MUST have to operate in a GROUP: post cards AND
 # receive un-@'d messages (the whole point — "no @ → manager", plus slash commands
@@ -245,9 +253,17 @@ def _connect_quick(argv: list[str]) -> int:
 
 def _connect(argv: list[str]) -> int:
     rest = list(argv)
-    if pop_bool_flag(rest, "--quick"):
-        return _connect_quick(rest)
-    return _connect_guided(rest)
+    try:
+        if pop_bool_flag(rest, "--quick"):
+            return _connect_quick(rest)
+        return _connect_guided(rest)
+    except (EOFError, KeyboardInterrupt):
+        # No stdin / non-TTY (a piped or CI invocation) or ^C mid-prompt — the
+        # guided flow's input() prompts raise here. Abort cleanly instead of
+        # dumping an EOFError traceback through the generic cli error handler.
+        print()
+        return error_exit("❌ 已取消（无输入 / 非交互终端）— "
+                          "在可交互终端里重跑 `claudeteam feishu connect`")
 
 
 _SUBCOMMANDS = {"connect": _connect}

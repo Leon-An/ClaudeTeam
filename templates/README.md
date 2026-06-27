@@ -16,8 +16,13 @@ content; the say/send/memory mechanics are added automatically.
    resolve relative to the config file:
    ```bash
    cp templates/software-dev/* .          # the toml + its *.md role docs, together
+   # Docker: templates are baked at /app/templates, config lives in /data —
+   #   docker compose exec --workdir /data claudeteam cp -r /app/templates/software-dev/. .
    ```
-   (Or just copy the `[team.agents.*]` blocks + the `.md` files into your existing config.)
+   The template **is** a complete `claudeteam.toml`, so it replaces (not merges
+   with) one that `claudeteam init` generated — init's extra `[router]`/`[watchdog]`/
+   `[feishu]` blocks all default safely, so dropping them is fine. (Or copy just the
+   `[team.agents.*]` blocks + the `.md` files into your existing config to keep them.)
 2. Adjust each agent's `cli` / `model` / `role` / `playbook`, and edit the `.md`
    playbooks to fit your project.
 3. `claudeteam feishu connect` (fills `chat_id`) → `claudeteam install-hooks` → `claudeteam up`.
