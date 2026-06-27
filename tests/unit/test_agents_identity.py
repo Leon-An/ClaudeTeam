@@ -256,6 +256,54 @@ def test_render_includes_notes_section_when_set():
     assert "擅长长文本审阅" in text
 
 
+# ── playbook: a role instruction file that becomes the agent's identity body ──
+
+
+def test_render_includes_playbook_when_set():
+    """`playbook = "<file>"` projects a self-contained role doc into the agent's
+    identity (after a divider), layered ON TOP of the team-protocol body — the
+    mechanism domain templates use to ship rich per-role instructions."""
+    from claudeteam.runtime import paths
+    team = {"agents": {"worker_cc": {
+        "cli": "claude-code", "model": "sonnet", "role": "员工",
+        "playbook": "backend.md"}}}
+    with isolated_env(team=team):
+        (paths.config_file().parent / "backend.md").write_text(
+            "# 后端工程师\n\n负责 API 与数据。PLAYBOOK_MARKER", encoding="utf-8")
+        text = identity.render("worker_cc")
+    assert "PLAYBOOK_MARKER" in text
+    assert "后端工程师" in text
+    assert "claudeteam send" in text   # team-protocol body still there, not replaced
+
+
+def test_render_playbook_missing_file_degrades():
+    """A playbook path that doesn't resolve must not crash the spawn — it just
+    renders no playbook section."""
+    team = {"agents": {"worker_cc": {
+        "cli": "claude-code", "role": "员工", "playbook": "does-not-exist.md"}}}
+    with isolated_env(team=team):
+        text = identity.render("worker_cc")   # must not raise
+    assert "员工" in text
+
+
+def test_render_resolves_config_fields_with_explicit_role():
+    """REGRESSION: the lifecycle provision path renders identity via
+    `write(role, cli, model)` — role/cli/model passed explicitly. That used to
+    skip the config read and silently drop specialty/tone/notes/playbook. render
+    must resolve config-backed fields in that path too."""
+    from claudeteam.runtime import paths
+    team = {"agents": {"worker_cc": {
+        "cli": "claude-code", "model": "sonnet", "role": "员工",
+        "specialty": ["SPECMARK"], "notes": "NOTEMARK", "playbook": "pb.md"}}}
+    with isolated_env(team=team):
+        (paths.config_file().parent / "pb.md").write_text("PLAYMARK", encoding="utf-8")
+        # explicit role/cli/model — exactly what lifecycle.write passes
+        text = identity.render("worker_cc", role="员工", cli="claude-code", model="sonnet")
+    assert "SPECMARK" in text   # specialty no longer dropped on the lifecycle path
+    assert "NOTEMARK" in text   # notes no longer dropped
+    assert "PLAYMARK" in text   # playbook resolves too
+
+
 def test_manager_renders_team_specialties_block():
     """Manager should see each non-manager agent's specialty so it can
     dispatch with awareness."""

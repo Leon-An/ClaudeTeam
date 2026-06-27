@@ -437,6 +437,31 @@ def _render_notes_section(notes: str) -> str:
     return f"\n\n## 备注\n\n{notes}"
 
 
+def _read_playbook(playbook: str) -> str:
+    """Read an agent's playbook file — a role instruction doc that becomes the
+    bulk of its identity. Path is relative to the config file's directory so a
+    copied template folder stays self-contained; absolute paths pass through.
+    Missing / unreadable degrades to "" (never break a spawn over a typo'd path)."""
+    p = Path(playbook)
+    if not p.is_absolute():
+        p = paths.config_file().parent / p
+    try:
+        return p.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def _render_playbook_section(playbook: str) -> str:
+    """Project an agent's playbook file into its identity, after a divider. The
+    playbook is a self-contained role doc (its own headings) layered on top of
+    the team-protocol body — so domain templates carry rich per-role instructions
+    without each one repeating the say/send mechanics."""
+    if not playbook:
+        return ""
+    text = _read_playbook(playbook)
+    return f"\n\n---\n\n{text}" if text else ""
+
+
 def _render_workspace_section(agent: str) -> str:
     """Per-agent private scratch area. Absolute path so it resolves from
     any pane CWD (claude / codex / ... spawn from different dirs)."""
@@ -545,7 +570,15 @@ def render(agent: str, *, role: str | None = None,
     (Step 2 schema extension). Empty / absent → no section rendered;
     keeps existing one-role-line agents' identity files unchanged.
     """
-    cfg = config.agent_config(agent) if any(v is None for v in (role, cli, model)) else {}
+    # Always read the agent's config so config-backed optional fields (specialty /
+    # tone / notes / playbook) resolve in EVERY path — including the lifecycle
+    # provision call that passes role/cli/model explicitly (which used to skip the
+    # read and silently drop them). Tolerate a missing agent (tests render ad-hoc
+    # names not in any team config) by degrading to an empty dict.
+    try:
+        cfg = config.agent_config(agent)
+    except KeyError:
+        cfg = {}
     role = role if role is not None else (cfg.get("role") or agent)
     cli = cli if cli is not None else (cfg.get("cli") or "claude-code")
     model = model if model is not None else (cfg.get("model") or "")
@@ -560,6 +593,7 @@ def render(agent: str, *, role: str | None = None,
     specialty = specialty if specialty is not None else (cfg.get("specialty") or [])
     tone = tone if tone is not None else (cfg.get("tone") or "")
     notes = notes if notes is not None else (cfg.get("notes") or "")
+    playbook = cfg.get("playbook") or ""
     body = _MANAGER_BODY if agent == "manager" else _WORKER_BODY
     rendered = body.format(name=agent, role=role, cli=cli, model=model,
                            workdir_rule=_WORKDIR_RULE,
@@ -569,6 +603,7 @@ def render(agent: str, *, role: str | None = None,
     rendered += _render_specialty_section(specialty)
     rendered += _render_tone_section(tone)
     rendered += _render_notes_section(notes)
+    rendered += _render_playbook_section(playbook)
     rendered += _render_workspace_section(agent)
     rendered += _render_skills_section()
     if agent == "manager":
