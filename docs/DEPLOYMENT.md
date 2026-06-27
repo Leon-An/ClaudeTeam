@@ -8,7 +8,7 @@ multi-team isolation, and common failures.
 Whether you're a human reading this or an AI agent driving the
 deployment, the flow is the same:
 
-1. **Feishu app + group** — run `claudeteam feishu connect` (or `claudeteam init`, which calls it) and scan the QR. One scan creates the app, grants its IM scopes + message event, auto-creates the team group with you in it, and saves the App creds (`state/feishu_app.json`, 0600) + `chat_id` (`claudeteam.toml`). Already have an app? Put its App ID / Secret / chat_id into those files (or `.env` for Docker) and skip the scan.
+1. **Feishu app + group** — run `claudeteam feishu connect` (or `claudeteam init`, which calls it). A browser opens to the Feishu auth page — click approve (or open the printed link / scan the QR). That creates the app, grants its IM scopes + message event, auto-creates the team group with you in it, and saves the App creds (`state/feishu_app.json`, 0600) + `chat_id` (`claudeteam.toml`). Already have an app? Put its App ID / Secret / chat_id into those files (or `.env` for Docker) and skip it.
 2. **Host or Docker** — Docker is simplest (`docker compose`, no host Python); host iterates faster but needs Python 3.10+, tmux, and the agent CLIs locally. Both are covered below.
 3. **Config** — `feishu connect` already wrote `chat_id`; `claudeteam init` generated the rest of `claudeteam.toml` with three default agents (`manager` + `worker_cc` on Claude Code, `worker_codex` on Codex). Keep them for a quick smoke or edit `[team.agents.*]` first. (Bot creds live in `state/feishu_app.json`, never the toml; only Docker/advanced deploys override via `FEISHU_APP_ID`/`FEISHU_APP_SECRET` in `.env`.)
 4. **Launch** — `claudeteam up`, then `claudeteam health` (expect all green).
@@ -31,9 +31,10 @@ deployment, the flow is the same:
 
 
 **Feishu app setup**: run `claudeteam feishu connect` (or just
-`claudeteam init`, which calls it) and scan the QR — one device-flow scan
-creates the app, grants the IM scopes + message event, auto-creates the
-team group, and saves the creds to `state/feishu_app.json`. See the
+`claudeteam init`, which calls it) — a browser opens to the auth page; click
+approve (or open the printed link / scan the QR). That one device-flow approval
+creates the app, grants the IM scopes + message event, auto-creates the team
+group, and saves the creds to `state/feishu_app.json`. See the
 [Bringing up a team](#bringing-up-a-team-end-to-end) walkthrough above.
 
 Optional but recommended:
@@ -61,53 +62,35 @@ gory details.
 
 ## Host deploy (4 steps)
 
-No per-shell env exports — `claudeteam init` writes `[feishu] send_as = "bot"`
-
-- `no_proxy = true` into the toml, and state defaults to `~/.claudeteam`.
+Needs **Python ≥ 3.10**, **tmux**, and **at least one agent CLI** (claude / codex / …) on PATH. No env exports — `claudeteam init` writes the `send_as` / `no_proxy` presets into `claudeteam.toml`, and state defaults to `~/.claudeteam`.
 
 ```bash
-# 1. install (editable, in a venv — PEP 668 means no bare pip on macOS Homebrew)
-#    macOS note: /usr/bin/python3 is 3.9.6 — too old. Use brew/pyenv:
-#      brew install python@3.12 && /opt/homebrew/bin/python3.12 -m venv .venv
-#    Linux: python3 from your distro is usually fine if it's ≥3.10.
-#    ANY Python ≥3.10 on PATH works — venv, conda/miniconda, or pyenv.
-#    If `claudeteam` is already installed under conda (so it resolves on
-#    PATH), you can skip the venv entirely; just confirm the agent CLIs
-#    (claude/codex/...) are on the same PATH. Check version any time with
-#    `claudeteam --version`.
 cd /path/to/ClaudeTeam
-python3 -m venv .venv
-source .venv/bin/activate
+
+# 1. install the CLI (any Python >=3.10 — venv, conda, or pyenv all work)
+python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 
-# 2. bootstrap config + register the bot (writes claudeteam.toml in cwd,
-#    send_as/no_proxy preset). On an interactive TTY `init` then runs
-#    `feishu connect` — scan the QR to create the app, auto-create the
-#    team group, and save creds to state/feishu_app.json + chat_id to the
-#    toml. Pass --no-connect to skip; it's also skipped if creds exist.
+# 2. create config + register the bot. A browser opens to the auth page —
+#    just click approve (or open the link it prints / scan the QR). Creates
+#    the app, auto-creates the team group, adds you, saves creds + chat_id.
+#    (Already have an app, or scripting? add --no-connect.)
 claudeteam init
-# $EDITOR claudeteam.toml                   # usually nothing to set — chat_id is
-                                            # already written; just edit agents if you want
-                                            # (run `claudeteam feishu connect` by hand if you skipped it)
 
-# 3. install slash hooks BEFORE up (claude-code caches them at pane spawn)
-claudeteam install-hooks                   # writes .claude/commands/<name>.md
+# 3. install the slash hooks — must run BEFORE `up`
+claudeteam install-hooks
 
-# 4. bring up the team
-claudeteam up                              # tmux session + agents + router + watchdog
-claudeteam health                          # verify everything green/yellow
+# 4. launch, then verify
+claudeteam up
+claudeteam health
 ```
 
-> **Optional env** (rarely needed): `export CLAUDETEAM_STATE_DIR="$PWD/state"`
-> to keep state in the repo instead of `~/.claudeteam`; `export LARK_CLI_NO_PROXY=1`
-> only if an `HTTPS_PROXY` is set and you removed `no_proxy=true` from the toml.
+> **macOS:** the system `/usr/bin/python3` (3.9) is too old — install a newer one
+> (`brew install python@3.12`) or use pyenv / conda. If `claudeteam` already
+> resolves on PATH (e.g. via conda), skip the venv — just keep the agent CLIs on
+> the same PATH.
 
-**Tear down:**
-
-```bash
-claudeteam down       # stop panes + daemons, keep inbox/logs/cursor
-claudeteam reset      # nuclear option: also wipes state
-```
+**Tear down:** `claudeteam down` (stop, keep state) · `claudeteam reset` (also wipe state).
 
 ---
 
@@ -127,12 +110,11 @@ hosts) so the container can reuse your Claude OAuth.
 > the Server section is missing when the daemon's down.
 
 ```bash
-# 1. fill credentials (gitignored). In Docker the app creds come from the
-#    env (it OVERRIDES state/feishu_app.json) — supply a pre-existing app's
-#    FEISHU_APP_ID + FEISHU_APP_SECRET, or register one first on a host with
-#    `claudeteam feishu connect` and copy its state/feishu_app.json values.
+# 1. supply the app creds in .env (no QR in Docker). Don't have an app yet?
+#    Register one on a host first with `claudeteam feishu connect`, then copy
+#    its FEISHU_APP_ID / SECRET here.
 cp .env.example .env
-$EDITOR .env                    # FEISHU_APP_ID + FEISHU_APP_SECRET
+$EDITOR .env                    # set FEISHU_APP_ID + FEISHU_APP_SECRET
 
 # 2. macOS only — materialise Claude OAuth from keychain into a file
 #    the container can bind-mount. Skip on Linux (file is already there).

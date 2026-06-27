@@ -1,8 +1,8 @@
-# 飞书一键注册 — `claudeteam feishu connect` 扫码流程
+# 飞书一键注册 — `claudeteam feishu connect`（浏览器授权）
 
 ## 目的
 
-证明「一次扫码 = 建 App + 建群 + 拉人 + 落凭证」这条注册链路真的成立，并且
+证明「一次授权 = 建 App + 建群 + 拉人 + 落凭证」这条注册链路真的成立，并且
 注册完之后**事件入站走 `scripts/feishu_channel/sidecar.js run`**（官方
 WebSocket → NDJSON），群里发一句话 manager 真能收到回。这是 host_smoke 的
 **前置**——host_smoke 默认你已经跑过本篇。
@@ -10,10 +10,10 @@ WebSocket → NDJSON），群里发一句话 manager 真能收到回。这是 ho
 覆盖：
 
 - `claudeteam init`（首次部署自动跑 `feishu connect`）/ 或单独 `claudeteam feishu connect`
-- 设备授权流程扫码（RFC 8628，官方 `@larksuite/channel` SDK）
-- 群自动创建 + 把扫码人拉进群
+- 设备授权流程（RFC 8628，官方 `@larksuite/channel` SDK）——浏览器点授权，扫码备选
+- 群自动创建 + 把授权人拉进群
 - 凭证落盘 `state/feishu_app.json`（0600）+ `chat_id` 写进 `claudeteam.toml`
-- `claudeteam up` 全员报到卡
+- `claudeteam up` 后主管自动发起全员点名（自检）
 - 群里发消息 → manager 回（证明 sidecar 入站通了）
 
 ## 适用范围
@@ -23,7 +23,8 @@ WebSocket → NDJSON），群里发一句话 manager 真能收到回。这是 ho
 - 已装：Python 3.10+、tmux、node + npx、`lark-cli`（出站发卡用）、至少一个
   agent CLI（`claude` / `codex` / …）在 PATH 上。
 - 已跑：`pip install -e .`（`claudeteam` 在 PATH 上）。
-- 一台能登录飞书的手机/客户端来扫码（要真人扫一次，agent 代不了）。
+- 在浏览器点一次「授权」（远程服务器则复制终端里的链接到本地浏览器，或扫码）——
+  要真人点一次，agent 代不了。
 
 ## 前置条件
 
@@ -39,7 +40,7 @@ ls state/feishu_app.json 2>/dev/null && echo "已存在——connect 会跳过�
 
 ## 操作（Given / When / Then）
 
-### 1. 注册（扫码）
+### 1. 注册（浏览器授权）
 
 **Given** 没有 `state/feishu_app.json`、终端是交互式 TTY，
 **When** 跑
@@ -51,23 +52,24 @@ claudeteam feishu connect
 # 跳过扫码（CI / 已有凭证）：claudeteam init --no-connect
 ```
 
-**Then** 终端里渲染出一个二维码 + 一条授权链接（设备授权流程）。
+**Then** 浏览器自动打开飞书授权页；终端也会醒目打印这条授权链接 + 一个二维码
+（远程服务器/无浏览器时用）。
 
 > `claudeteam init` 只在交互式 TTY 上自动跑 connect；非 TTY（或带 `--no-connect`）
 > 时跳过，凭证已存在时也跳过。
 
-### 2. 真人扫码
+### 2. 真人授权
 
-**Given** 二维码已渲染，
-**When** 用飞书手机端扫码、点「授权」，
+**Given** 浏览器已弹出授权页（或终端打印了链接 + 二维码），
+**When** 在浏览器里点「授权」（或复制链接到浏览器 / 用飞书 App 扫码），
 **Then** 进度回到终端继续。
 
-> 只有不支持「一次性开通」的租户上，才会**再弹第二个二维码**（授权 IM 权限 +
-> 消息事件）——再扫一次同样点「授权」即可。支持一次开通的租户只扫一次。
+> 只有不支持「一次性开通」的租户上，才会**再弹一次授权页**（授权 IM 权限 +
+> 消息事件）——再点一次「授权」即可。支持一次开通的租户只授权一次。
 
 ### 3. 落盘核对（机判）
 
-**Given** 扫码授权完成，
+**Given** 授权完成，
 **When** 看磁盘，
 **Then** 满足全部三条：
 
@@ -81,7 +83,7 @@ python3 -c "import json; d=json.load(open('state/feishu_app.json')); print('app_
 grep -E '^\s*chat_id\s*=\s*"oc_' claudeteam.toml
 # 期望命中一行 chat_id = "oc_..."
 
-# (c) 飞书里出现「ClaudeTeam」群、你（扫码人）在群里
+# (c) 飞书里出现「ClaudeTeam」群、你（授权人）在群里
 CHAT=$(grep -E '^\s*chat_id' claudeteam.toml | sed -E 's/.*"(oc_[^"]+)".*/\1/')
 LARK_CLI_NO_PROXY=1 lark-cli im +chat-search --query "ClaudeTeam" --as user --format json \
   | python3 -c "import json,sys; print([c.get('chat_id') for c in json.load(sys.stdin).get('data',{}).get('items',[])])"
@@ -91,7 +93,7 @@ LARK_CLI_NO_PROXY=1 lark-cli im +chat-search --query "ClaudeTeam" --as user --fo
 **通过条件**：(a) 文件存在且 mode 是 `-rw-------`；(b) `grep` 命中一行；
 (c) 群能搜到且 chat_id 对得上、你在成员里（飞书 App 里直接看群也行）。
 
-### 4. 上线 + 报到卡
+### 4. 上线 + 主管点名（自检，全程无需真人）
 
 **Given** 凭证 + chat_id 都就位，
 **When**
@@ -101,12 +103,14 @@ claudeteam install-hooks         # 要在 up 之前
 claudeteam up
 ```
 
-**Then** 全员各自在群里发一张「报到」卡；`claudeteam health` 全绿。
+**Then** 首次 `up` 后主管（manager）**自动发起全员点名**：先在群里宣布，再逐一通知
+每个 worker，各 worker 自己在群里汇报身份与状态，最后主管汇总。`claudeteam health` 全绿。
 
 > 若 `chat_id` 没设，`claudeteam up` 会直接报错并指向 `claudeteam feishu connect`。
 
-**通过条件（看群里）**：`claudeteam up` 后 ~60 秒内，群里能看到 manager + 各
-worker 的报到卡（每个成员一张）。
+**通过条件（看群里，无需真人发消息）**：`claudeteam up` 后几分钟内，群里能看到主管的
+点名公告 + 每个非退休 worker 的汇报 + 主管的汇总。看到这些 = 主管派单 + worker 在群里回
+整条链路都通。
 
 ### 5. 入站回环（证明 sidecar 通了）
 
@@ -132,18 +136,18 @@ claudeteam health | grep -i inbound
 
 ## 期望（一句话）
 
-一次扫码后：`state/feishu_app.json`（0600）+ `claudeteam.toml` 的
+授权完成后：`state/feishu_app.json`（0600）+ `claudeteam.toml` 的
 `chat_id` 都写好、ClaudeTeam 群里有你、`claudeteam up` 全员报到、群里发一句
 `@manager` 能在 60 秒内拿到带锚定的回复。
 
 ## 失败排查
 
-- **没渲染二维码**——确认是交互式 TTY（`claudeteam init` 非 TTY 会跳过 connect）；
+- **浏览器没打开 / 没打印链接**——确认是交互式 TTY（`claudeteam init` 非 TTY 会跳过 connect）；
   或凭证已存在被跳过（`ls state/feishu_app.json`，想重测先移走）。
 - **`state/feishu_app.json` 不是 0600**——connect 写盘权限有问题，重跑 connect；
   出站发卡 / sidecar 都靠 `feishu/lark.py:subprocess_env()` 从这个文件注入
   `FEISHU_APP_ID/SECRET` + tenant token。
-- **群没建出来 / 你不在群**——重扫一次（第二个授权二维码可能没扫到）。
+- **群没建出来 / 你不在群**——重新授权一次（第二个授权页可能没点到）。
 - **报到卡没出现**——`claudeteam health` 看是不是某个 agent 没起；CLI 没登录
   见 [host_smoke.md](host_smoke.md) §1 的排查。
 - **§5 manager 不回**——先确认 sidecar 进程在跑（上面那条 `ps`）；再看

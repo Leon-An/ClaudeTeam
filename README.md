@@ -126,7 +126,8 @@ container or via bind-mount).
 
 ## Quick start
 
-The only interactive step is a one-time **QR scan**: `claudeteam init` creates
+The only interactive step is one click: `claudeteam init` opens your browser to
+authorize, then creates
 the Feishu app, auto-creates your team's group chat, and adds you — no developer
 console, no copying App IDs around. (→ [Feishu bot setup](#feishu-bot-setup).)
 
@@ -142,10 +143,10 @@ pip install -e .
 #       tmux · node + npx · lark-cli (npm i -g @larksuite/cli)
 #       · at least one agent CLI: claude / codex / pi / opencode / … (see README adapter table)
 
-# 3 — config + bot: generate config, then scan a QR to register the bot
+# 3 — config + bot: generate config, then authorize the bot in your browser
 claudeteam init                  # writes claudeteam.toml, then runs `feishu connect`:
-                                 #   scan the QR in Feishu → app created, team group
-                                 #   auto-created with you in it, App creds + chat_id saved
+                                 #   a browser opens → click approve → app + team group
+                                 #   created with you in it, App creds + chat_id saved
 claudeteam install-hooks         # claude-code slash hooks — run BEFORE `up`
 
 # 4 — launch + verify
@@ -209,11 +210,11 @@ role = "策划员工"
 
 ## Feishu bot setup
 
-One command, one **QR scan** — no developer console, no Playwright. `claudeteam
-init` runs this automatically on first set-up; you can also run it on its own:
+One command, **one click** — a browser opens to the Feishu auth page (no developer
+console, no Playwright). `claudeteam init` runs this on first set-up; or run it directly:
 
 ```bash
-claudeteam feishu connect        # scan the QR rendered in the terminal
+claudeteam feishu connect        # opens your browser to authorize (or scan the QR)
 ```
 
 That single scan (an RFC-8628 device-flow via the official

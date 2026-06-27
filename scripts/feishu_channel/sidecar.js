@@ -27,9 +27,23 @@
 // NDJSON stream for `run`); stderr = human logs (QR, status, errors). Never mix.
 import { registerApp, createLarkChannel, LarkChannelError } from "@larksuite/channel";
 import qrcode from "qrcode-terminal";
+import { spawn } from "node:child_process";
 
 const log = (...a) => process.stderr.write(a.join(" ") + "\n");
 const emit = (o) => process.stdout.write(JSON.stringify(o) + "\n");
+
+// Best-effort: open the auth URL in the operator's default browser so they can
+// just click "authorize" instead of scanning a QR with their phone. Silent
+// no-op on a headless host (xdg-open with no $DISPLAY just fails) or when
+// CLAUDETEAM_NO_BROWSER is set (CI / scripted runs).
+function openBrowser(url) {
+  if (process.env.CLAUDETEAM_NO_BROWSER) return;
+  const [cmd, args] =
+    process.platform === "darwin" ? ["open", [url]]
+    : process.platform === "win32" ? ["cmd", ["/c", "start", "", url]]
+    : ["xdg-open", [url]];
+  try { spawn(cmd, args, { stdio: "ignore", detached: true }).unref(); } catch {}
+}
 
 // Scopes/events ClaudeTeam needs, pre-filled into the scan confirm page via
 // `addons` (additive — Feishu can't drop base permissions). Tunable here:
@@ -54,8 +68,15 @@ function appCreds() {
 }
 
 function renderQR({ url, expireIn }) {
+  const valid = expireIn ? `约 ${Math.max(1, Math.round(expireIn / 60))} 分钟内有效` : "限时有效";
+  // Link first + prominent (auto-opened in the browser); QR is the fallback.
+  log("");
+  log("  ┌─ 在浏览器里打开下面的链接完成授权（已尝试自动打开浏览器）─");
+  log(`  │   ${url}`);
+  log(`  └─ ${valid}。没有浏览器 / 在远程服务器上？用飞书 App 扫码：`);
+  log("");
   qrcode.generate(url, { small: true }, (q) => process.stderr.write(q + "\n"));
-  log(`授权链接（${expireIn ?? "?"}s 内有效）：${url}`);
+  openBrowser(url);
 }
 
 // ── register: scan QR → create + provision a fresh PersonalAgent app ──────────

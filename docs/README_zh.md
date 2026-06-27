@@ -101,8 +101,8 @@ Docker 部署：只要 Docker 20.10+ 和 Compose v2（CLI 跟容器一起带，�
 
 ## 快速开始
 
-唯一的交互步骤是一次性 **扫码**：`claudeteam init` 会建好飞书 App、自动建团队群、
-把你拉进群——不用进开发者后台、不用到处复制 App ID。（→ [飞书机器人配置](#飞书机器人配置)）
+唯一的交互步骤是点一下「授权」：`claudeteam init` 会自动打开浏览器授权页，然后建好
+飞书 App、自动建团队群、把你拉进群——不用进开发者后台、不用到处复制 App ID。（→ [飞书机器人配置](#飞书机器人配置)）
 
 然后从上到下跑完即可，没有分支、不用 `export`：
 
@@ -116,9 +116,9 @@ pip install -e .
 #       tmux · node + npx · lark-cli (npm i -g @larksuite/cli)
 #       · 至少一个 agent CLI：claude / codex / pi / opencode / …（见适配表）
 
-# 3 — 配置 + 注册机器人：先生成配置，再扫码注册 bot
+# 3 — 配置 + 注册机器人：生成配置，然后在浏览器里给 bot 授权
 claudeteam init                  # 写 claudeteam.toml，然后跑 `feishu connect`：
-                                 #   在飞书里扫码 → App 建好、团队群自动建好并把你拉进去、
+                                 #   浏览器自动打开 → 点「授权」→ App + 团队群建好并把你拉进去、
                                  #   App 凭证 + chat_id 自动保存
 claudeteam install-hooks         # claude-code 斜杠命令钩子——要在 `up` 之前装
 
@@ -179,26 +179,26 @@ role = "策划员工"
 
 ## 飞书机器人配置
 
-一条命令、一次**扫码**——不用开发者后台、不用 Playwright。`claudeteam init`
-首次部署时会自动跑它，你也可以单独跑：
+一条命令、点一下**授权**——浏览器自动打开授权页，不用开发者后台、不用 Playwright。
+`claudeteam init` 首次部署时会自动跑它，你也可以单独跑：
 
 ```bash
-claudeteam feishu connect        # 扫描终端里渲染出来的二维码
+claudeteam feishu connect        # 自动打开浏览器授权（或点终端里的链接 / 扫码）
 ```
 
-这一次扫码（基于官方
+这一次授权（基于官方
 [`@larksuite/channel`](https://www.npmjs.com/package/@larksuite/channel) SDK
 的 RFC-8628 设备授权流程）会：
 
 1. **建好**一个开启了机器人能力的飞书 PersonalAgent 应用，
 2. **授予**它要用的 IM 权限 + 消息事件——只有不支持一次性开通的租户上才会
-   再弹一个 *授权权限* 二维码，
-3. **自动建好**团队群并**把你（扫码人）拉进去**，
+   再弹一次 *授权权限* 页，
+3. **自动建好**团队群并**把你（授权人）拉进去**，
 4. **保存** App 凭证到 `state/feishu_app.json`（权限 0600）+ 新的 `chat_id`
    写进 `claudeteam.toml`。
 
-之后 `claudeteam up` 把全员带进这个群——每个成员发一张「报到」卡片。二维码 +
-授权链接直接渲染到终端，不用手动复制任何东西。
+之后 `claudeteam up` 后**主管会自动发起全员点名**，每个 worker 各自在群里逐一汇报。
+授权链接会自动在浏览器打开（也会醒目渲染到终端 + 二维码备选），基本不用手动复制。
 
 > 底层：`scripts/feishu_channel/` 下一个薄薄的 sidecar 包了 `@larksuite/channel`
 > SDK（跟
