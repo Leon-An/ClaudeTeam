@@ -1,3 +1,7 @@
+<p align="center">
+  <b>English</b> · <a href="DEPLOYMENT_zh.md">简体中文</a>
+</p>
+
 # Deployment Guide
 
 Get a ClaudeTeam crew running — **host or Docker — in 5 steps**. Config,

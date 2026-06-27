@@ -10,7 +10,7 @@
   <a href="../LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python 3.10+" />
   <a href="https://github.com/zylMozart/ClaudeTeam/actions/workflows/ci.yml"><img src="https://github.com/zylMozart/ClaudeTeam/actions/workflows/ci.yml/badge.svg" alt="tests" /></a>
-  <a href="DEPLOYMENT.md"><img src="https://img.shields.io/badge/docs-deployment-success.svg" alt="部署文档" /></a>
+  <a href="DEPLOYMENT_zh.md"><img src="https://img.shields.io/badge/docs-deployment-success.svg" alt="部署文档" /></a>
   <img src="https://img.shields.io/badge/chat-Feishu-1a73e8.svg" alt="飞书" />
 </p>
 
@@ -26,7 +26,7 @@
 > (Claude Code / Codex / Kimi / Gemini / Qwen 都行)：**
 >
 > ```
-> 克隆 https://github.com/zylMozart/ClaudeTeam.git，读 docs/DEPLOYMENT.md，
+> 克隆 https://github.com/zylMozart/ClaudeTeam.git，读 docs/DEPLOYMENT_zh.md，
 > 然后从头到尾带我跑一次 ClaudeTeam (如果还没飞书 App 也帮我建一个)。
 > ```
 
@@ -132,7 +132,7 @@ claudeteam health                # 期望全绿
 
 > **不用每个 shell 设环境变量。** `claudeteam init` 把 `send_as` / `no_proxy`
 > 写进 `claudeteam.toml`，state 默认落在 `~/.claudeteam`。Docker、多团队隔离、
-> 完整参考见 **[docs/DEPLOYMENT.md](DEPLOYMENT.md)**。
+> 完整参考见 **[docs/DEPLOYMENT_zh.md](DEPLOYMENT_zh.md)**。
 
 ---
 
@@ -157,7 +157,7 @@ claudeteam health                # 期望全绿
 
 后七个是 **OpenAI 兼容**（BYOK）：用 `OPENAI_BASE_URL` + `OPENAI_API_KEY` 指到任意端点，
 API key 走和其它一样的 `token > login > api_key` 优先级。详见
-[DEPLOYMENT.md](DEPLOYMENT.md) 的 *Model backend per agent*。
+[DEPLOYMENT_zh.md](DEPLOYMENT_zh.md) 的 *每个 agent 的模型后端*。
 
 `claudeteam.toml` 例：
 
@@ -217,7 +217,7 @@ claudeteam feishu connect        # 引导式：注册自建应用、授权、建
 
 | 文档 | 内容 |
 | --- | --- |
-| [`docs/DEPLOYMENT.md`](DEPLOYMENT.md) | Host + Docker 部署 / 配置 schema / 多团队隔离 / 故障排查 |
+| [`docs/DEPLOYMENT_zh.md`](DEPLOYMENT_zh.md) | Host + Docker 部署 / 配置 schema / 多团队隔离 / 故障排查 |
 | [`CLAUDE.md`](../CLAUDE.md) | 改代码前的内部规范 |
 
 ---
