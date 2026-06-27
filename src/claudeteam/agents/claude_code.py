@@ -1,6 +1,7 @@
 """Anthropic Claude Code adapter."""
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 
 from claudeteam.runtime import paths
@@ -44,10 +45,10 @@ class ClaudeCodeAdapter(CliAdapter):
         # prepended at the spawn site — see its module docstring for the
         # token > login > api_key precedence.
         return (
-            f"HOME={agent_home(agent)} "
+            f"HOME={shlex.quote(agent_home(agent))} "
             f"CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1 DISABLE_AUTOUPDATER=1 "
             f"IS_SANDBOX=1 claude --dangerously-skip-permissions "
-            f"--model {model} --name {agent}"
+            f"--model {shlex.quote(model)} --name {shlex.quote(agent)}"
         )
 
     def ready_markers(self) -> list[str]:

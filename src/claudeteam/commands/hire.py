@@ -12,7 +12,7 @@ archived workspace back, then provisions normally — "被裁的人能从归档�
 from __future__ import annotations
 
 from claudeteam.runtime import archive, config, lifecycle, tmux
-from claudeteam.util import error_exit, usage_error, warn
+from claudeteam.util import error_exit, maybe_print_help, usage_error, warn
 
 
 USAGE = "usage: claudeteam hire <agent>"
@@ -43,6 +43,8 @@ def _rehire_from_archive(agent: str) -> tuple[dict | None, str]:
 
 
 def main(argv: list[str]) -> int:
+    if maybe_print_help(argv, USAGE):
+        return 0
     if len(argv) < 1:
         return usage_error(USAGE)
     agent = argv[0]
@@ -75,8 +77,8 @@ def main(argv: list[str]) -> int:
         return 0
     if outcome == lifecycle.CONFIG_ERROR:
         return error_exit(
-            f"❌ {agent}: bad cli config in team.json (see warning above); "
-            f"hire aborted, fix team.json and retry")
+            f"❌ {agent}: bad cli config in claudeteam.toml (see warning above); "
+            f"hire aborted, fix claudeteam.toml and retry")
     if outcome == lifecycle.SPAWN_FAILED:
         return error_exit(f"❌ failed to spawn CLI in {agent} pane")
     if outcome == lifecycle.READY_NO_INIT:

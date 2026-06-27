@@ -11,7 +11,10 @@ parse machine-readable state.
 from __future__ import annotations
 
 from claudeteam.store import local_facts
-from claudeteam.util import ago_ms, pop_bool_flag, print_json
+from claudeteam.util import ago_ms, maybe_print_help, pop_bool_flag, print_json
+
+
+USAGE = "usage: claudeteam team [--json]"
 
 
 def _emit_text(rows: list[dict], heartbeats: dict[str, int]) -> None:
@@ -53,6 +56,8 @@ def _emit_json(rows: list[dict], heartbeats: dict[str, int]) -> None:
 
 def main(argv: list[str]) -> int:
     rest = list(argv)
+    if maybe_print_help(rest, USAGE):
+        return 0
     as_json = pop_bool_flag(rest, "--json")
     rows = local_facts.list_all_statuses()
     heartbeats = local_facts.all_heartbeats()

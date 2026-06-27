@@ -260,13 +260,9 @@ react 了一次（manager 处理两条还是一条不强求，但至少要看到
 完整链路。
 
 ```bash
-# 给 worker_codex 临时打 lazy
-python3 -c '
-import json
-t = json.load(open("team.json"))
-t["agents"]["worker_codex"]["lazy"] = True
-json.dump(t, open("team.json","w"), ensure_ascii=False, indent=2)
-'
+# 给 worker_codex 临时打 lazy：编辑 claudeteam.toml，在
+# [team.agents.worker_codex] 段下加一行   lazy = true
+${EDITOR:-vi} claudeteam.toml
 claudeteam down && claudeteam up
 
 # 在群里点名让 worker_codex 报到（带锚定）
@@ -283,12 +279,8 @@ SEND "@manager 让 worker_codex 现在报个到，回复里带上 $ANCHOR"
 **清理**：
 
 ```bash
-python3 -c '
-import json
-t = json.load(open("team.json"))
-t["agents"]["worker_codex"].pop("lazy", None)
-json.dump(t, open("team.json","w"), ensure_ascii=False, indent=2)
-'
+# 编辑 claudeteam.toml，删掉 [team.agents.worker_codex] 段下的   lazy = true
+${EDITOR:-vi} claudeteam.toml
 claudeteam down && claudeteam up
 ```
 

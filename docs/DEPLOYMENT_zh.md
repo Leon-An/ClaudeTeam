@@ -213,7 +213,8 @@ worker_to_worker  = true                      # 群里显示 worker 之间的互
 `playbook` 文件会成为它身份的主体——它原生的 `CLAUDE.md` / `AGENTS.md`——叠加在团队协议
 之上，于是每个 agent 一上线就知道自己该干什么，而不只是一行头衔。把某个文件夹的内容拷到
 你的 `claudeteam.toml` 旁边（`playbook` 路径相对它解析）改一改即可。任何领域都能自己写，
-就是一个 `.md`。
+就是一个 `.md`。改完用 `claudeteam reidentify <agent> --print` 可以**预览**某个 agent
+渲染出来的身份（role + playbook + 团队协议,打到 stdout、不用起团队),`up` 之前就能验。
 
 ---
 

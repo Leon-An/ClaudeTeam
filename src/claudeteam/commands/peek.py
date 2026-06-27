@@ -39,7 +39,7 @@ def main(argv: list[str]) -> int:
     try:
         config.agent_config(agent)
     except KeyError:
-        return error_exit(f"❌ unknown agent: {agent} (not in team.json)")
+        return error_exit(f"❌ unknown agent: {agent} (not in claudeteam.toml)")
 
     session = config.session_name()
     target = tmux.Target(session, agent)

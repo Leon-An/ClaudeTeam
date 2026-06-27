@@ -167,6 +167,17 @@ def _extract_text(content, msg_type: str) -> str:
         # 把所有段落拼成多行文本, 图片 / 文件等非文字 element 用 placeholder
         # 表达, 这样 LLM 能看到"老板发了一张图 + 这段文字"的全貌.
         return _post_to_text(data)
+    if msg_type == "interactive":
+        # A v2 card (a worker's `say` reply). Surface the title FIRST — it
+        # carries "{emoji} {agent} · {role}", which router._card_sender_agent
+        # reads to attribute the card to its worker on the catchup path —
+        # then the body markdown. Without this branch a card extracted to ""
+        # and got dropped as bot_self.
+        title = ((data.get("header") or {}).get("title") or {}).get("content", "")
+        body = "\n".join(
+            str(el["content"]) for el in (data.get("body") or {}).get("elements", [])
+            if isinstance(el, dict) and el.get("content"))
+        return f"{title}\n{body}".strip() or "[card]"
     # Default: text or unknown — try common .text field, then .content,
     # then leave empty so callers can fall back to ev.get("text").
     return data.get("text") or data.get("content") or ""

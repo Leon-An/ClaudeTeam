@@ -447,7 +447,8 @@ def _read_playbook(playbook: str) -> str:
         p = paths.config_file().parent / p
     try:
         return p.read_text(encoding="utf-8").strip()
-    except OSError:
+    except (OSError, UnicodeDecodeError):
+        # missing / unreadable / non-UTF-8 (binary) → degrade, never crash a spawn
         return ""
 
 

@@ -1,6 +1,7 @@
 """Tests for agents/identity.py — per-agent identity markdown rendering."""
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 from helpers import attr_patch, isolated_env, run_cli
@@ -943,3 +944,42 @@ def test_native_memory_text_includes_shared_team_experience():
         text = identity.native_memory_text("worker_cc")
         assert "团队共享经验" in text
         assert "用两步结账" in text
+
+
+# ── playbook mechanism (per-role doc layered into identity) ────────
+
+
+def test_read_playbook_returns_stripped_content():
+    with tempfile.TemporaryDirectory() as tmp:
+        f = Path(tmp) / "role.md"
+        f.write_text("  # Role\n\ndo the thing  ", encoding="utf-8")
+        assert identity._read_playbook(str(f)) == "# Role\n\ndo the thing"
+
+
+def test_read_playbook_tolerates_non_utf8_file():
+    # REGRESSION (D): a binary / non-UTF-8 playbook must degrade to "" rather
+    # than crash the spawn. _read_playbook caught only OSError before, so a
+    # latin-1/binary file raised UnicodeDecodeError straight through hire/up.
+    with tempfile.TemporaryDirectory() as tmp:
+        f = Path(tmp) / "role.bin"
+        f.write_bytes(b"\xff\xfe\x00 not utf-8 \x80\x81")
+        assert identity._read_playbook(str(f)) == ""
+
+
+def test_read_playbook_missing_file_degrades_to_empty():
+    with tempfile.TemporaryDirectory() as tmp:
+        assert identity._read_playbook(str(Path(tmp) / "nope.md")) == ""
+
+
+def test_render_playbook_section_layers_after_divider():
+    with tempfile.TemporaryDirectory() as tmp:
+        f = Path(tmp) / "role.md"
+        f.write_text("ROLE DOC BODY", encoding="utf-8")
+        out = identity._render_playbook_section(str(f))
+        assert out.startswith("\n\n---\n\n") and "ROLE DOC BODY" in out
+
+
+def test_render_playbook_section_empty_when_unset_or_unreadable():
+    assert identity._render_playbook_section("") == ""
+    with tempfile.TemporaryDirectory() as tmp:
+        assert identity._render_playbook_section(str(Path(tmp) / "gone.md")) == ""

@@ -170,6 +170,12 @@ COPY scripts/feishu_channel/ ./scripts/feishu_channel/
 RUN cd scripts/feishu_channel \
     && npm install --omit=dev --silent --no-fund --no-audit
 
+# Domain team templates (claudeteam.toml + per-role playbooks). Bundled so an
+# operator — or an agent building a team *inside* the container — can copy a
+# starting point (`cp -r templates/software-dev/* /data/`) without the full
+# repo. Small (markdown + toml), so unlike tests/docs it earns its image space.
+COPY templates/ ./templates/
+
 # Defaults so a fresh container has a sensible state layout. Override
 # any of these at run time via `docker run -e CLAUDETEAM_STATE_DIR=...`
 # or compose `environment:` if you want a different layout.

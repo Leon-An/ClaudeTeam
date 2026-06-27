@@ -362,7 +362,7 @@ def main(argv: list[str]) -> int:
 
     agents = config.agent_names()
     if not agents:
-        return error_exit("❌ team.json has no agents")
+        return error_exit("❌ claudeteam.toml has no agents")
 
     pid_file = paths.router_pid_file()
     if not pidlock.acquire(pid_file, name="router"):

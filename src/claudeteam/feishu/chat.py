@@ -67,7 +67,7 @@ def send_card(chat_id: str, card: dict, *, profile: str = "", as_user: bool = Fa
 
 
 def list_recent(chat_id: str, *, page_size: int = 20, profile: str = "",
-                as_user: bool = True, lark_run: Callable = _real_run) -> list[dict]:
+                as_user: bool = True, lark_run: Callable = _real_run) -> list[dict] | None:
     """List recent messages in a chat (newest-first per Feishu API).
 
     Returns the `messages` array; defaults to user identity since the
@@ -83,6 +83,6 @@ def list_recent(chat_id: str, *, page_size: int = 20, profile: str = "",
         "--format", "json",
     ]
     data = lark_run(args, profile=profile)
-    if not data:
-        return []
+    if data is None:
+        return None  # lark call FAILED (auth / proxy) — distinct from an empty chat
     return list(data.get("messages") or [])

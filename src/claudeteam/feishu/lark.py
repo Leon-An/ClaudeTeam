@@ -189,16 +189,16 @@ def _ensure_tenant_token(*, fetch: Callable | None = None,
     if not fresh or not fresh.get("token"):
         return None
     try:
-        # The token is a bearer credential — create the cache owner-only
-        # (0600) and refuse to follow a pre-planted symlink, so no other
-        # local user on a shared host can read it from the temp dir.
-        fd = os.open(cache_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-                     | os.O_NOFOLLOW, 0o600)
-        try:
-            os.write(fd, _json.dumps(fresh).encode("utf-8"))
-        finally:
-            os.close(fd)
-        os.chmod(cache_path, 0o600)  # tighten perms if the file pre-existed
+        # The token is a bearer credential. Write to a PRIVATE temp file we own
+        # (mkstemp → 0600, unique name), then atomically rename over the cache —
+        # so a pre-planted *regular* file at the predictable cache path can't
+        # capture the token on a shared host (O_NOFOLLOW alone didn't: a co-tenant
+        # could pre-create a world-readable regular file and we'd write into it).
+        d = os.path.dirname(cache_path) or tempfile.gettempdir()
+        fd, tmp = tempfile.mkstemp(dir=d, prefix=".cttok_")
+        with os.fdopen(fd, "wb") as f:
+            f.write(_json.dumps(fresh).encode("utf-8"))
+        os.replace(tmp, cache_path)
     except OSError:
         pass  # cache write best-effort; the in-memory return is the load-bearing path
     return str(fresh["token"])

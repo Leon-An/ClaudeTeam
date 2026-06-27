@@ -1,7 +1,7 @@
 # Minimum-viable compose for ClaudeTeam.
 #
-# Mounts a host `./team-data/` directory into /data so team.json,
-# runtime_config.json, and the state dir survive `docker compose down`.
+# Mounts a host `./team-data/` directory into /data so claudeteam.toml
+# and the state dir survive `docker compose down`.
 # Mounts the host's lark-cli OAuth profile so `claudeteam say`/`router`
 # don't need a fresh authentication round inside the container.
 #

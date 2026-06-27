@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import json
 
+from claudeteam.feishu import cards
 from claudeteam.feishu.router import Decision
-from claudeteam.feishu.subscribe import process_lines
+from claudeteam.feishu.subscribe import _extract_text, process_lines
 
 
 _AGENTS = ["manager", "worker_cc", "worker_codex"]
@@ -555,6 +556,17 @@ def test_text_message_extraction_unchanged_after_b1():
     process_lines([line], team_agents=_AGENTS,
                   chat_id="oc_team", apply_fn=applied.append)
     assert applied[0].text == "hello world"
+
+
+def test_extract_text_surfaces_worker_card_title_and_body():
+    # REGRESSION (#3): a worker `say` posts a v2 interactive card from the bot
+    # open_id. _extract_text must surface the card title ("{emoji} {agent} ·
+    # {role}") so router._card_sender_agent attributes it to the worker on the
+    # catchup path — without this the card extracted to "" and dropped bot_self.
+    card = cards.simple_card("\U0001f48e worker_cc \u00b7 \u5185\u5bb9\u7b56\u5212", "\u8fdb\u5ea6\uff1a\u5b8c\u6210 X")
+    out = _extract_text(json.dumps(card), "interactive")
+    assert "worker_cc \u00b7" in out   # title leads -> attribution works
+    assert "\u5b8c\u6210 X" in out      # body markdown layered after
 
 
 def test_on_line_received_fires_for_every_non_empty_line_including_drops():

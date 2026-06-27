@@ -46,6 +46,29 @@ def test_no_drop_when_team_chat_filter_unset():
     assert d.action is Action.ROUTE
 
 
+def test_drop_when_event_chat_id_missing_but_filter_set():
+    # REGRESSION (#4): a payload with no chat_id must DROP when a team chat
+    # filter is set — the old `and event.get("chat_id")` guard let a missing
+    # chat_id slip past the cross-team check and reach the manager.
+    d = classify_event(_ev(chat_id=None), team_agents=_AGENTS, chat_id="oc_team")
+    assert d.is_drop() and d.reason == "cross_team"
+
+
+def test_slash_detected_when_merged_after_text():
+    # REGRESSION (#1): the @larksuite/channel chat-queue merges messages sent
+    # within ~600ms, so "status?\n/team" arrives as one blob. The slash line
+    # must still dispatch as SLASH, not get swallowed into a routed text msg.
+    d = classify_event(_ev(text="status?\n/team"), team_agents=_AGENTS)
+    assert d.action is Action.SLASH and d.text == "/team"
+
+
+def test_continuous_text_without_slash_still_routes():
+    # Sibling guard to #1: a merged multi-line message with NO slash line still
+    # routes to manager as one text — we only special-case an actual `/...` line.
+    d = classify_event(_ev(text="first line\nsecond line"), team_agents=_AGENTS)
+    assert d.action is Action.ROUTE and d.targets == ["manager"]
+
+
 def test_drop_when_sender_matches_bot_id():
     d = classify_event(_ev(sender_id="ou_bot"), team_agents=_AGENTS, bot_id="ou_bot")
     assert d.is_drop() and d.reason == "bot_self"

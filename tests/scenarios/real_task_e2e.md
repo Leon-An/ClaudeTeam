@@ -28,7 +28,7 @@ source .venv/bin/activate
 export CLAUDETEAM_STATE_DIR="$PWD/state"
 export LARK_CLI_NO_PROXY=1
 export CLAUDETEAM_LARK_SEND_AS=bot
-CHAT="$(python3 -c 'import json; print(json.load(open("runtime_config.json"))["chat_id"])')"
+CHAT="$(python3 -c 'import tomllib; print(tomllib.load(open("claudeteam.toml","rb")).get("chat_id",""))')"
 
 # 确认基础设施健康
 claudeteam health   # 应全绿

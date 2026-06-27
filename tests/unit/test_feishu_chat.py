@@ -82,8 +82,16 @@ def test_list_recent_returns_empty_when_chat_id_blank():
     assert spy.calls == []
 
 
-def test_list_recent_returns_empty_when_lark_returns_none():
+def test_list_recent_returns_none_when_lark_fails():
+    # lark call failed (auth / proxy) → None, so catchup can tell it apart from
+    # an empty chat ([]) and warn instead of silently losing the restart gap.
     spy = _Spy(None)
+    assert chat.list_recent("oc_x", lark_run=spy) is None
+
+
+def test_list_recent_returns_empty_list_for_empty_chat():
+    # reachable chat with no messages → [] (NOT None)
+    spy = _Spy({"messages": []})
     assert chat.list_recent("oc_x", lark_run=spy) == []
 
 

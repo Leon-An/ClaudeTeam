@@ -230,6 +230,9 @@ of its identity — its native `CLAUDE.md` / `AGENTS.md` — layered on top of t
 protocol, so each shows up knowing its job, not just a one-line title. Copy a
 folder's contents next to your `claudeteam.toml` (the `playbook` paths resolve
 relative to it) and adapt. Write your own for any domain — it's just a `.md`.
+Preview what an agent will get with `claudeteam reidentify <agent> --print` — it
+renders that agent's identity (role + playbook + team protocol) to stdout, no live
+team needed, so you can check a config or playbook edit before `up`.
 
 ---
 

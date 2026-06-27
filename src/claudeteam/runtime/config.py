@@ -352,7 +352,7 @@ def agent_config(agent: str) -> dict:
     """Return the per-agent dict from team.json. Raises KeyError on miss."""
     agents = load_team().get("agents", {})
     if agent not in agents:
-        raise KeyError(f"agent {agent!r} not in team.json")
+        raise KeyError(f"agent {agent!r} not in claudeteam.toml")
     return dict(agents[agent])
 
 
