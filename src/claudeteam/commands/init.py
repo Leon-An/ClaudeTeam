@@ -53,6 +53,8 @@ session = "{session}"
 #   specialty   可选  list of strings, manager 派单时参考
 #   tone        可选  字符串, 渲染进 identity 影响 LLM 输出风格
 #   notes       可选  字符串, 任意 prompt 加料
+#   playbook    可选  指向一个 .md (相对本配置文件), 作为该 agent 的角色手册;
+#                     渲染进 identity (叠加在团队协议之上)。现成模板见 templates/
 #   card_color  可选  飞书 v2 色: blue/green/red/yellow/purple/orange/grey
 #   lazy        可选  true=首消息触发起 CLI; 默认 false
 [team.agents.manager]

@@ -89,6 +89,9 @@ on the other end, not a bot wall.
 - **One config file** — `claudeteam.toml` (Cargo-style, comment-friendly)
   — chat_id, agents, models, card colors, publish filters, all in
   one place.
+- **Team templates** — start from a ready domain team (software dev, research,
+  marketing, data, content) in [`templates/`](templates/): a `claudeteam.toml`
+  plus a per-role **playbook** that becomes each agent's `CLAUDE.md` / `AGENTS.md`.
 - **`[chat.publish]` filter** — sender→receiver visibility per channel.
   Silence noisy traffic without losing the audit log.
 - **Multi-CLI** — Claude Code, Codex, Kimi, Gemini, Qwen, plus seven

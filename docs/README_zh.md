@@ -75,6 +75,7 @@
 
 - **单接口路由** — 群里任何消息都只进 manager；员工不会直接收老板原话。Manager 是唯一调度入口。
 - **单一配置文件** — `claudeteam.toml`（Cargo 风格，可写注释），chat_id / agents / 模型 / 卡片色 / publish 过滤都在一起。
+- **团队模板** — 从 [`templates/`](../templates/) 里现成的领域团队起步（软件开发 / 科研 / 营销 / 数据 / 内容）：一个 `claudeteam.toml` + 每个角色一份 **playbook**，会成为该 agent 的 `CLAUDE.md` / `AGENTS.md`。
 - **`[chat.publish]` 过滤** — 按 sender→receiver 维度控可见性，静默噪声但保审计。
 - **多 CLI 混编** — Claude Code / Codex / Kimi / Gemini / Qwen，外加七个 OpenAI 兼容员工（opencode / openclaw / pi / codewhale / hermes / trae / minimax）可以同队混跑。
 - **持久 memory** — agent 记忆扛得住 `/clear` 和 pane 重启，wake prompt 自动注入。

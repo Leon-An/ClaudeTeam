@@ -27,8 +27,12 @@ content; the say/send/memory mechanics are added automatically.
 | Folder | Team |
 | --- | --- |
 | [`software-dev/`](software-dev/) | Tech Lead + Backend + Frontend + Code Review/QA |
+| [`automated-research/`](automated-research/) | Research Lead + Literature Reviewer + Data Analyst + Experiment Runner |
+| [`marketing-growth/`](marketing-growth/) | Growth Lead + Content Strategist + Paid Media Strategist + Marketing Analyst |
+| [`data-analysis/`](data-analysis/) | Analytics Lead + Data Engineer + Data Analyst + Reporting & Viz |
+| [`content-ops/`](content-ops/) | Content Lead + Writer + Editor + SEO Specialist |
 
-_(More domains coming — automated research, marketing growth, data analysis, …)_
+Need a different domain? Write your own (next section) — it's just a toml + a few `.md` files.
 
 ## Write your own / find more
 

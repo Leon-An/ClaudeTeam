@@ -205,6 +205,7 @@ model = "opus"
 specialty  = ["调度", "审阅"]                 # optional — manager sees this in dispatch prompt
 tone       = "稳重克制"                       # optional — biases LLM tone
 notes      = "always answer in Chinese"       # optional — free-form prompt addendum
+playbook   = "manager.md"                     # optional — a role-instruction .md (→ its CLAUDE.md/AGENTS.md)
 card_color = "blue"
 publish_overrides = { worker_to_user = false } # per-agent override of [chat.publish]
 
@@ -220,6 +221,15 @@ worker_to_worker  = true                      # show inter-worker pings in group
 Defaults are wide open (everything visible) — flip individual keys to `false`
 once the team's noise level needs trimming. **Override precedence** (highest
 wins): `env` > `claudeteam.toml` > code default (see `runtime/tunables.py`).
+
+**Team templates** — instead of hand-writing the roster, start from a domain
+template in [`templates/`](../templates/) (software-dev, automated-research,
+marketing-growth, data-analysis, content-ops): a ready `claudeteam.toml` plus a
+per-role **playbook** `.md` per agent. An agent's `playbook` file becomes the bulk
+of its identity — its native `CLAUDE.md` / `AGENTS.md` — layered on top of the team
+protocol, so each shows up knowing its job, not just a one-line title. Copy a
+folder's contents next to your `claudeteam.toml` (the `playbook` paths resolve
+relative to it) and adapt. Write your own for any domain — it's just a `.md`.
 
 ---
 

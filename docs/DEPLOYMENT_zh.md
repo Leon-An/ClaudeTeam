@@ -191,6 +191,7 @@ model = "opus"
 specialty  = ["调度", "审阅"]                 # 可选——manager 派单 prompt 里会看到
 tone       = "稳重克制"                       # 可选——影响 LLM 语气
 notes      = "always answer in Chinese"       # 可选——自由形式的 prompt 加料
+playbook   = "manager.md"                     # 可选——角色指令 .md（→ 该 agent 的 CLAUDE.md/AGENTS.md）
 card_color = "blue"
 publish_overrides = { worker_to_user = false } # 单 agent 覆盖 [chat.publish]
 
@@ -205,6 +206,14 @@ worker_to_worker  = true                      # 群里显示 worker 之间的互
 
 默认全开（什么都可见）——等团队噪声需要削减时，再把单个键翻成 `false`。**覆盖优先级**
 （高者胜）：`env` > `claudeteam.toml` > 代码默认（见 `runtime/tunables.py`）。
+
+**团队模板** —— 与其从零写团队，不如从 [`templates/`](../templates/) 里的领域模板起步
+（software-dev / automated-research / marketing-growth / data-analysis / content-ops）：
+一个现成的 `claudeteam.toml` + 每个 agent 一份角色 **playbook** `.md`。某个 agent 的
+`playbook` 文件会成为它身份的主体——它原生的 `CLAUDE.md` / `AGENTS.md`——叠加在团队协议
+之上，于是每个 agent 一上线就知道自己该干什么，而不只是一行头衔。把某个文件夹的内容拷到
+你的 `claudeteam.toml` 旁边（`playbook` 路径相对它解析）改一改即可。任何领域都能自己写，
+就是一个 `.md`。
 
 ---
 
