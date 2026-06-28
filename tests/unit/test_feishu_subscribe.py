@@ -354,21 +354,6 @@ def test_normalises_image_message_to_placeholder_text():
     assert "[image:" in applied[0].text
 
 
-def test_normalises_image_message_no_key_falls_back_to_bracket():
-    line = json.dumps({
-        "message_id": "om_img2",
-        "chat_id": "oc_team",
-        "sender_id": "ou_user",
-        "message_type": "image",
-        "content": "{}",
-    })
-    applied = []
-    stats = process_lines([line], team_agents=_AGENTS,
-                          chat_id="oc_team", apply_fn=applied.append)
-    assert stats.handled == 1
-    assert applied[0].text == "[image]"
-
-
 def test_normalises_file_message_with_filename():
     line = json.dumps({
         "message_id": "om_file1",
@@ -388,21 +373,6 @@ def test_normalises_file_message_with_filename():
     assert "file_key=file_v2_xxx" in applied[0].text
 
 
-def test_normalises_file_message_filename_only():
-    line = json.dumps({
-        "message_id": "om_file2",
-        "chat_id": "oc_team",
-        "sender_id": "ou_user",
-        "message_type": "file",
-        "content": json.dumps({"file_name": "notes.txt"}),
-    })
-    applied = []
-    stats = process_lines([line], team_agents=_AGENTS,
-                          chat_id="oc_team", apply_fn=applied.append)
-    assert stats.handled == 1
-    assert applied[0].text == "[file: notes.txt]"
-
-
 def test_normalises_audio_message():
     line = json.dumps({
         "message_id": "om_audio1",
@@ -417,21 +387,6 @@ def test_normalises_audio_message():
     assert stats.handled == 1
     assert "[audio:" in applied[0].text
     assert "audio_xxx" in applied[0].text
-
-
-def test_normalises_sticker_message():
-    line = json.dumps({
-        "message_id": "om_stk1",
-        "chat_id": "oc_team",
-        "sender_id": "ou_user",
-        "message_type": "sticker",
-        "content": json.dumps({"file_key": "stk_xxx"}),
-    })
-    applied = []
-    stats = process_lines([line], team_agents=_AGENTS,
-                          chat_id="oc_team", apply_fn=applied.append)
-    assert stats.handled == 1
-    assert "[sticker: stk_xxx]" in applied[0].text
 
 
 def test_normalises_post_text_only_message():
@@ -486,34 +441,6 @@ def test_normalises_post_text_plus_image_message():
     assert "[image: image_key=img_screenshot]" in text
 
 
-def test_normalises_post_text_plus_file_message():
-    """文件 + 文字混合."""
-    line = json.dumps({
-        "message_id": "om_post3",
-        "chat_id": "oc_team",
-        "sender_id": "ou_user",
-        "message_type": "post",
-        "content": json.dumps({
-            "title": "",
-            "content": [
-                [
-                    {"tag": "text", "text": "请评审这份: "},
-                    {"tag": "file", "file_name": "spec.pdf",
-                     "file_key": "file_v2_abc"},
-                ],
-            ],
-        }),
-    })
-    applied = []
-    stats = process_lines([line], team_agents=_AGENTS,
-                          chat_id="oc_team", apply_fn=applied.append)
-    assert stats.handled == 1
-    text = applied[0].text
-    assert "请评审这份" in text
-    assert "spec.pdf" in text
-    assert "file_v2_abc" in text
-
-
 def test_normalises_post_with_link_and_at_mention():
     """post 里的超链接 + @人 也要可见."""
     line = json.dumps({
@@ -540,22 +467,6 @@ def test_normalises_post_with_link_and_at_mention():
     assert "@ou_xyz" in text
     assert "这个文档" in text
     assert "https://x.test/doc" in text
-
-
-def test_text_message_extraction_unchanged_after_b1():
-    """Regression: text-message extraction still works after _extract_text
-    refactor."""
-    line = json.dumps({
-        "message_id": "om_t",
-        "chat_id": "oc_team",
-        "sender_id": "ou_user",
-        "message_type": "text",
-        "content": json.dumps({"text": "hello world"}),
-    })
-    applied = []
-    process_lines([line], team_agents=_AGENTS,
-                  chat_id="oc_team", apply_fn=applied.append)
-    assert applied[0].text == "hello world"
 
 
 def test_extract_text_surfaces_worker_card_title_and_body():

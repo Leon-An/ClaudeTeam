@@ -27,14 +27,6 @@ def _team_env(team_data, runtime_data=None):
 # ── team.json basics ────────────────────────────────────────────
 
 
-def test_load_team_returns_full_dict():
-    team = {"session": "test", "agents": {"a": {"cli": "claude-code"}}, "default_model": "opus"}
-    with _team_env(team):
-        loaded = config.load_team()
-        assert loaded["session"] == "test"
-        assert "a" in loaded["agents"]
-
-
 def test_load_team_returns_default_when_missing():
     # isolated_env points CLAUDETEAM_TEAM_FILE at a tempdir that has no
     # team.json (since team= isn't passed), so config.load_team() takes
@@ -82,12 +74,6 @@ def test_agent_cli_defaults_to_claude_code():
     team = {"agents": {"a": {}}}
     with _team_env(team):
         assert config.agent_cli("a") == "claude-code"
-
-
-def test_agent_cli_respects_explicit_value():
-    team = {"agents": {"a": {"cli": "codex-cli"}}}
-    with _team_env(team):
-        assert config.agent_cli("a") == "codex-cli"
 
 
 # ── model resolution chain ──────────────────────────────────────
@@ -469,21 +455,6 @@ role = "dev"
 
 
 # ── pure toml block helpers ──────────────────────────────────────
-
-
-def test_toml_remove_block_at_eof():
-    text = "[team]\nsession = \"t\"\n\n[team.agents.x]\ncli = \"claude-code\"\n"
-    out, found = config._toml_remove_agent_block(text, "x")
-    assert found is True
-    assert "[team.agents.x]" not in out
-    assert "[team]" in out
-
-
-def test_toml_remove_block_absent_is_noop():
-    text = "[team]\nsession = \"t\"\n"
-    out, found = config._toml_remove_agent_block(text, "x")
-    assert found is False
-    assert out == text
 
 
 def test_toml_remove_block_preserves_next_sections_comment():

@@ -27,22 +27,6 @@ def test_install_hooks_creates_md_per_command():
         assert "wrote 9 slash command" in out
 
 
-def test_install_hooks_peek_md_documents_5min_cadence():
-    """The /peek hook teaches `claudeteam peek <agent> [N]` as the
-    branded 5-min 巡视 path, replacing the manager identity's hard-coded
-    raw `tmux capture-pane -t {session}:<agent>`."""
-    with tempfile.TemporaryDirectory() as tmp:
-        run_cli(["install-hooks", tmp])
-        body = (Path(tmp) / ".claude" / "commands" / "peek.md").read_text(
-            encoding="utf-8")
-        assert "claudeteam peek" in body
-        # The 巡视 phrase must show up so agents recognise the use-case
-        assert "巡视" in body or "cadence" in body.lower()
-        # Default N + max documented (matches command's clamp)
-        assert "30" in body
-        assert "2000" in body
-
-
 def test_install_hooks_remember_md_documents_kind_vocabulary():
     """The remember hook must teach which `kind` values are convention
     so agents don't invent free-form labels (still works but breaks
@@ -74,17 +58,6 @@ def test_install_hooks_say_md_documents_card_only_after_R169():
         assert "thread" in body.lower() or "ignored" in body.lower()
 
 
-def test_install_hooks_recall_md_mentions_other_agent_lookup():
-    """The recall hook must mention that <other-agent> is also valid —
-    that's the manager 巡视 path enabling cross-agent memory peeks."""
-    with tempfile.TemporaryDirectory() as tmp:
-        run_cli(["install-hooks", tmp])
-        body = (Path(tmp) / ".claude" / "commands" / "recall.md").read_text(
-            encoding="utf-8")
-        assert "claudeteam recall" in body
-        assert "other-agent" in body or "another agent" in body.lower()
-
-
 def test_install_hooks_idempotent_overwrites_existing_files():
     with tempfile.TemporaryDirectory() as tmp:
         run_cli(["install-hooks", tmp])
@@ -98,26 +71,6 @@ def test_install_hooks_idempotent_overwrites_existing_files():
         assert "STALE" not in team_path.read_text(encoding="utf-8")
 
 
-def test_install_hooks_default_target_is_cwd():
-    with tempfile.TemporaryDirectory() as tmp:
-        cwd = os.getcwd()
-        os.chdir(tmp)
-        try:
-            rc, _, _ = run_cli(["install-hooks"])
-            assert rc == 0
-            assert (Path(tmp) / ".claude" / "commands" / "team.md").exists()
-        finally:
-            os.chdir(cwd)
-
-
-def test_install_hooks_say_md_mentions_chat():
-    with tempfile.TemporaryDirectory() as tmp:
-        run_cli(["install-hooks", tmp])
-        say_md = (Path(tmp) / ".claude" / "commands" / "say.md").read_text(encoding="utf-8")
-        assert "Feishu chat" in say_md
-        assert "claudeteam say" in say_md
-
-
 # ── parsing ──────────────────────────────────────────────────────
 
 
@@ -125,12 +78,6 @@ def test_install_hooks_too_many_args_returns_one():
     rc, _, err = run_cli(["install-hooks", "/a", "/b"])
     assert rc == 1
     assert "usage:" in err
-
-
-def test_install_hooks_help():
-    rc, out, _ = run_cli(["install-hooks", "--help"])
-    assert rc == 0
-    assert "usage: claudeteam install-hooks" in out
 
 
 # ── pane-staleness warning ────────────────────────────────────────

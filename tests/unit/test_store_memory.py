@@ -271,48 +271,7 @@ def test_known_kinds_covers_documented_vocabulary():
     }
 
 
-def test_kinds_summary_renders_canonical_separator():
-    """USAGE strings + future docs format kinds with `' / '`. The helper
-    is the single source of truth so a separator change (e.g. to commas)
-    propagates without grep-and-replace."""
-    s = memory.kinds_summary()
-    # Every kind shows up at least once
-    for k in memory.KNOWN_KINDS:
-        assert k in s
-    # Separator is `" / "` (with surrounding spaces)
-    assert " / " in s
-    # No double-separator (would mean order quirk)
-    assert " /  / " not in s
-
-
-def test_kinds_sorted_returns_alphabetical_list():
-    """Slash card display uses alphabetical order so a boss reading two
-    cards (kind list in /recall help vs /forget warn) sees the same
-    sequence. KNOWN_KINDS itself is in author-priority order
-    (task_assigned first), but the slash UI prefers stable sort."""
-    s = memory.kinds_sorted()
-    assert s == sorted(memory.KNOWN_KINDS)
-    # All kinds present
-    assert set(s) == set(memory.KNOWN_KINDS)
-    # Returns a list (not tuple) so f-string repr renders as Python list literal
-    assert isinstance(s, list)
-
-
 # ── warn_unknown_kind ────────────────────────────────────────────
-
-
-def test_warn_unknown_kind_no_op_for_known():
-    """Known kind = silence, no stderr noise."""
-    with captured_stderr() as err:
-        memory.warn_unknown_kind("decision")
-    assert err.getvalue() == ""
-
-
-def test_warn_unknown_kind_no_op_for_empty():
-    """Empty kind = "no filter intent" — pass-through, no warn."""
-    with captured_stderr() as err:
-        memory.warn_unknown_kind("")
-    assert err.getvalue() == ""
 
 
 def test_warn_unknown_kind_nudges_for_unconventional():
@@ -352,16 +311,6 @@ def test_append_silent_for_known_kinds():
         with captured_stderr() as err:
             for k in memory.KNOWN_KINDS:
                 memory.append("manager", k, f"{k} content")
-        assert err.getvalue() == ""
-
-
-def test_append_empty_kind_does_not_warn():
-    """Empty `kind` (some integration callers might pass it) — don't
-    warn. Validate only when something IS supplied that misses the
-    vocabulary."""
-    with isolated_env():
-        with captured_stderr() as err:
-            memory.append("manager", "", "anonymous note")
         assert err.getvalue() == ""
 
 

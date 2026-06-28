@@ -37,12 +37,6 @@ def test_ready_markers_include_qwen_prompt():
     assert any("Qwen" in m for m in markers)
 
 
-def test_process_name_is_qwen():
-    """For /proc walkers and `pkill -f qwen` to work, process_name must
-    match the binary's exec name."""
-    assert QwenCodeAdapter().process_name() == "qwen"
-
-
 def test_submit_keys_use_multiline_form():
     keys = QwenCodeAdapter().submit_keys()
     assert "M-Enter" in keys

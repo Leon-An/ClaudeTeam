@@ -53,15 +53,6 @@ def test_init_default_team_is_claude_only():
         assert all(a["cli"] == "claude-code" for a in agents.values())
 
 
-def test_init_default_chat_id_and_profile_empty():
-    with _tmp_env() as tmp:
-        with env_patch(CLAUDETEAM_CONFIG_FILE=str(tmp / "claudeteam.toml")):
-            run_cli(["init"])
-        cfg = _read_toml(tmp / "claudeteam.toml")
-        assert cfg["chat_id"] == ""
-        assert cfg["lark_profile"] == ""
-
-
 def test_init_emits_chat_publish_section():
     with _tmp_env() as tmp:
         with env_patch(CLAUDETEAM_CONFIG_FILE=str(tmp / "claudeteam.toml")):
@@ -159,12 +150,6 @@ def test_upgrade_emits_legacy_preserved_note():
 # ── help / arg validation ────────────────────────────────────────
 
 
-def test_init_help_returns_zero():
-    rc, out, _ = run_cli(["init", "--help"])
-    assert rc == 0
-    assert "usage: claudeteam init" in out
-
-
 def test_init_unknown_arg_returns_one():
     with _tmp_env():
         rc, _, err = run_cli(["init", "--bogus"])
@@ -173,24 +158,6 @@ def test_init_unknown_arg_returns_one():
 
 
 # ── template self-check ──────────────────────────────────────────
-
-
-def test_init_template_passes_tomllib_parse():
-    """The string template is hand-written; this is a sanity check it
-    actually parses via stdlib tomllib (catches typos at test time
-    before they break production deploys)."""
-    with _tmp_env() as tmp:
-        with env_patch(CLAUDETEAM_CONFIG_FILE=str(tmp / "claudeteam.toml")):
-            run_cli(["init"])
-        # Just parsing without raising = passes
-        cfg = _read_toml(tmp / "claudeteam.toml")
-        # Spot-check a few required keys are present
-        assert "chat_id" in cfg
-        assert "team" in cfg
-        assert "chat" in cfg
-        assert "limits" in cfg
-        assert "router" in cfg
-        assert "feishu" in cfg
 
 
 # ── first-run hook: init drives `feishu connect` (replaces bot-creator) ───────

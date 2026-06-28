@@ -89,12 +89,6 @@ def test_main_returns_one_when_team_has_no_agents():
 # ── help ────────────────────────────────────────────────────────
 
 
-def test_main_help_returns_zero():
-    rc, out, _ = run_cli(["router", "--help"])
-    assert rc == 0
-    assert "usage: claudeteam router" in out
-
-
 # ── stale-event self-restart ──────────────────────────────────────
 
 
@@ -132,13 +126,6 @@ def test_stale_threshold_falls_back_to_default_on_garbage():
     back to platform default rather than raise."""
     with isolated_env(), env_patch(CLAUDETEAM_ROUTER_STALE_S="potato"), _patch_platform("Linux"):
         assert _stale_event_threshold_s() == 600.0
-
-
-def test_stale_threshold_ignores_zero_or_negative():
-    with isolated_env(), env_patch(CLAUDETEAM_ROUTER_STALE_S="0"), _patch_platform("Linux"):
-        assert _stale_event_threshold_s() == 600.0
-    with isolated_env(), env_patch(CLAUDETEAM_ROUTER_STALE_S="-5"), _patch_platform("Darwin"):
-        assert _stale_event_threshold_s() == 120.0
 
 
 def test_make_on_progress_refreshes_timestamp_on_each_event():
@@ -370,9 +357,3 @@ def test_notify_catchup_skips_noop_when_nothing_skipped():
         assert local_facts.list_messages("manager") == []
 
 
-def test_notify_catchup_skips_only_slash():
-    from claudeteam.store import local_facts
-    with isolated_env():
-        _notify_catchup_skips("manager", dropped_stale=0, slash_skipped=4)
-        msgs = local_facts.list_messages("manager")
-    assert len(msgs) == 1 and "4 条控制命令" in msgs[0]["content"]

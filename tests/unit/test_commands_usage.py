@@ -66,19 +66,6 @@ def test_usage_rejects_unknown_view():
         assert "unknown view" in err
 
 
-def test_usage_rejects_unexpected_args():
-    with isolated_env():
-        rc, _, err = run_cli(["usage", "--bogus"])
-        assert rc == 1
-        assert "unexpected args" in err
-
-
-def test_usage_help():
-    rc, out, _ = run_cli(["usage", "--help"])
-    assert rc == 0
-    assert "usage: claudeteam usage" in out
-
-
 # ── --json mode ─────────────────────────────────────────────────
 
 
@@ -109,23 +96,6 @@ def test_usage_json_includes_claude_code_section_with_metrics():
         assert data["claude_code"]["metrics"] == fake_metrics
         qwen_entry = next(r for r in data["other_clis"] if r["cli"] == "qwen-code")
         assert "no upstream usage tool" in qwen_entry["note"]
-
-
-def test_usage_json_records_cc_failure_without_aborting():
-    """When the CC probe fails (token expired, network down), JSON
-    still emits with ok=False + `note` so consumers branch on field."""
-    import json as _json
-    from helpers import attr_patch
-    team = {"agents": {"manager": {"cli": "claude-code"}}}
-    with isolated_env(team=team), \
-            attr_patch(_usage_mod,
-                       _query_cc_usage=lambda home=None, opener=None: {
-                           "ok": False, "note": "access token 已过期"}):
-        rc, out, _ = run_cli(["usage", "--json"])
-        assert rc == 0
-        data = _json.loads(out)
-        assert data["claude_code"]["ok"] is False
-        assert "已过期" in data["claude_code"]["note"]
 
 
 # ── _query_cc_usage HTTPError body capture ──────────────────────

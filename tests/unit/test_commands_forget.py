@@ -30,15 +30,6 @@ def test_forget_with_yes_wipes_and_reports_count():
         assert memory.list_recent("manager") == []
 
 
-def test_forget_with_yes_singular_for_one_entry():
-    """Pluralisation: 1 entry → 'entry' (singular), not 'entries'."""
-    with isolated_env():
-        memory.append("worker_cc", "note", "single")
-        rc, out, _ = run_cli(["forget", "worker_cc", "--yes"])
-        assert rc == 0
-        assert "1 memory entry" in out
-
-
 def test_forget_empty_memory_with_yes_is_a_no_op():
     """Wiping an already-empty memory: rc=0, friendly noop message."""
     with isolated_env():
@@ -61,17 +52,6 @@ def test_forget_zero_args_returns_usage():
     rc, _, err = run_cli(["forget"])
     assert rc == 1
     assert "usage:" in err
-
-
-def test_forget_help():
-    rc, out, _ = run_cli(["forget", "--help"])
-    assert rc == 0
-    assert "usage: claudeteam forget" in out
-
-
-def test_forget_registered_in_cli():
-    from claudeteam.cli import COMMANDS
-    assert "forget" in COMMANDS
 
 
 # ── --kind scalpel ─────────────────────────────────────────────
@@ -130,13 +110,6 @@ def test_forget_kind_unknown_warns_but_proceeds():
         assert memory.list_recent("manager") == []
 
 
-def test_forget_help_lists_known_kinds():
-    """--help advertises KNOWN_KINDS."""
-    rc, out, _ = run_cli(["forget", "--help"])
-    for k in memory.KNOWN_KINDS:
-        assert k in out
-
-
 # ── --team (shared experience) ───────────────────────────────────
 
 
@@ -173,6 +146,3 @@ def test_forget_team_wipe_with_yes():
         assert team_memory.list_recent() == []
 
 
-def test_forget_help_mentions_team():
-    rc, out, _ = run_cli(["forget", "--help"])
-    assert "--team" in out

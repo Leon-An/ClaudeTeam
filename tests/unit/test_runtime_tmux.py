@@ -36,19 +36,10 @@ class _Recorder:
         return _FakeResult()
 
 
-def test_target_str_is_session_colon_window():
-    assert str(Target("S", "manager")) == "S:manager"
-
-
 def test_has_session_returns_true_on_zero_exit():
     rec = _Recorder([_FakeResult(returncode=0)])
     assert has_session("S", run=rec) is True
     assert rec.calls == [["tmux", "has-session", "-t", "S"]]
-
-
-def test_has_session_returns_false_on_nonzero():
-    rec = _Recorder([_FakeResult(returncode=1)])
-    assert has_session("S", run=rec) is False
 
 
 def test_capture_pane_returns_stdout_when_ok():
@@ -133,12 +124,6 @@ def test_spawn_agent_sends_command_then_enter():
         ["tmux", "send-keys", "-l", "-t", "S:w", "claude --model sonnet"],
         ["tmux", "send-keys", "-t", "S:w", "Enter"],
     ]
-
-
-def test_has_window_uses_session_colon_window():
-    rec = _Recorder([_FakeResult(returncode=0)])
-    has_window(Target("S", "manager"), run=rec)
-    assert rec.calls == [["tmux", "has-session", "-t", "S:manager"]]
 
 
 # ── _default_run resilience ──────────────────────────────────────

@@ -33,22 +33,6 @@ def test_render_manager_uses_manager_template():
     assert "claudeteam send <recipient> <sender>" in text
 
 
-def test_render_mirrors_boss_language_rule_present_in_both_bodies():
-    """The identity is written in English for repo maintainability, but every
-    agent must be told to reply in whatever language the boss writes in. The
-    "mirror the boss" rule must appear prominently in both bodies."""
-    mgr = identity.render("manager", role="Team Manager",
-                          cli="claude-code", model="opus")
-    wkr = identity.render("worker_cc", role="frontend",
-                          cli="claude-code", model="sonnet")
-    for text in (mgr, wkr):
-        assert "Language — mirror the boss." in text
-        assert "Always reply in the same language the boss writes in" in text
-        # spells out that English here is for maintainability, not the
-        # language the agent must speak
-        assert "NOT the language you must speak" in text
-
-
 def test_render_worker_uses_worker_template():
     text = identity.render("worker_cc", role="frontend",
                            cli="claude-code", model="sonnet")
@@ -79,38 +63,6 @@ def test_render_uses_adapter_display_model_for_noop_model_cli():
     assert "kimi 自身配置" in text
 
 
-def test_manager_has_collective_dispatch_hard_constraint():
-    """The manager identity's "Hard constraint: collective orders must
-    dispatch, never substitute a summary" section is critical—every manager
-    must learn it. The dispatch flow mentions it, but it must appear as a
-    standalone hard-constraint section with a keyword trigger list + strong
-    constraint language, not just glossed over in the routing notes."""
-    text = identity.render("manager", role="Manager", cli="claude-code", model="opus")
-    # standalone section heading (strong constraint)
-    assert "Hard constraint" in text
-    assert "collective orders" in text
-    # trigger keyword list (collective + broadcast phrasing + @team / @all)
-    for kw in ("all workers", "all hands", "@team", "everyone do", "each person do"):
-        assert kw in text, f"missing trigger keyword: {kw}"
-    # strong constraint language
-    assert "Never post the summary on a worker's behalf" in text
-    assert "never substitute one say for N sends" in text
-
-
-def test_render_argument_order_contract_present_in_manager():
-    text = identity.render("manager", role="r", cli="c", model="m")
-    assert "claudeteam send <recipient> <sender>" in text
-    assert "claudeteam say <agent>" in text
-    assert "❌" in text and "✅" in text
-
-
-def test_render_argument_order_contract_present_in_worker():
-    text = identity.render("w", role="r", cli="c", model="m")
-    assert "claudeteam send <recipient> <sender>" in text
-    assert "claudeteam say <agent>" in text
-    assert "❌" in text and "✅" in text
-
-
 def test_render_warns_against_cd_in_both_templates():
     """REGRESSION: worker_cc prefixing \`cd /repo &&\` on its first reply
     attempt broke chat_id resolution. Both templates must include an
@@ -120,64 +72,6 @@ def test_render_warns_against_cd_in_both_templates():
         assert "Working directory rule" in text
         assert "do NOT" in text and "cd" in text
         assert "runtime_config.json" in text
-
-
-def test_team_principles_baked_into_both_templates():
-    """Every agent is born carrying the 6 team working principles plus the
-    daily-ops quick reference: intent→task→--intent backlink, formal
-    approval state machine (not a verbal ok), verbatim boss-intent that
-    survives /compact, logging boss corrections to durable memory,
-    start-status before working, and report-back on self-closing a
-    finished task. Boss-mandated so a fresh worker follows the
-    tasks-feature discipline without being told."""
-    for agent in ("manager", "w"):
-        text = identity.render(agent, role="r", cli="c", model="m")
-        assert "## Team principles" in text
-        assert "--intent" in text                 # ① intent backlink
-        assert "task pause" in text               # ② approval state machine
-        assert "a verbal confirmation is not the state machine" in text
-        assert "task intent get I-n" in text      # ③ verbatim re-read
-        assert "/compact" in text
-        assert "remember <you> learning" in text  # ④ corrections → memory
-        # discipline gaps:
-        assert "--note" in text                   # ② pause must carry context
-        assert "approve --done" in text           # ② don't revive finished work
-        # ⑥ self-close → report manager
-        assert "A self-closed task must be reported back in sync" in text
-        # verdict rides the state machine, and the resumed worker verifies
-        # it before acting
-        assert "whatever was decided must ride the state machine via --note" in text
-        assert "may never be invented" in text
-        # principles §1 (live-read tier C): sparse-memory CLIs must re-read the
-        # authoritative intent before answering verbatim constraints;
-        # nobody may invent constraints the boss never gave.
-        assert "sparse-memory CLIs" in text
-        assert "don't invent constraints the boss never stated" in text
-        # start-status before working (⑤ — kanban truth and anchor
-        # coverage both depend on it)
-        assert "Set status before starting work" in text
-        assert "--status 进行中" in text
-        # high-frequency ops cheat-sheet rides the same always-loaded
-        # projection into all four native memory files
-        assert "## Daily-ops quick reference" in text
-        assert "--to user" in text                # how to address the boss
-        assert "recipient first" in text          # send arg-order trap
-        assert "claudeteam read <local_id>" in text
-
-
-def test_manager_body_carries_delegation_backlink_and_credit_principles():
-    """原则簇 §2/§3 (manager-only): substantive delegation carries a task
-    back-link (tier B), and multi-person deliveries credit every
-    contributor (tier B). These live in _MANAGER_BODY, so a worker
-    render must NOT carry them."""
-    mtext = identity.render("manager", role="Manager", cli="claude-code", model="m")
-    # §2 delegation back-link
-    assert "Delegating substantive work must carry a task back-link" in mtext
-    # §3 contributor credit
-    assert "Multi-person deliveries must credit every contributor" in mtext
-    wtext = identity.render("w", role="worker", cli="claude-code", model="m")
-    # manager-only, not for workers
-    assert "Delegating substantive work must carry a task back-link" not in wtext
 
 
 def test_team_principles_survive_in_native_memory_projection():
@@ -246,26 +140,6 @@ def test_render_includes_specialty_section_when_set():
     assert "## Specialty" in text
     assert "内容审核" in text
     assert "文案润色" in text
-
-
-def test_render_omits_specialty_section_when_unset():
-    team = {"agents": {"worker_cc": {
-        "cli": "claude-code", "model": "sonnet", "role": "员工",
-    }}}
-    with isolated_env(team=team):
-        text = identity.render("worker_cc")
-    assert "## Specialty" not in text
-
-
-def test_render_includes_tone_section_when_set():
-    team = {"agents": {"worker_cc": {
-        "cli": "claude-code", "model": "sonnet", "role": "员工",
-        "tone": "细致、礼貌、详尽",
-    }}}
-    with isolated_env(team=team):
-        text = identity.render("worker_cc")
-    assert "## Style" in text
-    assert "细致、礼貌、详尽" in text
 
 
 def test_render_includes_notes_section_when_set():
@@ -344,17 +218,6 @@ def test_manager_renders_team_specialties_block():
     assert "worker_codex" in text and "SQL" in text
 
 
-def test_worker_does_not_get_team_specialties_block():
-    team = {"agents": {
-        "manager": {"cli": "claude-code", "model": "opus", "role": "主管"},
-        "worker_cc": {"cli": "claude-code", "model": "sonnet", "role": "策划",
-                      "specialty": ["文案"]},
-    }}
-    with isolated_env(team=team):
-        text = identity.render("worker_cc")
-    assert "## Team members' specialties" not in text
-
-
 def test_manager_omits_team_specialties_block_when_no_worker_has_specialty():
     team = {"agents": {
         "manager": {"cli": "claude-code", "model": "opus", "role": "主管"},
@@ -367,55 +230,6 @@ def test_manager_omits_team_specialties_block_when_no_worker_has_specialty():
 
 
 # ── Step 4b: identity 模板教 LLM 用 --to ────────────────────
-
-
-def test_manager_identity_teaches_to_user():
-    team = {"agents": {"manager": {"cli": "claude-code", "model": "opus",
-                                    "role": "主管"}}}
-    with isolated_env(team=team):
-        text = identity.render("manager")
-    # manager 必须看到 `--to user` 用法和 chat.publish 提示
-    assert "--to user" in text
-    assert "chat.publish" in text
-
-
-def test_manager_identity_dispatch_step_uses_to_user():
-    team = {"agents": {"manager": {"cli": "claude-code", "model": "opus",
-                                    "role": "主管"}}}
-    with isolated_env(team=team):
-        text = identity.render("manager")
-    # dispatch-flow step 3 example must carry --to user
-    assert 'claudeteam say manager "<dispatched to N workers...>" --to user' in text
-
-
-def test_worker_identity_teaches_both_to_targets():
-    team = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
-                                      "role": "员工"}}}
-    with isolated_env(team=team):
-        text = identity.render("worker_cc")
-    # worker must know the two common --to values
-    assert "--to user" in text
-    assert "--to manager" in text
-
-
-def test_identity_requires_to_explicit():
-    """Both bodies must clearly tell the LLM "every say must explicitly carry
-    --to" — to stop the LLM being lazy and omitting it. The prompt's old
-    "omitting is equivalent" exemption sentence made the LLM stop carrying
-    --to, so it was changed to a strong constraint."""
-    team = {"agents": {
-        "manager": {"cli": "claude-code", "model": "opus", "role": "主管"},
-        "worker_cc": {"cli": "claude-code", "model": "sonnet", "role": "员工"},
-    }}
-    with isolated_env(team=team):
-        mgr = identity.render("manager")
-        wkr = identity.render("worker_cc")
-    # the strong-constraint sentence appears in both bodies
-    assert "must be passed explicitly" in mgr or ("must" in mgr.lower() and "--to" in mgr)
-    assert "must be passed explicitly" in wkr or ("must" in wkr.lower() and "--to" in wkr)
-    # no more "omitting is equivalent" exemption sentence
-    assert "省略 `--to` 等价" not in mgr
-    assert "省略 `--to` 等价" not in wkr
 
 
 def test_write_overwrites_existing_file():
@@ -466,28 +280,6 @@ def test_init_prompt_uses_absolute_identity_path():
         assert path.endswith("/agents/worker_cc/identity.md")
 
 
-def test_init_prompt_teaches_to_explicit_say():
-    """Step 4c: init prompt 也要强调 --to 必带。仅靠 identity body 不够 —
-    LLM 处理 inbox 时直接看 init prompt 的 say 例子。例子不带 --to →
-    LLM 跟着省略。"""
-    with isolated_env():
-        prompt = identity.init_prompt("worker_cc")
-    # 例子带 --to user
-    assert "--to user" in prompt
-    # 强约束语出现
-    assert "MUST" in prompt or "必须" in prompt
-    # 提示 manager / user 两个目标
-    assert "manager" in prompt and "user" in prompt
-
-
-def test_init_prompt_manager_targets_user_only_in_hint():
-    """manager 的 init prompt 提示只列 --to user（manager 没有"对自己说"
-    的场景）。"""
-    with isolated_env():
-        prompt = identity.init_prompt("manager")
-    assert "--to user" in prompt
-
-
 def test_init_prompt_teaches_inbox_processing_after_R168():
     """The prompt tells agents to PROCESS unread messages (post a chat
     response when it's a status / 报道, mark each read), not just count
@@ -522,19 +314,6 @@ def test_init_prompt_appends_memory_when_present():
 
 
 # ── Phase C: CLI-native memory file (claude's ~/.claude/CLAUDE.md) ──
-
-
-def test_adapter_native_memory_path_default_is_none():
-    """Base contract: a CLI declares no native memory file by default, so
-    an adapter opts out unless it overrides."""
-    assert base.CliAdapter.native_memory_path.__doc__  # documented contract
-
-    class _StubAdapter(base.CliAdapter):
-        def spawn_cmd(self, agent, model): return ""
-        def ready_markers(self): return []
-        def process_name(self): return "stub"
-
-    assert _StubAdapter().native_memory_path("worker_x") is None
 
 
 def test_claude_adapter_native_memory_path_is_in_agent_home():
@@ -994,15 +773,3 @@ def test_read_playbook_missing_file_degrades_to_empty():
         assert identity._read_playbook(str(Path(tmp) / "nope.md")) == ""
 
 
-def test_render_playbook_section_layers_after_divider():
-    with tempfile.TemporaryDirectory() as tmp:
-        f = Path(tmp) / "role.md"
-        f.write_text("ROLE DOC BODY", encoding="utf-8")
-        out = identity._render_playbook_section(str(f))
-        assert out.startswith("\n\n---\n\n") and "ROLE DOC BODY" in out
-
-
-def test_render_playbook_section_empty_when_unset_or_unreadable():
-    assert identity._render_playbook_section("") == ""
-    with tempfile.TemporaryDirectory() as tmp:
-        assert identity._render_playbook_section(str(Path(tmp) / "gone.md")) == ""

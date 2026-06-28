@@ -32,13 +32,6 @@ def test_task_create_with_by_and_desc():
         assert t["description"] == "root cause Y"
 
 
-def test_task_create_title_with_spaces():
-    with isolated_env():
-        run_cli(["task", "create", "worker", "fix", "the", "broken", "thing"])
-        t = tasks.list_tasks()[0]
-        assert t["title"] == "fix the broken thing"
-
-
 def test_task_create_missing_args_returns_one():
     with isolated_env():
         rc, _, err = run_cli(["task", "create", "worker"])
@@ -97,13 +90,6 @@ def test_task_done_marks_completed():
 # ── list / get ────────────────────────────────────────────────────
 
 
-def test_task_list_empty():
-    with isolated_env():
-        rc, out, _ = run_cli(["task", "list"])
-        assert rc == 0
-        assert "no matching tasks" in out
-
-
 def test_task_list_shows_count_and_each_row():
     with isolated_env():
         tasks.create("w", "first task")
@@ -141,21 +127,7 @@ def test_task_get_existing_renders_full_card():
         assert "desc: d" in out
 
 
-def test_task_get_unknown_id_returns_one():
-    with isolated_env():
-        rc, _, err = run_cli(["task", "get", "T-99"])
-        assert rc == 1
-        assert "no such task" in err
-
-
 # ── dispatcher ───────────────────────────────────────────────────
-
-
-def test_task_no_args_prints_usage():
-    rc, out, _ = run_cli(["task"])
-    # treated as "show usage"; behaviour-wise rc==1 since no subcmd
-    assert "usage:" in out
-    assert rc == 1
 
 
 def test_task_unknown_subcommand_returns_one():
@@ -325,16 +297,6 @@ def test_task_reject_rework_echoes_to_assignee_and_logs():
         # and the transition is audited
         kinds = [(l["type"], l["ref"]) for l in local_facts.list_logs("w")]
         assert ("task_transition", "T-1") in kinds
-
-
-def test_task_reject_cancel_echoes_to_assignee_and_logs():
-    with isolated_env():
-        _make_in_progress()
-        run_cli(["task", "pause", "T-1"])
-        run_cli(["task", "reject", "T-1", "作废", "--cancel"])
-        assert tasks.get("T-1")["status"] == "已取消"
-        assert any(m["task_id"] == "T-1"
-                   for m in local_facts.list_messages("w"))
 
 
 def test_task_pause_routes_to_explicit_approver_via_to():

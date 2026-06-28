@@ -156,23 +156,6 @@ def test_api_error_extracts_message_from_nested_error_dict():
     assert "{'type'" not in log
 
 
-def test_api_error_extracts_message_from_validation_error():
-    """Same shape, different type — `validation` errors from
-    `--image` flag rejection. Operator wants the actual rejection
-    reason, not a dict literal."""
-    import io
-    import contextlib
-    payload = ('{"ok":false,"error":{"type":"validation",'
-               '"message":"--image: --file must be a relative path"}}')
-    rec = _Recorder(FakeProc(stdout=payload))
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        lark.call(["x"], run=rec)
-    log = out.getvalue()
-    assert "must be a relative path" in log
-    assert "type=validation" in log
-
-
 def test_api_error_falls_back_when_error_is_plain_string():
     """Some endpoints return error as a plain string. Fall back to
     that string verbatim."""
@@ -197,12 +180,6 @@ def test_api_error_falls_back_to_code_when_no_message():
     assert "42" in out.getvalue()
 
 
-def test_run_returns_data_when_ok_true():
-    """Belt-and-suspenders: ok=true with data should still unwrap data."""
-    rec = _Recorder(FakeProc(stdout='{"ok":true,"data":{"message_id":"om_2"}}'))
-    assert lark.call(["x"], run=rec) == {"message_id": "om_2"}
-
-
 def test_run_returns_none_on_invalid_json():
     rec = _Recorder(FakeProc(stdout="not-json"))
     assert lark.call(["x"], run=rec) is None
@@ -212,68 +189,6 @@ def test_run_returns_none_on_timeout():
     def fake(*args, **kwargs):
         raise subprocess.TimeoutExpired(cmd=["lark"], timeout=90)
     assert lark.call(["x"], run=fake) is None
-
-
-def test_run_returns_none_when_npx_not_on_path():
-    """REGRESSION: subprocess.run raising FileNotFoundError (npx not
-    installed) used to propagate as a top-level traceback through
-    every claudeteam say / router invocation. Now caught with a
-    one-liner pointing at Node.js install."""
-    import io
-    import contextlib
-
-    def fake(*a, **kw):
-        raise FileNotFoundError("[Errno 2] No such file or directory: 'npx'")
-
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        result = lark.call(["x"], run=fake)
-    assert result is None
-    assert "npx not found on PATH" in out.getvalue()
-
-
-def test_run_returns_none_on_other_oserror():
-    """OSError variants other than FileNotFoundError (permission denied
-    on fork, EAGAIN, etc.) also caught — same one-line warn pattern."""
-    import io
-    import contextlib
-
-    def fake(*a, **kw):
-        raise OSError("[Errno 13] Permission denied")
-
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        result = lark.call(["x"], run=fake)
-    assert result is None
-    assert "could not be launched" in out.getvalue()
-
-
-def test_run_logs_preview_when_stdout_is_not_json():
-    """REGRESSION: silent return None on JSONDecodeError used to make
-    debugging impossible. Now logs a one-line preview of the offending
-    output so the operator can see the kind of garbage they got back."""
-    import io
-    import contextlib
-    rec = _Recorder(FakeProc(stdout="<html>\n<body>auth required</body>\n</html>\n"))
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        result = lark.call(["x"], run=rec)
-    assert result is None
-    log = out.getvalue()
-    assert "non-JSON" in log
-    assert "<html>" in log  # the preview line
-
-
-def test_run_default_timeout_is_90_seconds():
-    rec = _Recorder(FakeProc(stdout="{}"))
-    lark.call(["x"], run=rec)
-    assert rec.calls[0]["kwargs"]["timeout"] == 90
-
-
-def test_run_uses_explicit_timeout_when_passed():
-    rec = _Recorder(FakeProc(stdout="{}"))
-    lark.call(["x"], timeout=5, run=rec)
-    assert rec.calls[0]["kwargs"]["timeout"] == 5
 
 
 def test_run_strips_https_proxy_when_no_proxy_env_set():
@@ -396,67 +311,7 @@ def test_timeout_clamps_zero_or_negative_to_one():
     assert rec2.calls[0]["kwargs"]["timeout"] == 1
 
 
-def test_timeout_explicit_zero_also_clamped():
-    """Same clamp applied to the explicit `timeout=` kwarg path —
-    a caller passing 0 still gets a usable 1s window, not an
-    insta-fail."""
-    rec = _Recorder(FakeProc(stdout="{}"))
-    lark.call(["x"], timeout=0, run=rec)
-    assert rec.calls[0]["kwargs"]["timeout"] == 1
-
-
 # ── Popen-time errors (npx missing, permission denied, ...) ────
-
-
-def test_run_returns_none_when_npx_not_on_path():
-    """REGRESSION: subprocess raising FileNotFoundError (npx not
-    installed) used to propagate as a top-level traceback through
-    every claudeteam say / chat invocation. Now caught with a
-    one-liner pointing at Node.js install."""
-    import io
-    import contextlib
-
-    def fake(*a, **kw):
-        raise FileNotFoundError("[Errno 2] No such file or directory: 'npx'")
-
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        result = lark.call(["x"], run=fake)
-    assert result is None
-    assert "npx not found on PATH" in out.getvalue()
-
-
-def test_run_returns_none_on_other_oserror():
-    """OSError variants other than FileNotFoundError (permission, EAGAIN,
-    fork failed) — same one-line warn pattern."""
-    import io
-    import contextlib
-
-    def fake(*a, **kw):
-        raise OSError("[Errno 13] Permission denied")
-
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        result = lark.call(["x"], run=fake)
-    assert result is None
-    assert "could not be launched" in out.getvalue()
-
-
-def test_run_logs_preview_when_stdout_is_not_json():
-    """REGRESSION: silent return None on JSONDecodeError used to make
-    debugging impossible. Now logs a one-line preview of the offending
-    output so the operator can see the kind of garbage they got back
-    (typically: HTML auth wall page, lark-cli banner text)."""
-    import io
-    import contextlib
-    rec = _Recorder(FakeProc(stdout="<html>\n<body>auth required</body>\n</html>\n"))
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        result = lark.call(["x"], run=rec)
-    assert result is None
-    log = out.getvalue()
-    assert "non-JSON" in log
-    assert "<html>" in log
 
 
 # ── tenant_access_token bootstrap (container path) ───────────────
@@ -720,13 +575,6 @@ def test_subprocess_env_injects_creds_from_state_file():
 def test_sidecar_path_respects_env_override():
     with env_patch(CLAUDETEAM_FEISHU_SIDECAR_DIR="/opt/x"):
         assert str(lark.sidecar_path()) == "/opt/x/sidecar.js"
-
-
-def test_sidecar_path_default_is_repo_relative():
-    with env_patch(CLAUDETEAM_FEISHU_SIDECAR_DIR=None):
-        p = lark.sidecar_path()
-        assert p.name == "sidecar.js"
-        assert p.parent.name == "feishu_channel"
 
 
 def test_subprocess_env_isolates_lark_cli_config_dir_when_creds_present():

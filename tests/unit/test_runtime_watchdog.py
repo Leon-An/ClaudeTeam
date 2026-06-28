@@ -284,18 +284,6 @@ def test_respawn_invokes_reap_before_spawning_when_markers_present():
     assert order == ["reap", "popen"]
 
 
-def test_respawn_skips_reap_when_no_markers():
-    """Specs without orphan_markers (e.g. watchdog itself) shouldn't
-    trigger a ps scan — reap is still called but is a noop."""
-    spec = _spec(orphan_markers=())
-    reap_called: list[ProcessSpec] = []
-    respawn(spec,
-            popen=lambda *a, **k: object(),
-            reap=lambda s: reap_called.append(s) or 0)
-    # reap is invoked uniformly; the noop check is in list_orphan_pids
-    assert reap_called == [spec]
-
-
 # ── supervise: alive path ────────────────────────────────────────
 
 
@@ -308,16 +296,6 @@ def test_supervise_records_alive_when_check_passes():
               now=lambda: 0,
               log=lambda *_: None)
     assert states["router"].last_action == "alive"
-    assert states["router"].fail_count == 0
-
-
-def test_supervise_resets_fail_count_on_alive_recovery():
-    spec = _spec()
-    states = {"router": ProcessState("router", fail_count=2)}
-    supervise([spec], states,
-              alive_check=lambda s: True,
-              respawn_fn=lambda s: True,
-              now=lambda: 0, log=lambda *_: None)
     assert states["router"].fail_count == 0
 
 

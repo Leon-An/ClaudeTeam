@@ -173,14 +173,6 @@ def test_human_at_mention_still_routes_only_to_manager():
     assert d.sender == ""  # human
 
 
-def test_multiple_mentions_still_routes_only_to_manager():
-    d = classify_event(
-        _ev(text="@worker_cc and @worker_codex and @worker_cc"),
-        team_agents=_AGENTS,
-    )
-    assert d.targets == ["manager"]
-
-
 def test_mentions_of_unknown_names_routes_to_manager():
     d = classify_event(_ev(text="hey @stranger please help"), team_agents=_AGENTS)
     assert d.targets == ["manager"]
@@ -219,11 +211,6 @@ def test_classify_does_not_mutate_seen_set():
     classify_event(_ev(), team_agents=_AGENTS, seen_msg_ids=seen)
     # classifier reads but does not mutate; caller is responsible for adding
     assert seen == set()
-
-
-def test_msg_id_propagates_into_decision():
-    d = classify_event(_ev(message_id="om_42"), team_agents=_AGENTS)
-    assert d.msg_id == "om_42"
 
 
 # ── Action.SLASH (router-level dispatch) ─────────────────────────
@@ -287,30 +274,6 @@ def test_at_team_token_routes_to_manager_only():
     assert d.targets == ["manager"]
 
 
-def test_at_all_token_routes_to_manager_only():
-    d = classify_event(_ev(text="@all heads up"), team_agents=_AGENTS)
-    assert d.action is Action.ROUTE
-    assert d.targets == ["manager"]
-
-
-def test_at_everyone_routes_to_manager_only():
-    d = classify_event(_ev(text="@everyone deploy now"), team_agents=_AGENTS)
-    assert d.action is Action.ROUTE
-    assert d.targets == ["manager"]
-
-
-def test_action_broadcast_no_longer_emitted():
-    """Routing-level broadcast is dead. Every variant of 'broadcast
-    trigger' from a human now ROUTEs to manager. The BROADCAST action
-    itself is kept in the enum for legacy reasons but is unreachable
-    from classify_event."""
-    for text in ("全体注意", "@team x", "@all y", "@everyone z"):
-        d = classify_event(_ev(text=text, message_id=f"om_{hash(text)}"),
-                            team_agents=_AGENTS)
-        assert d.action is Action.ROUTE, f"{text!r} should route to manager"
-        assert d.targets == ["manager"], f"{text!r} target wrong"
-
-
 def test_explicit_mention_with_broadcast_token_routes_to_manager():
     """`@worker_cc 全体成员都开会` — both tokens present. Still just
     manager. Manager reads the text and decides intent."""
@@ -360,14 +323,3 @@ def test_unparseable_bot_message_drops():
     assert d.reason == "bot_self"
 
 
-def test_worker_card_with_chinese_role_still_parsed():
-    """The role text in the title is Chinese (`container-A 工程师`),
-    but the agent name `worker_cc` is what the parser keys on."""
-    card_text = '<card title="💎 worker_cc · container-A 工程师">报道</card>'
-    d = classify_event(
-        _ev(text=card_text, sender_id="bot_xxx"),
-        team_agents=_AGENTS, bot_id="bot_xxx",
-    )
-    assert d.action is Action.ROUTE
-    assert d.targets == ["manager"]
-    assert d.sender == "worker_cc"

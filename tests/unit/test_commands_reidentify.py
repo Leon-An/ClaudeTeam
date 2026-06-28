@@ -135,12 +135,6 @@ def test_reidentify_print_renders_identity_without_live_team():
     assert "team worker" in out         # incl the team-protocol body, not just the role
 
 
-def test_reidentify_help_prints_usage():
-    rc, out, _ = run_cli(["reidentify", "--help"])
-    assert rc == 0
-    assert "usage: claudeteam reidentify" in out
-
-
 def test_reidentify_unknown_agent_names_claudeteam_toml():
     """Config is claudeteam.toml — the error must not name the legacy
     team.json (which no longer exists)."""

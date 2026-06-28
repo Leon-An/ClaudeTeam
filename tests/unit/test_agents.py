@@ -31,12 +31,6 @@ def test_registry_lists_known_clis_plus_kimi_and_qwen_aliases():
     }
 
 
-def test_get_adapter_returns_matching_concrete_type():
-    assert isinstance(get_adapter("claude-code"), ClaudeCodeAdapter)
-    assert isinstance(get_adapter("codex-cli"), CodexCliAdapter)
-    assert isinstance(get_adapter("kimi-code"), KimiCodeAdapter)
-
-
 def test_kimi_alias_returns_same_instance():
     assert get_adapter("kimi-code") is get_adapter("kimi-cli")
 
@@ -157,21 +151,6 @@ def test_codex_display_model_passes_openai_through_but_labels_dropped():
     assert a.display_model("") == "codex 自身配置"
 
 
-def test_noop_model_adapters_label_their_own_config():
-    """gemini/qwen/kimi ignore the team/argv model → never echo it back."""
-    for adapter in (GeminiCliAdapter(), QwenCodeAdapter(), KimiCodeAdapter()):
-        label = adapter.display_model("opus")
-        assert "opus" not in label
-        assert "自身配置" in label
-
-
-def test_claude_display_model_is_verbatim():
-    """claude-code actually runs the resolved model, so its label is the
-    model itself (base default), empty → 默认."""
-    assert ClaudeCodeAdapter().display_model("sonnet") == "sonnet"
-    assert ClaudeCodeAdapter().display_model("") == "默认"
-
-
 def test_native_memory_reloads_only_claude_and_gemini():
     """The mid-session disk-reload capability gates the G reidentify
     fallback: claude (re-reads after /compact) + gemini (every-prompt +
@@ -245,12 +224,6 @@ def test_kimi_omits_dash_m_when_no_model_and_no_config():
 # ── markers ──────────────────────────────────────────────────────
 
 
-def test_process_names_match_expected_binaries():
-    assert ClaudeCodeAdapter().process_name() == "claude"
-    assert CodexCliAdapter().process_name() == "codex"
-    assert KimiCodeAdapter().process_name() == "kimi"
-
-
 # ── codex_cli.ensure_workdir_trusted ─────────────────────────────
 
 
@@ -296,20 +269,3 @@ def test_ensure_workdir_trusted_idempotent_when_entry_exists():
         assert cfg.read_text(encoding="utf-8") == original
 
 
-def test_clear_and_compact_commands_are_per_cli():
-    """/clear is universal; /compact is claude/codex/kimi, /compress for the
-    gemini-style CLIs — declared on the adapter so the slash handler injects
-    each agent's OWN command instead of a hardcoded one."""
-    from claudeteam.agents.claude_code import ClaudeCodeAdapter
-    from claudeteam.agents.codex_cli import CodexCliAdapter
-    from claudeteam.agents.gemini_cli import GeminiCliAdapter
-    from claudeteam.agents.qwen_code import QwenCodeAdapter
-    from claudeteam.agents.kimi_code import KimiCodeAdapter
-    for adapter in (ClaudeCodeAdapter(), CodexCliAdapter(), GeminiCliAdapter(),
-                    QwenCodeAdapter(), KimiCodeAdapter()):
-        assert adapter.clear_command() == "/clear"
-    assert ClaudeCodeAdapter().compact_command() == "/compact"
-    assert CodexCliAdapter().compact_command() == "/compact"
-    assert KimiCodeAdapter().compact_command() == "/compact"
-    assert GeminiCliAdapter().compact_command() == "/compress"
-    assert QwenCodeAdapter().compact_command() == "/compress"

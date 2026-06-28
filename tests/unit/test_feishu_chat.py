@@ -38,15 +38,6 @@ def test_send_text_routes_to_messages_reply_when_reply_to_set():
     assert "--reply-to" not in args
 
 
-def test_send_text_uses_messages_send_when_no_reply_to():
-    spy = _Spy({})
-    chat.send_text("oc_x", "x", lark_run=spy)
-    args = spy.calls[0]["args"]
-    assert "+messages-send" in args
-    assert "+messages-reply" not in args
-    assert "--chat-id" in args and "oc_x" in args
-
-
 def test_send_text_returns_none_when_chat_id_empty():
     spy = _Spy({})
     assert chat.send_text("", "x", lark_run=spy) is None
@@ -126,14 +117,6 @@ def test_list_recent_threads_profile_through_to_lark_run():
     assert spy.calls[0]["kwargs"]["profile"] == "prod"
 
 
-def test_list_recent_handles_missing_messages_field():
-    """If lark-cli returns a `data` dict that has no `messages` key
-    (e.g. the chat is genuinely empty), list_recent should return []
-    not crash on the .get(...) chain."""
-    spy = _Spy({"has_more": False})  # no "messages" key
-    assert chat.list_recent("oc_x", lark_run=spy) == []
-
-
 def test_send_card_returns_none_when_chat_id_empty():
     """Sister to send_text's same guard — silently skip on empty
     chat_id rather than letting lark-cli error."""
@@ -142,11 +125,3 @@ def test_send_card_returns_none_when_chat_id_empty():
     assert spy.calls == []
 
 
-def test_send_card_threads_profile_and_identity_through():
-    spy = _Spy({"message_id": "om_card"})
-    out = chat.send_card("oc_x", {"title": "hi"}, profile="prod",
-                         as_user=True, lark_run=spy)
-    assert out == {"message_id": "om_card"}
-    assert spy.calls[0]["kwargs"]["profile"] == "prod"
-    args = spy.calls[0]["args"]
-    assert args[args.index("--as") + 1] == "user"

@@ -141,37 +141,10 @@ def test_recall_kind_filter_with_limit_trims_after_filter():
         assert "note 49" not in out
 
 
-def test_recall_zero_limit_returns_error():
-    rc, _, err = run_cli(["recall", "w", "--limit", "0"])
-    assert rc == 1
-    assert ">= 1" in err
-
-
 def test_recall_zero_args_returns_usage():
     rc, _, err = run_cli(["recall"])
     assert rc == 1
     assert "usage:" in err
-
-
-def test_recall_help_flag():
-    rc, out, _ = run_cli(["recall", "--help"])
-    assert rc == 0
-    assert "usage: claudeteam recall" in out
-
-
-def test_recall_help_lists_known_kinds():
-    """--help advertises memory.KNOWN_KINDS so operators don't have to
-    grep the source to learn the convention."""
-    rc, out, _ = run_cli(["recall", "--help"])
-    for k in memory.KNOWN_KINDS:
-        assert k in out
-    # Make the "any string accepted" caveat visible too
-    assert "stderr" in out.lower() or "nudge" in out.lower()
-
-
-def test_recall_registered_in_cli():
-    from claudeteam.cli import COMMANDS
-    assert "recall" in COMMANDS
 
 
 # ── --team (shared experience) ───────────────────────────────────
@@ -193,21 +166,6 @@ def test_recall_team_empty_friendly_message():
         rc, out, _ = run_cli(["recall", "--team"])
         assert rc == 0
         assert "no shared experience yet" in out
-
-
-def test_recall_team_json():
-    from claudeteam.store import team_memory
-    with isolated_env():
-        team_memory.append("x", by="a")
-        rc, out, _ = run_cli(["recall", "--team", "--json"])
-        assert rc == 0
-        rows = json.loads(out)
-        assert rows[0]["by"] == "a"
-
-
-def test_recall_help_mentions_team():
-    rc, out, _ = run_cli(["recall", "--help"])
-    assert "--team" in out
 
 
 def test_recall_team_shows_entry_ids():

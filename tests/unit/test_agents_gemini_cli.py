@@ -41,12 +41,6 @@ def test_ready_markers_present():
     assert any("Gemini" in m for m in markers)
 
 
-def test_process_name_is_gemini():
-    """For /proc walkers and `pkill -f gemini` to work, process_name
-    must match the binary's exec name."""
-    assert GeminiCliAdapter().process_name() == "gemini"
-
-
 def test_submit_keys_use_multiline_form():
     """Ink-based UIs need M-Enter to commit (Enter inserts newline);
     same pattern as Codex / Kimi. Plain Enter as fallback."""

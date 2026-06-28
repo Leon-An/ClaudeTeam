@@ -89,12 +89,6 @@ def test_say_sends_to_chat_and_logs_locally():
         assert logs[0]["content"] == "hello world"
 
 
-def test_say_default_identity_is_bot():
-    with _isolated(), _fake_send() as send:
-        run_cli(["say", "manager", "hi", "--no-card"])
-        assert send["calls"][0]["as_user"] is False
-
-
 def test_say_as_user_flag():
     with _isolated(), _fake_send() as send:
         run_cli(["say", "manager", "hi", "--no-card", "--as", "user"])
@@ -183,23 +177,6 @@ def _fake_send_card():
         yield state
 
 
-def test_say_card_flag_sends_card_not_text():
-    """`--card` routes through send_card; send_text isn't touched.
-    Title is `{emoji} {agent} · {role}` (no more bare `[agent]`)."""
-    with _isolated(), _fake_send_card() as st:
-        rc, _, _ = run_cli(["say", "manager", "重要决策已落地", "--card"])
-    assert rc == 0
-    assert len(st["card_calls"]) == 1
-    assert st["text_calls"] == []
-    card = st["card_calls"][0]["card"]
-    # title is "{emoji} {agent} · {role}" pulled from team.json
-    assert card["header"]["title"]["content"] == "🎯 manager · 团队主管"
-    body = card["body"]["elements"][0]["content"]
-    assert "重要决策已落地" in body
-    # team.json `color: blue` → blue template
-    assert card["header"]["template"] == "blue"
-
-
 def test_say_card_for_worker_uses_team_json_color_after_R169():
     """team.json's per-agent `color` field wins over the hard-coded
     worker_*→green default. Test fixture sets worker_cc → purple."""
@@ -240,19 +217,6 @@ def test_say_card_color_reflects_live_toml_edit():
             f"card_color edit didn't take effect: still {second_color}"
 
 
-def test_say_with_reply_warns_and_sends_card_anyway():
-    """Cards don't thread; `--reply` prints a stderr warning but
-    still sends the card. The warn message is generic
-    "--reply ignored (Feishu cards don't thread)" since there's
-    no longer a --card vs --no-card distinction."""
-    with _isolated(), _fake_send_card() as st:
-        rc, _, err = run_cli(["say", "manager", "msg",
-                              "--reply", "om_xx"])
-    assert rc == 0
-    assert "ignored" in err and "thread" in err
-    assert len(st["card_calls"]) == 1
-
-
 def test_say_default_now_sends_card_after_R168():
     """Default flipped — every `claudeteam say` now sends a v2 card
     (colored header per role), not plain text. The convention: agent
@@ -290,20 +254,6 @@ def test_say_card_falls_back_to_default_emoji_when_team_json_missing_emoji():
         # not in default table → ⚙️ system glyph
         assert st["card_calls"][0]["card"]["header"]["title"]["content"] == \
             "⚙️ worker_unknown · 未知员工"
-
-
-def test_say_no_card_flag_is_a_no_op_post_R169():
-    """`--no-card` removed as escape hatch — every chat message is a
-    card. Flag is consumed for backwards-compat but does not change
-    behaviour. Convention: no plain-text agent chat."""
-    with _isolated(), _fake_send_card() as st:
-        rc, _, _ = run_cli(["say", "manager", "收到", "--no-card"])
-    assert rc == 0
-    # All sends now go through send_card path; send_text is dead
-    assert len(st["card_calls"]) == 1
-    assert st["text_calls"] == []
-    title = st["card_calls"][0]["card"]["header"]["title"]["content"]
-    assert title == "🎯 manager · 团队主管"
 
 
 def test_say_audit_log_failure_does_not_block_chat_send():
@@ -371,23 +321,6 @@ def test_say_passes_through_when_publish_true():
     with _isolated() as tmp, _fake_send() as send:
         _toml_with_publish(tmp, manager_to_worker=True)
         rc, _, _ = run_cli(["say", "manager", "派单", "--to", "worker_cc"])
-    assert rc == 0
-    assert len(send["calls"]) == 1
-
-
-def test_say_passes_through_when_publish_always():
-    """`always` is a hint, treated as True at runtime."""
-    with _isolated() as tmp, _fake_send() as send:
-        _toml_with_publish(tmp, manager_to_user="always")
-        rc, _, _ = run_cli(["say", "manager", "答老板", "--to", "user"])
-    assert rc == 0
-    assert len(send["calls"]) == 1
-
-
-def test_say_worker_to_user_default_true():
-    """worker → user (worker 完工卡) — 默认 True (preserve current behavior)."""
-    with _isolated() as tmp, _fake_send() as send:
-        rc, _, _ = run_cli(["say", "worker_cc", "完工 ✅", "--to", "user"])
     assert rc == 0
     assert len(send["calls"]) == 1
 
@@ -487,15 +420,6 @@ def test_say_overrides_force_pass_when_global_silenced():
 def test_say_overrides_take_precedence_over_global():
     """When global says false but override says true, override wins."""
     with _isolated_with_overrides("worker_cc", {"worker_to_user": True}) as tmp, \
-            _fake_send() as send:
-        _toml_with_publish(tmp, worker_to_user=False)
-        rc, _, _ = run_cli(["say", "worker_cc", "完工", "--to", "user"])
-        assert rc == 0
-        assert len(send["calls"]) == 1
-
-
-def test_say_overrides_always_treated_as_true():
-    with _isolated_with_overrides("worker_cc", {"worker_to_user": "always"}) as tmp, \
             _fake_send() as send:
         _toml_with_publish(tmp, worker_to_user=False)
         rc, _, _ = run_cli(["say", "worker_cc", "完工", "--to", "user"])

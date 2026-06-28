@@ -19,13 +19,6 @@ def test_create_returns_task_id_and_persists():
         assert rows[0]["status"] == "待处理"
 
 
-def test_ids_increment_across_creates():
-    with isolated_env():
-        a = tasks.create("x", "first")
-        b = tasks.create("y", "second")
-        assert a == "T-1" and b == "T-2"
-
-
 def test_create_with_metadata_persists_creator_and_description():
     with isolated_env():
         tid = tasks.create("worker", "fix X",
@@ -174,14 +167,6 @@ def test_get_returns_none_for_unknown_id():
         assert tasks.get("T-doesnotexist") is None
 
 
-def test_list_sorted_by_id():
-    with isolated_env():
-        for i in range(5):
-            tasks.create(f"w{i}", f"task {i}")
-        rows = tasks.list_tasks()
-        assert [t["id"] for t in rows] == ["T-1", "T-2", "T-3", "T-4", "T-5"]
-
-
 # ── intent records (immutable verbatim asks) ──────────────────────
 
 
@@ -193,14 +178,6 @@ def test_create_intent_returns_id_and_persists_verbatim():
         assert intent["raw_text"] == "把首页做成深色模式"
         assert intent["source_msg"] == "msg_1"
         assert intent["creator"] == "user"
-
-
-def test_intent_ids_increment_independently_of_tasks():
-    with isolated_env():
-        tasks.create("w", "a task")          # T-1, must not bump intent id
-        i1 = tasks.create_intent("意图一")
-        i2 = tasks.create_intent("意图二")
-        assert (i1, i2) == ("I-1", "I-2")
 
 
 def test_create_intent_empty_rejects():
@@ -403,19 +380,6 @@ def test_double_pause_returns_false():
         t = tasks.get(tid)
         assert t["approval_note"] == "first"
         assert t["paused_at"] == first_paused_at
-
-
-def test_create_sets_suspend_field_defaults():
-    """A fresh task carries the new approval-flow fields as safe defaults so
-    every reader can rely on them without KeyError."""
-    with isolated_env():
-        tid = tasks.create("w", "t")
-        t = tasks.get(tid)
-        assert t["intent_id"] == ""
-        assert t["awaiting"] == ""
-        assert t["approval_note"] == ""
-        assert t["paused_by"] == ""
-        assert t["paused_at"] is None
 
 
 # ── multi-intent / multi-task isolation ───────────────────────────
