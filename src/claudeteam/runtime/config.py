@@ -82,7 +82,7 @@ def load_team() -> dict:
     toml_team = tunables.load().get("team")
     if isinstance(toml_team, dict) and toml_team:
         return {
-            "session": toml_team.get("session", "ClaudeTeam"),
+            "session": toml_team.get("session") or default_session_name(),
             "agents": dict(toml_team.get("agents", {})),
             "default_model": toml_team.get("default_model", "opus"),
         }
@@ -340,8 +340,21 @@ def restore_agent_block(name: str, block_text: str) -> tuple[bool, str]:
     return (True, f"restored [team.agents.{name}] block to {cf}")
 
 
+def default_session_name() -> str:
+    """Per-team default tmux session name, derived from the config's location —
+    the same identity `state_dir` uses (减2). Without this two teams on one host
+    both default to the literal "ClaudeTeam" on the shared tmux socket, so team
+    B's `down`/`fire` would kill team A's panes. Used as `init`'s default AND
+    `session_name()`'s fallback. Pure (no toml read) so `init` can call it
+    before the toml exists."""
+    from claudeteam.runtime import paths
+    stem = "".join(c if (c.isalnum() or c in "_-") else "-"
+                   for c in paths.config_file().parent.name) or "team"
+    return f"ClaudeTeam-{stem}"
+
+
 def session_name() -> str:
-    return load_team().get("session", "ClaudeTeam")
+    return (load_team().get("session") or "").strip() or default_session_name()
 
 
 def agent_names() -> list[str]:

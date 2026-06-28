@@ -223,7 +223,7 @@ def main(argv: list[str]) -> int:
     upgrade = pop_bool_flag(rest, "--upgrade")
     no_connect = pop_bool_flag(rest, "--no-connect")
     quick = pop_bool_flag(rest, "--quick")
-    session = pop_flag(rest, "--session") or "ClaudeTeam"
+    session = pop_flag(rest, "--session") or _config.default_session_name()
     if (rc := reject_extra_args(rest, USAGE)) is not None:
         return rc
 

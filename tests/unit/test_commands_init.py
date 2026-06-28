@@ -74,6 +74,17 @@ def test_init_session_flag_overrides_default():
         assert cfg["team"]["session"] == "Alpha"
 
 
+def test_init_default_session_is_per_team_derived():
+    """Without --session, the written session derives from the config's
+    location (not a bare "ClaudeTeam") so two teams on one host don't collide
+    on one tmux session / cross-kill each other's panes."""
+    with _tmp_env() as tmp:
+        with env_patch(CLAUDETEAM_CONFIG_FILE=str(tmp / "claudeteam.toml")):
+            run_cli(["init"])
+        sess = _read_toml(tmp / "claudeteam.toml")["team"]["session"]
+        assert sess.startswith("ClaudeTeam-") and sess != "ClaudeTeam"
+
+
 # ── overwrite protection ─────────────────────────────────────────
 
 

@@ -37,9 +37,14 @@ def test_load_team_returns_default_when_missing():
         assert "session" in t
 
 
-def test_session_name_falls_back_to_claudeteam():
+def test_session_name_derives_per_team_when_unset():
+    """No `session` in the team → derive a per-team name from the config's
+    location, so two teams on one host don't collide on a shared "ClaudeTeam"
+    session (which `down`/`fire` would cross-kill)."""
     with _team_env({"agents": {}}):
-        assert config.session_name() == "ClaudeTeam"
+        sn = config.session_name()
+        assert sn == config.default_session_name()
+        assert sn.startswith("ClaudeTeam-") and sn != "ClaudeTeam"
 
 
 def test_agent_names_sorted():
@@ -275,7 +280,9 @@ def test_session_name_falls_back_to_default_when_team_corrupt():
         (tmp / "team.json").write_text("{partial", encoding="utf-8")
         import io, contextlib
         with contextlib.redirect_stderr(io.StringIO()):
-            assert config.session_name() == "ClaudeTeam"
+            # degrades to a usable default (now per-team-derived) — the point is
+            # it doesn't blow up, not the exact string.
+            assert config.session_name().startswith("ClaudeTeam")
             assert config.agent_names() == []
 
 
