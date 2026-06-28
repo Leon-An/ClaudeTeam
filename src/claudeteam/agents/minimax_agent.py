@@ -18,6 +18,7 @@ from __future__ import annotations
 import shlex
 
 from .base import CliAdapter, OPENAI_COMPAT_AUTH
+from .claude_code import agent_home
 
 
 # printf format that renders config.yaml; %s slots get key / base_url / model.
@@ -27,18 +28,23 @@ _CFG_PRINTF = r"""printf 'api_key: "%s"\napi_base: "%s"\nmodel: "%s"\nprovider: 
 
 class MiniMaxAgentAdapter(CliAdapter):
     def spawn_cmd(self, agent: str, model: str) -> str:
-        # Provision ~/.mini-agent/config/config.yaml from the operator's
-        # OPENAI_BASE_URL/OPENAI_API_KEY + this agent's model, then launch.
-        # (Mini-Agent reads only that file — no endpoint env var exists.)
+        # Provision <agent_home>/.mini-agent/config/config.yaml from the
+        # operator's OPENAI_BASE_URL/OPENAI_API_KEY + this agent's model, then
+        # launch with HOME pinned there. (Mini-Agent reads only that file — no
+        # endpoint env var exists.) HOME is per-agent so two minimax agents — or
+        # two teams — don't clobber one shared ~/.mini-agent; every other
+        # OpenAI-compat adapter already isolates HOME this way.
         m = (model or "").strip()
+        qhome = shlex.quote(agent_home(agent))
         write_cfg = (
-            'mkdir -p "$HOME/.mini-agent/config" && '
+            f"mkdir -p {qhome}/.mini-agent/config && "
             + _CFG_PRINTF
             + '"$OPENAI_API_KEY" "$OPENAI_BASE_URL" '
             + shlex.quote(m)
-            + ' > "$HOME/.mini-agent/config/config.yaml"'
+            + f" > {qhome}/.mini-agent/config/config.yaml"
         )
-        return f"{write_cfg} && MINI_AGENT_AGENT={shlex.quote(agent)} mini-agent"
+        return (f"{write_cfg} && HOME={qhome} "
+                f"MINI_AGENT_AGENT={shlex.quote(agent)} mini-agent")
 
     def ready_markers(self) -> list[str]:
         # Interactive REPL banner, printed after tools + config load. ASCII-only
