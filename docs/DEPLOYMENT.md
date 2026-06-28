@@ -124,6 +124,14 @@ The base image bakes in `claude`, `codex`, `kimi` (plus `pi`/`hermes`); `gemini`
 and `qwen` are **not** included — derive from `claudeteam:dev` and install those,
 or bind-mount the host binary.
 
+**Mount sources must exist before `up -d`.** Docker turns a missing *file*
+mount-source (e.g. `~/.claude.json`, `~/.lark-cli/config.json`) into an empty
+*directory*, which then breaks the app. On a fresh box, first:
+`mkdir -p ~/.codex ~/.kimi ~/.claude/projects ~/.lark-cli/cache && touch ~/.claude.json`,
+materialize the Claude OAuth file (Step 2), and **delete any mount line in
+`docker-compose.yml` for a CLI you don't run** (e.g. drop `~/.codex`/`~/.kimi`
+on a claude-only box).
+
 ---
 
 ## The Feishu bot (Step 3, in depth)

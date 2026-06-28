@@ -24,6 +24,9 @@ services:
     # Without a reaper, PID 1 (`sleep infinity`) never wait()s them.
     init: true
     volumes:
+      # NOTE: every host path below must already exist before `up -d` — Docker
+      # turns a missing *file* source into a directory and the app then breaks.
+      # Delete any mount for a CLI you don't run. See docs/DEPLOYMENT.md.
       # Bind-mount source RW so Python edits hot-reload without
       # `docker compose build`. Only rebuild for Dockerfile / deps
       # changes. RW (not :ro) because pip's `*.egg-info` writes into
