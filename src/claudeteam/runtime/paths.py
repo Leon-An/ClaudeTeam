@@ -2,7 +2,8 @@
 
 All paths derive from `$CLAUDETEAM_STATE_DIR` (re-read on every call so
 tests get isolation by setting the env, not by monkey-patching).  When
-not set, falls back to `~/.claudeteam`.
+not set, falls back to a `state/` dir beside the config file — the config's
+location is the team's identity, so two teams never share one global dir.
 
 Layout:
     $CLAUDETEAM_STATE_DIR/
@@ -24,8 +25,12 @@ from claudeteam.util import env_path
 
 
 def state_dir() -> Path:
-    """Top-level directory for all runtime state."""
-    return env_path("CLAUDETEAM_STATE_DIR") or Path.home() / ".claudeteam"
+    """Top-level directory for all runtime state.
+
+    Defaults to a `state/` dir beside the config file (so each team dir keeps
+    its own state and two teams can't bleed into one shared global dir).
+    Override with $CLAUDETEAM_STATE_DIR — e.g. a Docker volume."""
+    return env_path("CLAUDETEAM_STATE_DIR") or config_file().parent / "state"
 
 
 def facts_dir() -> Path:

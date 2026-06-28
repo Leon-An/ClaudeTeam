@@ -41,7 +41,7 @@ from claudeteam.util import env_str
 
 # env vars to propagate from the operator's shell into every spawned pane
 # so worker agents' shell-out calls (via Bash tool) see the deployment's
-# state dir instead of falling back to ~/.claudeteam.
+# state dir instead of re-deriving a different one from the pane's own cwd.
 #
 # FEISHU_APP_*/LARKSUITE_CLI_APP_* are propagated too: when the
 # tmux server was started by an earlier checkout's `claudeteam up`, new
@@ -371,8 +371,9 @@ def _ensure_agent_home(agent: str, cli: str) -> None:
 def pane_env_prefix() -> str:
     """Build a shell env prefix that, prepended to a spawn_cmd, makes the
     spawned process inherit CLAUDETEAM_STATE_DIR and the Feishu env so
-    worker agents calling `claudeteam say` write to the project state
-    dir, not `~/.claudeteam`.
+    worker agents calling `claudeteam say` write to the team's state dir —
+    the resolved path is passed explicitly so the pane never re-derives a
+    different one from its own cwd.
     """
     parts = [f"CLAUDETEAM_STATE_DIR={shlex.quote(str(paths.state_dir()))}"]
     for var in _PROPAGATED_ENV:

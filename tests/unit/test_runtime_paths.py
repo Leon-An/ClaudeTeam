@@ -14,9 +14,14 @@ def _state_env(value):
     return env_patch(CLAUDETEAM_STATE_DIR=value)
 
 
-def test_state_dir_falls_back_to_home_when_env_unset():
-    with _state_env(None):
-        assert paths.state_dir() == Path.home() / ".claudeteam"
+def test_state_dir_defaults_beside_config_when_env_unset():
+    """No CLAUDETEAM_STATE_DIR → state lives in `state/` next to the config
+    file (config location = team identity), so two teams can't bleed into one
+    shared ~/.claudeteam."""
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = Path(tmp) / "claudeteam.toml"
+        with env_patch(CLAUDETEAM_STATE_DIR=None, CLAUDETEAM_CONFIG_FILE=str(cfg)):
+            assert paths.state_dir() == Path(tmp) / "state"
 
 
 def test_state_dir_uses_env_when_set():

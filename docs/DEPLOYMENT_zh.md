@@ -246,17 +246,20 @@ ANTHROPIC_AUTH_TOKEN=sk-...
 
 ## 多团队隔离
 
-在一台宿主上跑多个团队——给每个团队各自的 state dir + session 名：
+state 存在**每个团队 `claudeteam.toml` 旁边的 `state/` 目录**里——配置文件的位置*就是*
+团队身份。再跑一个团队不需要任何特殊 env，把每个团队放在各自的目录里即可：
 
 ```bash
-export CLAUDETEAM_STATE_DIR=/path/to/team-a/state && cd /path/to/team-a && claudeteam up
+cd /path/to/team-a && claudeteam up
 # 另一个 shell：
-export CLAUDETEAM_STATE_DIR=/path/to/team-b/state && cd /path/to/team-b && claudeteam up
+cd /path/to/team-b && claudeteam up
 ```
 
-每个团队都需要**自己的飞书 App**（独立的 app_id/secret）——多团队共用一个会导致凭证
-泄漏 + 事件路由冲突。`claudeteam switch <team-dir>` 会把 env 导出打印成一行可被 shell
-求值的内容。
+每个团队各自保留 `team-a/state/` 和 `team-b/state/`，agent、状态、收件箱互不串味。
+想把 state 放到别处（比如 Docker 卷），用 `CLAUDETEAM_STATE_DIR` 覆盖即可。
+
+每个团队仍需**自己的飞书 App**（独立 app_id/secret）——多团队共用一个会导致凭证泄漏 +
+事件路由冲突。
 
 ---
 

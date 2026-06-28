@@ -269,17 +269,22 @@ a specific one. See each CLI's `tests/scenarios/<cli>.md` for concrete, per-prov
 
 ## Multi-team isolation
 
-Run multiple teams on one host by giving each its own state dir + session name:
+State lives in a `state/` dir **beside each team's `claudeteam.toml`** — the
+config's location *is* the team's identity. Running a second team needs no
+special env; just keep each team in its own directory:
 
 ```bash
-export CLAUDETEAM_STATE_DIR=/path/to/team-a/state && cd /path/to/team-a && claudeteam up
+cd /path/to/team-a && claudeteam up
 # different shell:
-export CLAUDETEAM_STATE_DIR=/path/to/team-b/state && cd /path/to/team-b && claudeteam up
+cd /path/to/team-b && claudeteam up
 ```
 
-Each team needs its **own Feishu app** (independent app_id/secret) — sharing one
-across teams causes credential leakage + event-routing conflicts.
-`claudeteam switch <team-dir>` prints the env exports as one shell-evaluable line.
+Each team keeps its own `team-a/state/` and `team-b/state/`, so their agents,
+status, and inboxes never bleed together. Override the location with
+`CLAUDETEAM_STATE_DIR` if you want state elsewhere (e.g. a Docker volume).
+
+Each team still needs its **own Feishu app** (independent app_id/secret) —
+sharing one across teams causes credential leakage + event-routing conflicts.
 
 ---
 
