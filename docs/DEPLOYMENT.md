@@ -184,6 +184,30 @@ team needed, so you can check a config or playbook edit before `up`.
 
 ---
 
+## Agent CLIs
+
+Each agent runs a coding CLI — install the ones you'll use (ClaudeTeam just needs it on PATH).
+The default team is all `claude-code`, so `claude` alone runs it.
+
+| Adapter | `cli` | Install |
+| ------- | ----- | ------- |
+| Claude Code | `claude-code` | `npm i -g @anthropic-ai/claude-code` |
+| Codex CLI | `codex-cli` | `npm i -g @openai/codex` |
+| Kimi Code | `kimi-code` | `uv tool install kimi-cli` |
+| Gemini CLI | `gemini-cli` | `npm i -g @google/gemini-cli` |
+| Qwen Code | `qwen-code` | `npm i -g qwen-code` |
+| MiniMax Mini-Agent | `minimax` | `uv tool install "git+https://github.com/MiniMax-AI/Mini-Agent.git"` |
+| opencode | `opencode` | `npm i -g opencode-ai` |
+| CodeWhale | `codewhale` | `npm i -g codewhale` |
+| OpenClaw | `openclaw` | `npm i -g openclaw` · needs Node ≥ 22 |
+| Trae | `trae` | `uv tool install --with docker --with pexpect "git+https://github.com/bytedance/trae-agent.git"` |
+| Hermes | `hermes` | `curl -fsSL https://hermes-agent.nousresearch.com/install.sh \| bash -s -- --skip-setup` |
+| Pi | `pi` | `npm i -g @mariozechner/pi-coding-agent` |
+
+The last seven are **OpenAI-compatible** (BYOK) — credentials + endpoint below.
+
+---
+
 ## Model backend per agent (credentials + endpoint)
 
 **A first boot needs none of this** — the 2 default agents run on your Claude

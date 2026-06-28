@@ -3,198 +3,95 @@
 </p>
 
 <p align="center">
-  <img src="docs/media/hero.png" alt="ClaudeTeam — Dynamic AI Team Orchestration" width="880" />
+  <img src="docs/media/architecture.png" alt="ClaudeTeam — turn one prompt into a dynamic AI team: a manager agent selects capabilities, hires/fires workers on demand, runs them as a loop or workflow, with persistent memory and self-reflection, all driven from Feishu" width="900" />
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
-  <img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python 3.10+" />
+  <img src="https://img.shields.io/badge/python-3.9%2B-blue.svg" alt="Python 3.9+" />
   <a href="https://github.com/zylMozart/ClaudeTeam/actions/workflows/ci.yml"><img src="https://github.com/zylMozart/ClaudeTeam/actions/workflows/ci.yml/badge.svg" alt="tests" /></a>
   <a href="docs/DEPLOYMENT.md"><img src="https://img.shields.io/badge/docs-deployment-success.svg" alt="Documentation" /></a>
   <img src="https://img.shields.io/badge/chat-Feishu-1a73e8.svg" alt="Chat: Feishu" />
 </p>
 
 <p align="center">
-  <b>Hire & fire AI agents on demand · mix CLIs · manage from your phone via Feishu.</b>
+  <b>Turn one prompt into a dynamic AI team.</b><br/>
+  A manager agent hires and fires workers on demand, orchestrates them as a loop or a workflow,
+  remembers across tasks, reflects and improves — and you drive the whole crew from a Feishu group chat on your phone.
 </p>
 
-<p align="center">
-  Multiple coding agents running in tmux, coordinated through a Feishu group chat. The boss talks to a <b>manager</b> agent; the manager dispatches workers, watches their panes, and summarises back. Everything is auditable on disk; nothing depends on a remote DB.
-</p>
-
-> **Deploy by pasting this to your coding agent
-> (Claude Code, Codex, Kimi, Gemini, Qwen, …):**
+> **Deploy by pasting this to your coding agent (Claude Code, Codex, Kimi, Gemini, Qwen, …):**
 >
 > ```
-> Clone https://github.com/zylMozart/ClaudeTeam.git, read
-> docs/DEPLOYMENT.md, then walk me through bringing up a team
-> end-to-end (including the Feishu app if I don't have one yet).
+> Clone https://github.com/zylMozart/ClaudeTeam.git, read docs/DEPLOYMENT.md,
+> then walk me through bringing up a team end-to-end (including the Feishu app
+> if I don't have one yet).
 > ```
 
-**Feishu group chat — control your AI team in real time**
+---
 
-<table><tr>
-<td><img src="docs/media/example/feishu_example1.jpg" width="200" /></td>
-<td><img src="docs/media/example/feishu_example2.jpg" width="200" /></td>
-<td><img src="docs/media/example/feishu_example3.jpg" width="200" /></td>
-<td><img src="docs/media/example/feishu_example4.jpg" width="200" /></td>
-<td><img src="docs/media/example/feishu_example5.jpg" width="200" /></td>
-</tr></table>
+## ✨ Why ClaudeTeam
 
-**tmux backend — Claude Code agents running in parallel**
+- **🔁 Agent Loop — always on.** Agents run continuously in tmux, not one-shot. The manager loops over the group chat + inbox and a watchdog keeps every pane alive (auto-restart with cooldown) — so the team is a **standing crew you talk to**, not a script you re-run.
+- **👥 Dynamic hiring, firing & workflows.** `/hire` spins up a new agent, `/fire` retires one — the roster reshapes itself **mid-task**. The manager picks the topology the prompt needs: fan out in parallel, run a sequence, or loop until the goal is met.
+- **🧠 Persistent memory.** Every agent keeps durable memory that survives `/clear` and pane respawn, auto-injected on wake. The team also shares a pooled **experience log** + a reusable **skills** library.
+- **🌱 Self-reflection & evolution.** Agents review outcomes and fold what they learned back into the shared memory + skills — so the team gets **better at recurring work** instead of starting from zero each time.
+- **📱 Run it from Feishu.** Control the whole crew from a group chat on your phone: message the manager in plain language (no `@` needed), watch workers report back as cards, and drive ops with slash commands.
 
-<p><img src="docs/media/example/tmux_example.png" width="800" /></p>
+> Built on **your** coding CLIs — mixed freely in one team. Everything is auditable on disk; nothing depends on a remote DB.
 
 ---
 
-## What it does
+## Works with your CLI
 
-<p align="center">
-  <img src="docs/media/architecture.png" alt="ClaudeTeam architecture: Feishu Router dispatches to a Manager Agent, which hires/fires from a dynamic worker pool of isolated tmux panes (Claude Code, Codex, Kimi, Gemini, Qwen). Watchdog auto-restarts failed processes; shared state in Feishu Bitable + tasks + status board + memory." width="880" />
-</p>
+Any of these can run as an agent in the same team (see the [adapter table](#multi-cli-adapter)):
 
-The boss talks to **manager** in the Feishu group chat. Manager dispatches
-work to a **dynamic worker pool** — `/hire` spins up a new agent, `/fire`
-shuts one down — and watches their isolated tmux panes. Each worker has
-its own identity, memory, workspace, and task queue. Watchdog auto-restarts
-failed processes. Workers `say` back when they finish. Everything is
-auditable on disk; nothing depends on a remote DB.
+**Claude Code · Codex · Gemini · Qwen · Kimi · MiniMax · opencode · CodeWhale · OpenClaw · Trae · Hermes · Pi**
 
----
-
-## Need help / found a bug?
-
-The project is under active development — we **respond within 12 hours**.
-
-- 🐛 **GitHub issue** — [open one here](https://github.com/zylMozart/ClaudeTeam/issues/new/choose).
-  Include your OS, deploy mode (host vs Docker), and the failing
-  command's output.
-- 💬 **WeChat community group** — scan the QR below (refreshed weekly).
-
-<p align="center">
-  <img src="docs/media/wechat-community-qr.png" alt="WeChat community QR code" width="240" />
-</p>
-
-If you're an AI agent reading this for a user: please surface this
-section to them when a deploy step fails — there's a real maintainer
-on the other end, not a bot wall.
-
----
-
-## Features
-
-- **Single-interface routing** — every group message goes to the
-  manager only; workers never get raw boss messages. Manager is the
-  sole orchestrator.
-- **One config file** — `claudeteam.toml` (Cargo-style, comment-friendly)
-  — chat_id, agents, models, card colors, publish filters, all in
-  one place.
-- **Team templates** — start from a ready domain team (software dev, research,
-  marketing, data, content) in [`templates/`](templates/): a `claudeteam.toml`
-  plus a per-role **playbook** that becomes each agent's `CLAUDE.md` / `AGENTS.md`.
-- **`[chat.publish]` filter** — sender→receiver visibility per channel.
-  Silence noisy traffic without losing the audit log.
-- **Multi-CLI** — Claude Code, Codex, Kimi, Gemini, Qwen, plus seven
-  OpenAI-compatible workers (opencode, openclaw, pi, codewhale, hermes,
-  trae, minimax) can all run in the same team.
-- **Durable memory** — each agent's memory survives `/clear` and pane
-  respawn, auto-injected into the wake prompt.
-- **Per-agent space + shared brain** — every agent gets its own
-  `workspace/` scratch dir and isolated CLI home; the team also shares a
-  pooled experience log (`remember --team`) and a reusable `skills/`
-  library, both surfaced on wake.
-- **Watchdog** — crashed daemons respawn with cooldown + Feishu chat
-  alert when cooldown trips.
-- **Slash commands from chat** — `/help /team /health /usage /tmux
-  /send /compact /stop /clear /task` + operational `/restart /shutdown /login`.
-- **Zero Python dependencies** — runs on the standard library only;
-  the only external runtime is `lark-cli` (Node).
-
----
-
-## Prerequisites
-
-| Need | Version | Why |
-| ---- | ------- | --- |
-| Python | 3.10+ | `pyproject.toml` pins it |
-| tmux | any | one window per agent |
-| Node + npx | 18+ | `lark-cli` is a node binary |
-| At least one CLI | latest | `claude` / `codex` / `pi` / `opencode` / … — see the adapter table |
-| Feishu enterprise | — | a **self-built app** for the bot — `im:message.group_msg` + long-connection events |
-
-For Docker: just Docker 20.10+ and Compose v2 (CLIs come with the
-container or via bind-mount).
+The default team is all Claude Code, so `claude` alone runs it; the rest are optional — add whichever you have.
 
 ---
 
 ## Quick start
 
-`claudeteam init` walks you through registering a **self-built Feishu app**
-(企业自建应用) — the only kind that can receive un-@'d group messages — handing you
-a one-click link to grant every scope at once, then auto-creating your team's
-group chat. (→ [Feishu bot setup](#feishu-bot-setup).)
-
-Then run these top to bottom — no branching, nothing to `export`:
+Prerequisites, install, and the full step-by-step (host & Docker) live in
+**[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** — 4 steps, top to bottom. The core flow once installed:
 
 ```bash
-# 1 — code + the `claudeteam` CLI (zero Python deps)
-git clone https://github.com/zylMozart/ClaudeTeam.git && cd ClaudeTeam
-python3 -m venv .venv && source .venv/bin/activate     # Python 3.10+
-pip install -e .
-
-# 2 — external tools on PATH (none are pip-installable):
-#       tmux · node + npx · lark-cli (npm i -g @larksuite/cli)
-#       · at least one agent CLI: claude / codex / pi / opencode / … (see README adapter table)
-
-# 3 — config + bot: generate config, then register the Feishu app (guided)
-claudeteam init                  # writes claudeteam.toml, then runs `feishu connect`:
-                                 #   create a self-built app → paste App ID/Secret → click the
-                                 #   one-click permission link → publish; it verifies the scopes,
-                                 #   creates your team group, saves creds + chat_id.
-                                 #   DM / @bot only? → `claudeteam feishu connect --quick` (one QR scan)
-claudeteam install-hooks         # claude-code slash hooks — run BEFORE `up`
-
-# 4 — launch + verify
-claudeteam up                    # tmux + agents + router + watchdog; crew reports into the group
-claudeteam health                # expect all green
+claudeteam init --no-connect       # write claudeteam.toml (default: manager + 1 claude worker)
+claudeteam feishu connect --quick  # tap/scan once → auto-creates the bot app + your team group
+claudeteam install-hooks
+claudeteam up                      # start the crew; the manager runs a roll-call in your group
 ```
 
-Then in your Feishu group: send `/health`, then just `你好` (no `@` needed —
-plain messages go to the manager) — manager replies in ~30 s. If `health` is red →
-[docs/DEPLOYMENT.md → Common failures](docs/DEPLOYMENT.md#common-failures).
-
-> **No per-shell env vars needed.** `claudeteam init` writes `send_as` /
-> `no_proxy` into `claudeteam.toml`, and state defaults to `~/.claudeteam`.
-> Docker, multi-team isolation, and the full reference live in
-> **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
+Then say `你好` in the group (no `@` needed — plain messages reach the manager). Agents **reuse
+your existing local CLI login**, and green `health` only means infra is up — the real signal is
+the manager's roll-call.
 
 ---
 
 ## Multi-CLI adapter
 
-Different agents can run different CLIs in the same team:
+Different agents can run different CLIs in the same team. Install each per its own docs
+([install table in DEPLOYMENT.md](docs/DEPLOYMENT.md#agent-clis)) — ClaudeTeam just needs it on PATH.
 
-| Adapter | Identifier | Install |
-| ------- | ---------- | ------- |
-| Claude Code | `claude-code` (default) | `npm i -g @anthropic-ai/claude-code` |
-| Codex CLI | `codex-cli` | `npm i -g @openai/codex` |
-| Kimi Code | `kimi-code` | `uv tool install kimi-cli` |
-| Gemini CLI | `gemini-cli` | `npm i -g @google/gemini-cli` |
-| Qwen Code | `qwen-code` | `npm i -g qwen-code` |
-| MiniMax Mini-Agent | `minimax` | `uv tool install "git+https://github.com/MiniMax-AI/Mini-Agent.git"` |
-| opencode | `opencode` | `npm i -g opencode-ai` |
-| CodeWhale | `codewhale` | `npm i -g codewhale` |
-| OpenClaw | `openclaw` | `npm i -g openclaw` · needs Node ≥ 22 |
-| Trae | `trae` | `uv tool install --with docker --with pexpect "git+https://github.com/bytedance/trae-agent.git"` |
-| Hermes | `hermes` | `curl -fsSL https://hermes-agent.nousresearch.com/install.sh \| bash -s -- --skip-setup` |
-| Pi | `pi` | `npm i -g @mariozechner/pi-coding-agent` |
+| Adapter | `cli` identifier |
+| ------- | ---------------- |
+| Claude Code | `claude-code` (default) |
+| Codex CLI | `codex-cli` |
+| Kimi Code | `kimi-code` |
+| Gemini CLI | `gemini-cli` |
+| Qwen Code | `qwen-code` |
+| MiniMax Mini-Agent | `minimax` |
+| opencode | `opencode` |
+| CodeWhale | `codewhale` |
+| OpenClaw | `openclaw` |
+| Trae | `trae` |
+| Hermes | `hermes` |
+| Pi | `pi` |
 
 The last seven are **OpenAI-compatible** (BYOK) — point them at any endpoint with
-`OPENAI_BASE_URL` + `OPENAI_API_KEY`; the key resolves through the same
-`token > login > api_key` priority as the others. See
-[DEPLOYMENT.md](docs/DEPLOYMENT.md) → *Model backend per agent*.
-
-In `claudeteam.toml`:
+`OPENAI_BASE_URL` + `OPENAI_API_KEY`. See [DEPLOYMENT.md → *Model backend per agent*](docs/DEPLOYMENT.md).
 
 ```toml
 [team.agents.manager]
@@ -202,54 +99,38 @@ cli = "claude-code"
 model = "opus"
 role = "团队主管"
 
-[team.agents.worker_codex]
+[team.agents.worker_codex]   # add only if you have codex installed
 cli = "codex-cli"
 role = "数据分析员工"
-
-[team.agents.worker_kimi]
-cli = "kimi-code"
-role = "策划员工"
 ```
+
+---
+
+## More
+
+- **Single-interface routing** — every group message goes to the manager only; workers never get raw boss messages. The manager is the sole orchestrator.
+- **One config file** — `claudeteam.toml` (Cargo-style, comment-friendly): chat_id, agents, models, card colors, publish filters, all in one place.
+- **Team templates** — start from a ready domain team (software dev, research, marketing, data, content) in [`templates/`](templates/): a `claudeteam.toml` plus a per-role **playbook** that becomes each agent's `CLAUDE.md` / `AGENTS.md`.
+- **`[chat.publish]` filter** — sender→receiver visibility per channel; silence noisy traffic without losing the audit log.
+- **Per-agent space + shared brain** — every agent gets its own `workspace/` scratch dir and isolated CLI home; the team shares a pooled experience log (`remember --team`) and a reusable `skills/` library, both surfaced on wake.
+- **Slash commands from chat** — `/help /team /health /usage /tmux /send /compact /stop /clear /task` + operational `/restart /shutdown /login`.
+- **Almost zero deps** — standard-library Python (a `tomli` backport only on Python < 3.11); the only external runtime is `lark-cli` (Node).
 
 ---
 
 ## Feishu bot setup
 
-ClaudeTeam talks through a **self-built app (企业自建应用)** — the only kind Feishu
-lets receive **un-@'d group messages** (the sensitive `im:message.group_msg`
-scope, needed for plain text + slash commands + catchup). `claudeteam init` runs
-this on first set-up; or run it directly:
+`claudeteam feishu connect --quick` registers a bot, auto-creates your team group, and saves
+the `chat_id` — a single tap/scan, zero console. It requests the group-message scope
+(`im:message.group_msg`) too, which lands on most tenants → the group works **without `@`-ing the
+bot**; the command verifies and tells you if your tenant didn't grant it. For a tenant that
+doesn't, the guided self-built-app flow (`claudeteam feishu connect`) gets it for sure.
 
-```bash
-claudeteam feishu connect        # guided: register a self-built app, grant scopes, create the group
-```
+→ Full walkthrough (both paths, scopes, events, publishing): **[docs/DEPLOYMENT.md → Step 3](docs/DEPLOYMENT.md)**.
 
-It walks you through it — the command does the verifying + group creation; you do
-these console steps once:
-
-1. **Create the app** — <https://open.feishu.cn/app> → 创建企业自建应用 → add the
-   **机器人 (bot)** capability → copy the **App ID + App Secret** and paste them when prompted.
-2. **Grant scopes in one click** — it prints a permission deep-link with all 7
-   scopes (incl `im:message.group_msg`) pre-selected → open it → 确认.
-3. **Event** — 事件与回调 → 订阅方式 = **使用长连接** → add the **接收消息** event.
-4. **Publish** — 应用发布 → 创建版本 → 申请发布 → **批准** (tenant admins approve
-   their own version instantly; personal-edition apps skip review).
-5. Press **Enter** — it verifies `im:message.group_msg` landed, **creates your
-   team group**, and saves App creds (`state/feishu_app.json`, 0600) + `chat_id`
-   into `claudeteam.toml`.
-
-Then `claudeteam up` brings the crew into that group and the manager runs a roll-call.
-
-> **`--quick` (one-scan, DM/@bot-only):** `claudeteam feishu connect --quick`
-> registers a **PersonalAgent** app via a single QR scan (RFC-8628 device-flow) —
-> zero console clicks, but Feishu won't grant it `im:message.group_msg`, so in
-> groups users must `@` the bot. Fine for DM-only use.
-
-> Under the hood: a thin sidecar at `scripts/feishu_channel/` wraps the official
-> [`@larksuite/channel`](https://www.npmjs.com/package/@larksuite/channel) SDK
-> (the same one
-> [zarazhangrui/lark-channel-bridge](https://github.com/zarazhangrui/feishu-claude-code-bridge)
-> is built on) for both registration and the WebSocket event ingress.
+Under the hood: a thin sidecar at `scripts/feishu_channel/` over the official
+[`@larksuite/channel`](https://www.npmjs.com/package/@larksuite/channel) SDK, used for both
+registration and the WebSocket event ingress.
 
 ---
 
@@ -257,7 +138,8 @@ Then `claudeteam up` brings the crew into that group and the manager runs a roll
 
 | Doc | What's in it |
 | --- | ------------ |
-| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Host + Docker setup, config schema, multi-team isolation, troubleshooting |
+| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Host setup (4 steps), config schema, model backends, multi-team isolation, troubleshooting |
+| [`docs/DEPLOYMENT_docker.md`](docs/DEPLOYMENT_docker.md) | Docker / server deploy |
 | [`CLAUDE.md`](CLAUDE.md) | Building rules — read before changing code |
 
 ---
@@ -265,32 +147,43 @@ Then `claudeteam up` brings the crew into that group and the manager runs a roll
 ## FAQ
 
 **Q: Does it work with non-Anthropic models?**
-A: Yes — the multi-CLI adapter table above shows the supported CLIs.
-Each agent picks one in `claudeteam.toml`.
+A: Yes — the multi-CLI adapter table shows the supported CLIs; each agent picks one in `claudeteam.toml`.
 
 **Q: Can I use Slack / Discord instead of Feishu?**
-A: Not out of the box. The chat layer is Feishu-specific
-(`src/claudeteam/feishu/`).
+A: Not out of the box. The chat layer is Feishu-specific (`src/claudeteam/feishu/`).
 
 **Q: How many agents can I run?**
-A: Tested up to 5. Each Claude Code pane uses ~200-400 MB; 8 GB host
-RAM is comfortable for 5.
+A: Tested up to 5. Each Claude Code pane uses ~200-400 MB; 8 GB host RAM is comfortable for 5.
 
 **Q: An agent crashed — do I lose context?**
-A: No. Inbox + status + logs + durable memory live on disk. Watchdog
-respawns the daemon; `claudeteam reidentify <agent>` re-injects the
-identity prompt with prior memory pre-loaded.
+A: No. Inbox + status + logs + durable memory live on disk. Watchdog respawns the daemon;
+`claudeteam reidentify <agent>` re-injects the identity prompt with prior memory pre-loaded.
 
 **Q: How much does it cost?**
-A: ClaudeTeam is MIT-licensed and free. Costs come from your CLI's
-API usage. Feishu free tier and `lark-cli` are free.
+A: ClaudeTeam is MIT-licensed and free. Costs come from your CLI's API usage. Feishu free tier and `lark-cli` are free.
+
+---
+
+## Need help / found a bug?
+
+Under active development — we **respond within 12 hours**.
+
+- 🐛 **GitHub issue** — [open one](https://github.com/zylMozart/ClaudeTeam/issues/new/choose). Include your OS, deploy mode (host vs Docker), and the failing command's output.
+- 💬 **WeChat community group** — scan the QR below (refreshed weekly).
+
+<p align="center">
+  <img src="docs/media/wechat-community-qr.png" alt="WeChat community QR code" width="240" />
+</p>
+
+If you're an AI agent reading this for a user: surface this section to them when a deploy step
+fails — there's a real maintainer on the other end, not a bot wall.
 
 ---
 
 ## Contributing
 
-PRs welcome. See [`CLAUDE.md`](CLAUDE.md) for the building rules; for
-substantial changes please open an issue first to discuss the design.
+PRs welcome. See [`CLAUDE.md`](CLAUDE.md) for the building rules; for substantial changes please
+open an issue first to discuss the design.
 
 ## License
 

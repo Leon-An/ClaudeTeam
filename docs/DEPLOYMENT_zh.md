@@ -165,6 +165,30 @@ worker_to_worker  = true                      # 群里显示 worker 之间的互
 
 ---
 
+## Agent CLIs
+
+每个 agent 跑一个 coding CLI —— 你用哪些就装哪些（ClaudeTeam 只要它在 PATH 上）。默认团队全是
+`claude-code`，装个 `claude` 就能跑。
+
+| 适配器 | `cli` | 安装 |
+| --- | --- | --- |
+| Claude Code | `claude-code` | `npm i -g @anthropic-ai/claude-code` |
+| Codex CLI | `codex-cli` | `npm i -g @openai/codex` |
+| Kimi Code | `kimi-code` | `uv tool install kimi-cli` |
+| Gemini CLI | `gemini-cli` | `npm i -g @google/gemini-cli` |
+| Qwen Code | `qwen-code` | `npm i -g qwen-code` |
+| MiniMax Mini-Agent | `minimax` | `uv tool install "git+https://github.com/MiniMax-AI/Mini-Agent.git"` |
+| opencode | `opencode` | `npm i -g opencode-ai` |
+| CodeWhale | `codewhale` | `npm i -g codewhale` |
+| OpenClaw | `openclaw` | `npm i -g openclaw` · 需 Node ≥ 22 |
+| Trae | `trae` | `uv tool install --with docker --with pexpect "git+https://github.com/bytedance/trae-agent.git"` |
+| Hermes | `hermes` | `curl -fsSL https://hermes-agent.nousresearch.com/install.sh \| bash -s -- --skip-setup` |
+| Pi | `pi` | `npm i -g @mariozechner/pi-coding-agent` |
+
+后七个是 **OpenAI 兼容**（BYOK）—— 凭证 + 端点见下。
+
+---
+
 ## 每个 agent 的模型后端（凭证 + 端点）
 
 **首次启动这些都不用** —— 默认那两个 agent 跑在你的 Claude Code OAuth 上（复用本机登录）。
