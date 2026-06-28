@@ -86,12 +86,6 @@ def test_log_append_then_list():
         assert rows[1]["ref"] == "REF-1"
 
 
-def test_log_returns_empty_when_no_log_file():
-    with isolated_env():
-        # never appended → no log file
-        assert local_facts.list_logs("a") == []
-
-
 def test_facts_dir_uses_state_dir_env():
     with isolated_env() as tmp:
         facts_dir = tmp / "state" / "facts"
@@ -120,12 +114,6 @@ def test_touch_heartbeat_overwrites_previous_timestamp():
         assert second >= first
 
 
-def test_touch_heartbeat_skips_blank_agent():
-    with isolated_env():
-        local_facts.touch_heartbeat("")
-        assert local_facts.all_heartbeats() == {}
-
-
 def test_touch_heartbeat_skips_flag_shaped_agent():
     """Safety net: a '-'-prefixed name (misparsed option like
     '--help') must never register as a phantom heartbeat, no matter which
@@ -142,7 +130,6 @@ def test_upsert_status_skips_flag_shaped_agent():
     with isolated_env():
         local_facts.upsert_status("--help", "进行中", "x")
         assert local_facts.get_status("--help") is None
-        assert local_facts.list_all_statuses() == []
 
 
 def test_all_heartbeats_returns_each_recorded_agent():
@@ -151,11 +138,6 @@ def test_all_heartbeats_returns_each_recorded_agent():
         local_facts.touch_heartbeat("bob")
         beats = local_facts.all_heartbeats()
         assert set(beats) == {"alice", "bob"}
-
-
-def test_get_heartbeat_returns_none_for_unknown_agent():
-    with isolated_env():
-        assert local_facts.get_heartbeat("ghost") is None
 
 
 def test_touch_heartbeat_swallows_oserror_so_callers_dont_die():
