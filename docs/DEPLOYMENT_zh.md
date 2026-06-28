@@ -48,14 +48,21 @@ git clone https://github.com/zylMozart/ClaudeTeam.git && cd ClaudeTeam
 python3 -m venv .venv && source .venv/bin/activate      # 任意 Python >=3.10
 pip install -e .
 
-# 2. PATH 上的外部工具（都不是 pip 能装的）——见“开始之前”：
-#    tmux · node+npx · lark-cli (npm i -g @larksuite/cli) · >=1 个 agent CLI
+# 2. 外部工具（pip 装不了，按你的系统装这几样）：
+#    macOS ： brew install tmux node && npm i -g @larksuite/cli @anthropic-ai/claude-code
+#    Debian： sudo apt install -y tmux nodejs npm && npm i -g @larksuite/cli @anthropic-ai/claude-code
+#    （claude-code = 默认 agent CLI；想用别的 CLI 见 README 适配表，按需再装）
 
-# 3. 配置 + 机器人——注册一个自建飞书应用（引导式；见“飞书机器人”一节）
-claudeteam init        # 写 claudeteam.toml，然后带你走一个自建应用：
-                       # 在控制台建好 -> 点它打印的权限 deep-link -> 发版 -> 贴 App ID/Secret。
-                       # 它会验证权限、建团队群、保存凭证 + chat_id。
-                       # 只私聊 / @bot？-> `claudeteam feishu connect --quick`（扫一次码）。
+# 3. 配置 + 飞书机器人 —— 先试「点 / 扫一下就建好」（最省事，多数租户连群消息一起搞定）：
+claudeteam init --no-connect                 # 写好 claudeteam.toml，先不自动进引导
+claudeteam feishu connect --quick            # ← 生成授权链接（自动开浏览器，二维码兜底），点/扫一下
+#   确认后飞书自动建好：机器人应用 + 团队群 + 凭证 + chat_id，全程零控制台。
+#   命令会自查群消息权限 im:message.group_msg：
+#     ✅ 拿到了（多数租户都放行）→ 群里【不 @】也能收，彻底齐活；
+#     ⚠️ 本租户没放行 → 它会提示你：群里 @bot，或改走下面的引导式。
+#
+# 想 100% 保证群里免 @、不看租户脸色 → 引导式自建应用（多两步手动，权限最稳）：
+claudeteam init        # 当场带你：控制台建 app+机器人 → 点一键授权链接 → 发版 → 回车自动建群
 
 # 4. 装斜杠命令钩子（必须在 `up` 之前）
 claudeteam install-hooks
@@ -122,27 +129,35 @@ docker compose exec claudeteam tmux attach -t ClaudeTeam   # 看 pane；Ctrl+B d
 
 ## 飞书机器人（第 3 步详解）
 
-`claudeteam init` 会替你跑 `claudeteam feishu connect`（在交互式 TTY 上）。它注册一个
-**自建应用（企业自建应用）**——只有这种应用飞书才允许收**群里不 @ 的消息**——并一步步
-带你做。验证 + 建群由命令完成；你只需在控制台做一次这几步：
+`claudeteam init --quick` / `claudeteam init` 会替你跑 `claudeteam feishu connect`（交互式
+TTY 上）：注册机器人应用 + 建团队群 + 存凭证 + 写 `chat_id`，你基本只需点 / 扫一下。两条路，
+**先试 A，不行再上 B**：
+
+### A. `--quick` —— 点 / 扫一下就建好（推荐先试）
+
+`claudeteam init --quick`（或 `claudeteam feishu connect --quick`）用 RFC-8628 设备码流注册
+一个 PersonalAgent 应用：终端给**一条链接（自动开浏览器）+ 二维码兜底**，点 / 扫一下 → 确认 →
+飞书**自动建好应用 + 团队群 + 授权 + 存凭证**，全程零控制台。
+
+授权时**通过 `addons` 一并申请了群消息权限** `im:message.group_msg`——租户放行（飞书的"灰度"）
+就直接拿到。命令随后**自查**并告诉你拿到没有：
+
+- ✅ 拿到了（多数租户都给）→ 群里**不 @ 也能收**，和自建应用一样齐活，到此结束；
+- ⚠️ 本租户没放行 → 命令提示你：群里 @ 机器人就能用，或者改走 B 拿稳的群权限。
+
+### B. 引导式自建应用 —— 群权限 100% 拿得到的兜底
+
+只有当 A 在你的租户没拿到群权限、而你又要"群里不 @ 也能收"时才需要。`claudeteam init`（或
+`claudeteam feishu connect`）会在控制台引导你做这几步：
 
 1. **建应用** —— 打开 <https://open.feishu.cn/app> → 创建企业自建应用 →「添加应用能力」
    加**机器人** → 复制 **App ID + App Secret**，命令提示时粘贴进去。
-2. **一键授权** —— 命令会打印一条权限 deep-link，已把全部 7 个权限（含敏感的
-   `im:message.group_msg`）勾上。打开 → 确认。
+2. **一键授权** —— 命令打印一条权限 deep-link，已把全部 7 个权限（含敏感的
+   `im:message.group_msg`）勾好。打开 → 确认。
 3. **事件** —— 事件与回调 → 订阅方式 = **使用长连接** → 添加事件**接收消息**。
-4. **发版** —— 应用发布 → 创建版本 → 申请发布 → **批准**（你是租户管理员就能直接批准
-   自己的版本；个人版应用免审核）。
-5. 按**回车** —— 命令验证 `im:message.group_msg` 已到位、建好团队群、把 App 凭证存到
+4. **发版** —— 应用发布 → 创建版本 → 申请发布 → **批准**（你是租户管理员就直接批；个人版免审核）。
+5. 按**回车** —— 命令验证 `im:message.group_msg` 到位、建好团队群、把凭证存到
    `state/feishu_app.json`（0600）+ `chat_id` 写进 `claudeteam.toml`。
-
-**为什么要自建应用、而不是扫一次码：** 收群里不 @ 的消息（普通文字 + 斜杠命令 +
-catchup 补漏）需要**敏感权限** `im:message.group_msg`，飞书只在自建应用上、经控制台 +
-管理员批准才给。扫一次码的 PersonalAgent **拿不到**，所以群里你得对什么都 `@` 一下机器人。
-
-> **`--quick`（扫一次码，仅私聊 / @bot）：** `claudeteam feishu connect --quick` 用扫码
-> 注册一个 PersonalAgent 应用——零控制台点击，但群里用户必须 `@` 机器人（且 catchup
-> 没法补漏群里漏掉的消息）。只私聊机器人、或者总是 `@` 它的话，够用。
 
 > **Docker / 脚本化：** `claudeteam init --no-connect`，然后把
 > `FEISHU_APP_ID` / `FEISHU_APP_SECRET` 写进 `.env`（env **覆盖**凭证文件）、`chat_id`

@@ -21,7 +21,7 @@ from claudeteam.util import (
 
 
 USAGE = ("usage: claudeteam init [--session NAME] [--force] [--upgrade] "
-         "[--no-connect]")
+         "[--no-connect] [--quick]")
 
 
 # ── default schema as a string template (preserves comments) ─────
@@ -218,6 +218,7 @@ def main(argv: list[str]) -> int:
     force = pop_bool_flag(rest, "--force")
     upgrade = pop_bool_flag(rest, "--upgrade")
     no_connect = pop_bool_flag(rest, "--no-connect")
+    quick = pop_bool_flag(rest, "--quick")
     session = pop_flag(rest, "--session") or "ClaudeTeam"
     if (rc := reject_extra_args(rest, USAGE)) is not None:
         return rc
@@ -263,7 +264,9 @@ def main(argv: list[str]) -> int:
                       or env_str("FEISHU_APP_ID"))
     if _should_autoconnect(no_connect, have_creds):
         from claudeteam.commands import feishu as _feishu
-        rc = _feishu.main(["connect"])
+        # --quick → the one-scan PersonalAgent device-flow QR; else the guided
+        # self-built-app flow. Both create the app + group + write chat_id.
+        rc = _feishu.main(["connect", "--quick"] if quick else ["connect"])
         if rc != 0:
             print("\n⚠️  注册未完成；稍后重跑 `claudeteam feishu connect` 即可。")
             return rc

@@ -45,9 +45,11 @@ USAGE = (
 
 # Scopes a working ClaudeTeam bot MUST have to operate in a GROUP: post cards AND
 # receive un-@'d messages (the whole point — "no @ → manager", plus slash commands
-# + catchup). `im:message.group_msg` is the *sensitive* one a 自建应用 gets via the
-# console + admin approval; a one-scan PersonalAgent can't, so it's the dividing
-# line between the guided flow (full) and --quick (DM/@bot-only).
+# + catchup). `im:message.group_msg` is the *sensitive* one: a 自建应用 gets it via
+# the console + admin approval (guaranteed), and --quick's one-scan register also
+# REQUESTS it via `addons` — landing on tenants that honor them (Feishu gray-scale),
+# else falling back to @bot-in-groups. So it's not "guided=full vs quick=DM-only":
+# _connect_quick verifies at runtime and tells the operator which they got.
 _REQUIRED_SCOPES = frozenset({
     "im:message:send_as_bot",   # post cards into the group
     "im:message.group_msg",     # receive un-@'d group messages (boss types freely)
@@ -243,11 +245,20 @@ def _connect_quick(argv: list[str]) -> int:
                         owner_open_id=owner, tenant=tenant)
     print(f"✅ 应用已注册并保存凭据：{app_id}")
 
+    # --quick DOES request im:message.group_msg via the register `addons`; whether
+    # it lands is tenant-dependent (Feishu "gray-scale"). So this is NOT "can't" —
+    # it's verify-and-tell: ✅ granted (many tenants) → un-@'d group works; ⚠️ the
+    # tenant dropped the addon → @bot or switch to the guided self-built app.
     granted = _granted_scopes(app_id, app_secret)
-    if granted is None or "im:message.group_msg" not in granted:
-        print("⚠️  个人版应用拿不到 im:message.group_msg：群里**必须 @bot** 才收得到消息"
-              "（斜杠命令同理），且 catchup 补漏在群里失效。要群里免 @ 请改用默认的 "
-              "`claudeteam feishu connect`（自建应用）。")
+    if granted is None:
+        print("ℹ️  暂时读不到已授权权限（个人版要发版/审批后才能自查）——先继续建群。"
+              "若群里【不 @】收不到消息，说明本租户没放行一键授权的 im:message.group_msg，"
+              "改用 `claudeteam feishu connect`（自建应用）即可群里免 @。")
+    elif "im:message.group_msg" not in granted:
+        print("⚠️  本租户没给一次扫码授予 im:message.group_msg（addons 被丢弃）：群里**要 @bot**"
+              "才收得到（斜杠命令同理）。要群里免 @，改用 `claudeteam feishu connect`（自建应用）。")
+    else:
+        print("✅ 群消息权限到位（含 im:message.group_msg → 群里不 @ 也能收，一次扫码全搞定）")
     return _create_group_and_persist(app_id, app_secret, group_name, owner=owner)
 
 

@@ -50,15 +50,23 @@ git clone https://github.com/zylMozart/ClaudeTeam.git && cd ClaudeTeam
 python3 -m venv .venv && source .venv/bin/activate      # any Python >=3.10
 pip install -e .
 
-# 2. External tools on PATH (none are pip-installable) — see "Before you begin":
-#    tmux · node+npx · lark-cli (npm i -g @larksuite/cli) · >=1 agent CLI
+# 2. External tools (not pip-installable) — install for your OS:
+#    macOS:  brew install tmux node && npm i -g @larksuite/cli @anthropic-ai/claude-code
+#    Debian: sudo apt install -y tmux nodejs npm && npm i -g @larksuite/cli @anthropic-ai/claude-code
+#    (claude-code = the default agent CLI; for other CLIs see the README matrix)
 
-# 3. Config + bot — register a self-built Feishu app (guided; see "The Feishu bot")
-claudeteam init        # writes claudeteam.toml, then walks you through a self-built app:
-                       # create it in the console -> click the permission deep-link it prints
-                       # -> publish -> paste App ID/Secret. It verifies scopes, creates your
-                       # team group, saves creds + chat_id.
-                       # Only DM / @bot the bot? -> `claudeteam feishu connect --quick` (one scan).
+# 3. Config + Feishu bot — try the one-tap path first (easiest; on most tenants it
+#    sets up group messages too):
+claudeteam init --no-connect                 # writes claudeteam.toml, skips auto-connect
+claudeteam feishu connect --quick            # <- prints an auth link (auto-opens browser) + QR; tap/scan
+#   On confirm, Feishu auto-creates the bot app + team group + creds + chat_id — zero console.
+#   The command then checks the group-message scope (im:message.group_msg):
+#     OK   granted (most tenants) -> the group works WITHOUT @-ing the bot; done.
+#     warn not granted on your tenant -> it tells you: @ the bot, or use the guided flow below.
+#
+# Want un-@'d groups guaranteed regardless of tenant? -> guided self-built app:
+claudeteam init        # walks you in-terminal: create app in console -> click the 1-tap
+                       # scope link -> publish -> Enter, and it auto-creates the group.
 
 # 4. Install slash hooks (MUST run before `up`)
 claudeteam install-hooks
@@ -136,10 +144,32 @@ on a claude-only box).
 
 ## The Feishu bot (Step 3, in depth)
 
-`claudeteam init` runs `claudeteam feishu connect` for you (on an interactive
-TTY). It registers a **self-built app (企业自建应用)** — the only kind Feishu lets
-receive **un-@'d group messages** — and walks you through it. The command does
-the verifying + group-creation; you do these console steps once:
+`claudeteam init --quick` / `claudeteam init` runs `claudeteam feishu connect` for
+you (on an interactive TTY): it registers the bot app + creates the team group +
+saves creds + writes `chat_id` — you mostly just tap/scan. Two paths; **try A,
+fall back to B**:
+
+### A. `--quick` — tap/scan once and it's built (try this first)
+
+`claudeteam init --quick` (or `claudeteam feishu connect --quick`) uses the
+RFC-8628 device flow to register a PersonalAgent app: the terminal prints **a link
+(auto-opens your browser) + a QR fallback**, you tap/scan → confirm → Feishu
+**auto-creates the app + team group + grants scopes + saves creds**, zero console.
+
+The grant **requests the group-message scope `im:message.group_msg` via `addons`** —
+which lands on tenants that honor them (Feishu "gray-scale"). The command then
+**verifies and tells you**:
+
+- OK — granted (most tenants) → the group works **without @-ing the bot**, same as
+  a self-built app; you're done.
+- warn — your tenant dropped it → the command says: `@` the bot in groups, or switch
+  to B for a guaranteed grant.
+
+### B. Guided self-built app — the fallback that always gets the group scope
+
+Only needed if A didn't get the group scope on your tenant and you want un-@'d
+group messages. `claudeteam init` (or `claudeteam feishu connect`) walks you
+through these console steps once:
 
 1. **Create the app** — open <https://open.feishu.cn/app> → 创建企业自建应用 → add
    the **机器人 (bot)** capability → copy the **App ID + App Secret** and paste
@@ -153,17 +183,6 @@ the verifying + group-creation; you do these console steps once:
 5. Press **Enter** — the command verifies `im:message.group_msg` landed, creates
    the team group, and saves App creds → `state/feishu_app.json` (0600) + `chat_id`
    → `claudeteam.toml`.
-
-**Why a self-built app, not one-scan:** receiving un-@'d group messages (plain
-text + slash commands + catchup recovery) requires the **sensitive**
-`im:message.group_msg` scope, which Feishu grants only to a self-built app via
-console + admin approval. A one-scan PersonalAgent **can't** get it, so in groups
-you'd have to `@` the bot for everything.
-
-> **`--quick` (one-scan, DM/@bot-only):** `claudeteam feishu connect --quick`
-> registers a PersonalAgent app via a QR scan — zero console clicks, but in
-> groups users must `@` the bot (and catchup can't recover missed group messages).
-> Fine if you only DM the bot or always `@` it.
 
 **Docker / scripting:** `claudeteam init --no-connect`, then put
 `FEISHU_APP_ID` / `FEISHU_APP_SECRET` into `.env` (env **overrides** the creds

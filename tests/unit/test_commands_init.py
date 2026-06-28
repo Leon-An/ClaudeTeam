@@ -208,6 +208,20 @@ def test_init_default_runs_feishu_connect():
     assert called == [["connect"]]
 
 
+def test_init_quick_passes_quick_to_feishu_connect():
+    """`init --quick` routes the one-scan PersonalAgent device flow: it must
+    pass `--quick` through to `feishu connect` (the convenient QR path)."""
+    from helpers import attr_patch
+    from claudeteam.commands import feishu, init
+    called = []
+    with isolated_env(), env_patch(FEISHU_APP_ID=None), \
+            attr_patch(init, _should_autoconnect=lambda *a: True), \
+            attr_patch(feishu, main=lambda argv: called.append(list(argv)) or 0):
+        rc, out, _ = run_cli(["init", "--quick"])
+    assert rc == 0
+    assert called == [["connect", "--quick"]]
+
+
 def test_init_no_connect_skips_registration_and_prints_step():
     """--no-connect (CI / scripted) must NOT launch the interactive scan, but
     still tells the operator the command to run later."""
