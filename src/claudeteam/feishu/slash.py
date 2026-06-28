@@ -971,7 +971,7 @@ def _login_env(cli: str, agent: str) -> dict:
     host's. claude/gemini/qwen key off HOME; codex off CODEX_HOME
     (= <agent_home>/.codex). Mirrors the spawn env in agents/*.py."""
     import os
-    from claudeteam.agents.claude_code import agent_home
+    from claudeteam.runtime.paths import agent_home
     env = dict(os.environ)
     spec = _LOGIN_SPEC[cli]
     if spec["env_var"] == "CODEX_HOME":

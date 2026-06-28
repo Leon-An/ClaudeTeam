@@ -59,12 +59,12 @@ def test_registered_in_agents_init():
 def test_spawn_cmd_sets_per_agent_home():
     """HOME=<agent_home> isolates each pane's ~/.gemini so sibling panes
     don't clobber one shared auth cache / GEMINI.md."""
-    from claudeteam.agents.claude_code import agent_home
+    from claudeteam.runtime.paths import agent_home
     cmd = GeminiCliAdapter().spawn_cmd("worker_gemini", "")
     assert f"HOME={agent_home('worker_gemini')}" in cmd
 
 
 def test_native_memory_path_is_gemini_md_under_agent_home():
-    from claudeteam.agents.claude_code import agent_home
+    from claudeteam.runtime.paths import agent_home
     path = GeminiCliAdapter().native_memory_path("worker_gemini")
     assert path == f"{agent_home('worker_gemini')}/.gemini/GEMINI.md"

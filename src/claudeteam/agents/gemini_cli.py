@@ -16,7 +16,7 @@ from __future__ import annotations
 import shlex
 
 from .base import AuthSlots, CliAdapter, MULTILINE_SUBMIT_KEYS
-from .claude_code import agent_home
+from claudeteam.runtime.paths import agent_home
 
 
 class GeminiCliAdapter(CliAdapter):

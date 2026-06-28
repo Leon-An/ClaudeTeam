@@ -155,7 +155,7 @@ def _ensure_claude_agent_home(agent: str) -> None:
     doesn't exist), silently skip and let claude fall back to its
     default `$HOME` discovery.
     """
-    from claudeteam.agents.claude_code import agent_home as _agent_home
+    from claudeteam.runtime.paths import agent_home as _agent_home
     home = Path(_agent_home(agent))
     claude_dir = home / ".claude"
     try:
@@ -319,7 +319,7 @@ def _seed_cli_credentials(agent: str, cli: str) -> None:
     skip_envs = (skip_env,) if isinstance(skip_env, str) else (skip_env or ())
     if any(env_str(e) for e in skip_envs):
         return
-    from claudeteam.agents.claude_code import agent_home as _agent_home
+    from claudeteam.runtime.paths import agent_home as _agent_home
     src = Path.home() / rel
     dst = Path(_agent_home(agent)) / rel
     if dst.exists() or dst.is_symlink() or not _path_readable(src):
@@ -360,7 +360,7 @@ def _ensure_agent_home(agent: str, cli: str) -> None:
     if cli == "claude-code":
         _ensure_claude_agent_home(agent)
         return
-    from claudeteam.agents.claude_code import agent_home as _agent_home
+    from claudeteam.runtime.paths import agent_home as _agent_home
     try:
         Path(_agent_home(agent)).mkdir(parents=True, exist_ok=True)
     except OSError:

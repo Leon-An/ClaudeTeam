@@ -109,7 +109,7 @@ def _read_login_token(cred: Path) -> str | None:
 
 
 def _agent_home(agent: str) -> Path:
-    from claudeteam.agents.claude_code import agent_home
+    from claudeteam.runtime.paths import agent_home
     return Path(agent_home(agent))
 
 

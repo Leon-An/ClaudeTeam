@@ -2,30 +2,10 @@
 from __future__ import annotations
 
 import shlex
-from pathlib import Path
 
 from claudeteam.runtime import paths
-from claudeteam.util import env_str
 
 from .base import AuthSlots, CliAdapter
-
-
-def agent_home(agent: str) -> str:
-    """Per-agent HOME — the `home/` subdir of the agent's own state dir.
-
-    Defaults to `<state_dir>/agents/<agent>/home`, so each agent's CLI
-    dotfiles (`.claude` / `.codex` / `.gemini` / ...) sit in the same tree
-    as its `identity.md` + `memory.jsonl` — one directory per agent.
-
-    Set `CLAUDETEAM_AGENT_HOME_ROOT` to relocate the homes onto a separate
-    mount (e.g. a Docker volume that persists credentials across image
-    rebuilds, or a writable path on macOS where `~` is a read-only
-    firmlink); the home is then `<root>/<agent>`.
-    """
-    root = env_str("CLAUDETEAM_AGENT_HOME_ROOT")
-    if root:
-        return str(Path(root) / agent)
-    return str(paths.agent_dir(agent) / "home")
 
 
 class ClaudeCodeAdapter(CliAdapter):
@@ -45,7 +25,7 @@ class ClaudeCodeAdapter(CliAdapter):
         # prepended at the spawn site — see its module docstring for the
         # token > login > api_key precedence.
         return (
-            f"HOME={shlex.quote(agent_home(agent))} "
+            f"HOME={shlex.quote(paths.agent_home(agent))} "
             f"CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1 DISABLE_AUTOUPDATER=1 "
             f"IS_SANDBOX=1 claude --dangerously-skip-permissions "
             f"--model {shlex.quote(model)} --name {shlex.quote(agent)}"
@@ -79,4 +59,4 @@ class ClaudeCodeAdapter(CliAdapter):
         # policy + memory digest survive context compaction. The per-agent
         # HOME means each agent gets its own file — zero cross-agent
         # collision and no project-repo pollution.
-        return f"{agent_home(agent)}/.claude/CLAUDE.md"
+        return f"{paths.agent_home(agent)}/.claude/CLAUDE.md"

@@ -49,21 +49,19 @@ def test_agent_workspace_is_under_agent_dir():
 def test_agent_home_nests_under_agent_dir_by_default():
     """Merged layout: the CLI HOME is the home/ subdir of the agent's own
     dir, so everything for one agent lives in one tree."""
-    from claudeteam.agents import claude_code
     with tempfile.TemporaryDirectory() as tmp:
         with _state_env(tmp):
-            assert (claude_code.agent_home("worker_cc")
+            assert (paths.agent_home("worker_cc")
                     == str(Path(tmp) / "agents" / "worker_cc" / "home"))
 
 
 def test_agent_home_root_env_overrides_nesting():
     """CLAUDETEAM_AGENT_HOME_ROOT relocates homes onto a separate mount
     (e.g. a Docker credential volume)."""
-    from claudeteam.agents import claude_code
     with tempfile.TemporaryDirectory() as tmp, \
             tempfile.TemporaryDirectory() as homes:
         with _state_env(tmp), env_patch(CLAUDETEAM_AGENT_HOME_ROOT=homes):
-            assert (claude_code.agent_home("worker_cc")
+            assert (paths.agent_home("worker_cc")
                     == str(Path(homes) / "worker_cc"))
 
 

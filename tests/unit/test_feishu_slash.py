@@ -1162,7 +1162,7 @@ def test_login_run_subprocess_spawn_failure():
 def test_login_env_isolates_codex_and_claude_homes():
     """The subprocess env points the CLI's token write at the agent's
     ISOLATED per-agent home, never the host's."""
-    from claudeteam.agents.claude_code import agent_home
+    from claudeteam.runtime.paths import agent_home
     with _team_env():
         ce = slash._login_env("codex-cli", "worker_codex")
         assert ce["CODEX_HOME"] == f"{agent_home('worker_codex')}/.codex"

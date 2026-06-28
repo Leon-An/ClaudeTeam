@@ -9,6 +9,7 @@ from claudeteam.agents import identity
 from claudeteam.agents import base, claude_code
 from claudeteam.agents.codex_cli import CodexCliAdapter
 from claudeteam.store import memory, tasks
+from claudeteam.runtime import paths
 
 
 # ── render() — template selection ─────────────────────────────────
@@ -323,7 +324,7 @@ def test_claude_adapter_native_memory_path_is_in_agent_home():
     assert path is not None
     assert path.endswith("/worker_cc/home/.claude/CLAUDE.md")
     # Same HOME root the spawn_cmd uses → claude actually reads it.
-    assert path.startswith(claude_code.agent_home("worker_cc"))
+    assert path.startswith(paths.agent_home("worker_cc"))
 
 
 def test_native_memory_text_combines_identity_policy_and_digest():
@@ -489,7 +490,7 @@ def test_write_also_writes_claude_native_memory_file():
     with isolated_env(team=team):
         memory.append("worker_cc", "learning", "auth uses bcrypt")
         identity.write("worker_cc")
-        native = Path(claude_code.agent_home("worker_cc")) / ".claude" / "CLAUDE.md"
+        native = Path(paths.agent_home("worker_cc")) / ".claude" / "CLAUDE.md"
         assert native.exists()
         text = native.read_text(encoding="utf-8")
         assert "team worker" in text          # identity body
@@ -501,7 +502,7 @@ def test_write_also_writes_claude_native_memory_file():
 
 
 def _native_path(agent: str) -> Path:
-    return Path(claude_code.agent_home(agent)) / ".claude" / "CLAUDE.md"
+    return Path(paths.agent_home(agent)) / ".claude" / "CLAUDE.md"
 
 
 def test_refresh_native_memory_rewrites_anchor_to_current():
