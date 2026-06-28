@@ -39,15 +39,18 @@ def test_init_writes_toml_and_returns_zero():
         assert "Next:" in out
 
 
-def test_init_default_team_has_three_agents():
+def test_init_default_team_is_claude_only():
+    """Default team needs only claude-code so a fresh user with just Claude
+    installed gets a working team out of the box (agents reuse the local Claude
+    login). codex / other-CLI workers are a commented example to uncomment when
+    you have them — "用户有什么用什么", optional, not required."""
     with _tmp_env() as tmp:
         with env_patch(CLAUDETEAM_CONFIG_FILE=str(tmp / "claudeteam.toml")):
             run_cli(["init"])
         cfg = _read_toml(tmp / "claudeteam.toml")
         agents = cfg["team"]["agents"]
-        assert set(agents) == {"manager", "worker_cc", "worker_codex"}
-        assert agents["manager"]["cli"] == "claude-code"
-        assert agents["worker_codex"]["cli"] == "codex-cli"
+        assert set(agents) == {"manager", "worker_cc"}
+        assert all(a["cli"] == "claude-code" for a in agents.values())
 
 
 def test_init_default_chat_id_and_profile_empty():

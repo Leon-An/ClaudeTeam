@@ -1,213 +1,133 @@
 <p align="center">
-  <b>English</b> · <a href="DEPLOYMENT_zh.md">简体中文</a>
+  <b>English</b> · <a href="DEPLOYMENT_zh.md">简体中文</a> · <a href="DEPLOYMENT_docker.md">Docker →</a>
 </p>
 
-# Deployment Guide
+# Deployment Guide (Host)
 
-Get a ClaudeTeam crew running — **host or Docker — in 5 steps**. Config,
-model-backend, and troubleshooting reference live below the quickstarts.
+Get a ClaudeTeam crew running — **just follow the 4 steps below, top to bottom**.
+Config, model-backend, and troubleshooting reference live further down. Deploying
+on Docker / a server → see [Docker deploy](DEPLOYMENT_docker.md).
 
-> **Driving this with a coding agent?** Tell it: *read this doc, then walk me
-> through it — and **ask me, never guess** (which agent CLIs? host or Docker? do
-> I already have a Feishu app?).* The happy path is 5 commands; the agent's job
-> is to pick the right options **with** you and run them.
+> **Driving this with a coding agent?** Tell it: *read this doc, walk me through
+> it; when there's a choice (which agent CLIs? do I already have a Feishu app?)
+> **ask me, don't guess**.*
 
 ---
 
 ## Before you begin
 
-**Pick a mode first** — and don't run both against the same Feishu chat, or
-Feishu silently splits events between the two subscribers.
+Install these (the bits `pip` can't):
 
-| | **Host** | **Docker** |
-|---|---|---|
-| Choose when | your dev machine, fast iteration | headless / server / multi-team |
-| Host needs | Python ≥3.10, tmux, node+npx, ≥1 agent CLI | just Docker 20.10+ & Compose v2 |
-| State lives in | `~/.claudeteam` (or `./state/`) | `./team-data/` (survives `compose down`) |
-
-**Host prerequisites** (Docker bakes these into the image — skip if you chose Docker):
-
-- **Python ≥ 3.10** — *macOS: the system `/usr/bin/python3` is 3.9, too old →
-  `brew install python@3.12` or pyenv. Debian/Ubuntu: also
-  `sudo apt install -y python3-venv`, else `venv` errors `ensurepip is not available`.*
+- **Python 3.9+** — macOS's built-in `/usr/bin/python3` (3.9) is fine, nothing
+  extra to install. Debian/Ubuntu also needs `sudo apt install -y python3-venv`.
 - **tmux** — one window per agent.
-- **node + npx (18+)** — `lark-cli` (sending) + the `scripts/feishu_channel/`
-  sidecar (bot registration + event ingress).
-- **≥ 1 agent CLI** on PATH — `claude` / `codex` / `pi` / `opencode` / … (see the
+- **node + npx (18+)** — runs `lark-cli` (sending) + the Feishu sidecar (bot
+  registration + event ingress).
+- **≥ 1 agent CLI** — `claude` alone is enough (the default team uses only it);
+  mixing in `codex` / `gemini` / `qwen` / … is **optional** (see the
   [adapter table](../README.md#multi-cli-adapter)).
-- A **Feishu / Lark enterprise tenant** — `claudeteam init` registers the app for you.
+- A **Feishu / Lark account** — a personal one can scan-register; an enterprise
+  tenant unlocks "un-@'d in groups".
 
-After `up`, `claudeteam health` reports each of these (binaries, env, tmux,
-daemons) as ✓/✗ — use it to confirm your setup rather than checking by hand.
+> 💡 Agents **reuse your existing local login**: if `claude` is logged in on this
+> machine, the claude agents use it directly — **no separate login**. Same for any
+> other CLI — logged in locally is enough.
 
 ---
 
-## Quickstart — Host
+## Step 1 · Install
 
 ```bash
-# 1. Code + the `claudeteam` CLI (zero Python deps)
+# Code + the claudeteam command (-e = editable install: always tracks your
+# checkout, never stuck on a stale version)
 git clone https://github.com/zylMozart/ClaudeTeam.git && cd ClaudeTeam
-python3 -m venv .venv && source .venv/bin/activate      # any Python >=3.10
+python3 -m venv .venv && source .venv/bin/activate    # macOS's built-in 3.9 is fine
 pip install -e .
 
-# 2. External tools (not pip-installable) — install for your OS:
-#    macOS:  brew install tmux node && npm i -g @larksuite/cli @anthropic-ai/claude-code
-#    Debian: sudo apt install -y tmux nodejs npm && npm i -g @larksuite/cli @anthropic-ai/claude-code
-#    (claude-code = the default agent CLI; for other CLIs see the README matrix)
-
-# 3. Config + Feishu bot — try the one-tap path first (easiest; on most tenants it
-#    sets up group messages too):
-claudeteam init --no-connect                 # writes claudeteam.toml, skips auto-connect
-claudeteam feishu connect --quick            # <- prints an auth link (auto-opens browser) + QR; tap/scan
-#   On confirm, Feishu auto-creates the bot app + team group + creds + chat_id — zero console.
-#   The command then checks the group-message scope (im:message.group_msg):
-#     OK   granted (most tenants) -> the group works WITHOUT @-ing the bot; done.
-#     warn not granted on your tenant -> it tells you: @ the bot, or use the guided flow below.
-#
-# Want un-@'d groups guaranteed regardless of tenant? -> guided self-built app:
-claudeteam init        # walks you in-terminal: create app in console -> click the 1-tap
-                       # scope link -> publish -> Enter, and it auto-creates the group.
-
-# 4. Install slash hooks (MUST run before `up`)
-claudeteam install-hooks
-
-# 5. Launch + verify
-claudeteam up
-claudeteam health      # SUCCESS = every line green: binaries, env, tmux, router, watchdog
+# External tools pip can't install:
+#   macOS:  brew install tmux node && npm i -g @larksuite/cli @anthropic-ai/claude-code
+#   Debian: sudo apt install -y tmux nodejs npm && npm i -g @larksuite/cli @anthropic-ai/claude-code
 ```
 
-**You're up when** — in your Feishu group the **manager posts a roll-call and
-each worker reports in** (the autonomous self-check, [details](#verifying-the-deploy)).
-Then send `/health`, then `@manager 你好` → reply in ~30 s. Red `health`? →
-[Common failures](#common-failures).
+> Install only the agent CLIs you'll use. The default team is all `claude-code`,
+> so `claude` alone runs it; add `codex` etc. only if you want them.
 
-**Tear down:** `claudeteam down` (stop, keep state) · `claudeteam reset` (also wipe state).
-
----
-
-## Quickstart — Docker
-
-Same 5-step spine. Nothing but Docker on the host — it bind-mounts your Claude
-OAuth so the container reuses it.
-
-> **macOS:** start Docker Desktop first (`open -a Docker`, wait for the whale to
-> settle). `docker compose` errors `failed to connect to the docker API …` until
-> the daemon is up — check with `docker info | grep '^Server:'`.
+## Step 2 · Configure your team
 
 ```bash
-# 1. Code + credentials in .env (no browser step in Docker)
-git clone https://github.com/zylMozart/ClaudeTeam.git && cd ClaudeTeam
-cp .env.example .env
-$EDITOR .env           # set FEISHU_APP_ID + FEISHU_APP_SECRET.
-                       # No app yet? Register one on a host with `claudeteam feishu connect`,
-                       # then copy its values here.
-
-# 2. macOS only — materialise Claude OAuth from keychain (Linux: already a file)
-mkdir -p ~/.claude
-security find-generic-password -s "Claude Code-credentials" -w > ~/.claude/.credentials.json
-
-# 3. Build + start the container (image bakes the sidecar's node_modules)
-docker compose build && docker compose up -d
-
-# 4. Config inside the container (creds come from .env, so --no-connect skips the guided console steps)
-docker compose exec --workdir /data claudeteam claudeteam init --no-connect
-$EDITOR team-data/claudeteam.toml       # set chat_id + tweak agents
-                                        #   no group yet? run `claudeteam feishu connect` on a
-                                        #   desktop host to create it, then copy its oc_... here
-
-# 5. Launch + verify
-docker compose exec claudeteam claudeteam install-hooks
-docker compose exec claudeteam claudeteam up
-docker compose exec claudeteam claudeteam health
-docker compose exec claudeteam tmux attach -t ClaudeTeam   # watch panes; Ctrl+B d to detach
+claudeteam init --no-connect      # writes claudeteam.toml (default: manager + 1 claude worker)
+$EDITOR claudeteam.toml           # adjust agents to the CLIs you have / are logged into (below)
 ```
 
-**You're up when** — same as Host: the manager runs the roll-call in the group
-and `claudeteam health` is green.
+Open `claudeteam.toml`; `[team.agents.*]` is your roster. The default is two
+`claude-code` agents — **install claude and it just works**. To add a worker on
+another CLI (only if you've **installed + logged into** it), uncomment the example
+init wrote and edit it:
 
-**Compose mounts** (full list in `docker-compose.yml`): `./team-data/`→`/data/`
-(config + state), `~/.claude/.credentials.json` (Claude OAuth, RW so refreshes
-persist), `~/.codex`/`~/.kimi` (per-CLI creds), `./src/`→`/app/src/` (hot-reload).
-The base image bakes in `claude`, `codex`, `kimi` (plus `pi`/`hermes`); `gemini`
-and `qwen` are **not** included — derive from `claudeteam:dev` and install those,
-or bind-mount the host binary.
+```toml
+[team.agents.worker_codex]
+cli   = "codex-cli"     # add only if you have codex installed; otherwise leave it out
+model = "gpt-5.5"
+role  = "Codex worker"
+```
 
-**Mount sources must exist before `up -d`.** Docker turns a missing *file*
-mount-source (e.g. `~/.claude.json`, `~/.lark-cli/config.json`) into an empty
-*directory*, which then breaks the app. On a fresh box, first:
-`mkdir -p ~/.codex ~/.kimi ~/.claude/projects ~/.lark-cli/cache && touch ~/.claude.json`,
-materialize the Claude OAuth file (Step 2), and **delete any mount line in
-`docker-compose.yml` for a CLI you don't run** (e.g. drop `~/.codex`/`~/.kimi`
-on a claude-only box).
+> Don't want to configure from scratch? [`templates/`](../templates/) has ready
+> domain teams (software-dev / research / marketing / data / content) — copy one
+> and tweak. `claudeteam reidentify <agent> --print` previews an agent's rendered
+> identity before `up`.
 
----
+## Step 3 · Connect Feishu (tap/scan once → bot + group built)
 
-## The Feishu bot (Step 3, in depth)
+```bash
+claudeteam feishu connect --quick     # prints an auth link (auto-opens browser) + a QR; tap/scan
+```
 
-`claudeteam init --quick` / `claudeteam init` runs `claudeteam feishu connect` for
-you (on an interactive TTY): it registers the bot app + creates the team group +
-saves creds + writes `chat_id` — you mostly just tap/scan. Two paths; **try A,
-fall back to B**:
+On confirm, Feishu **auto-creates** the bot app + team group (invites you) + creds
++ `chat_id` (written back to `claudeteam.toml`), zero console. The command then
+**checks the group-message scope** `im:message.group_msg`:
 
-### A. `--quick` — tap/scan once and it's built (try this first)
+- ✅ granted (most tenants) → the group works **without @-ing the bot**; you're done.
+- ⚠️ your tenant dropped it → the command tells you: `@`-ing the bot in groups
+  works; for un-@'d groups, use the guided flow below.
 
-`claudeteam init --quick` (or `claudeteam feishu connect --quick`) uses the
-RFC-8628 device flow to register a PersonalAgent app: the terminal prints **a link
-(auto-opens your browser) + a QR fallback**, you tap/scan → confirm → Feishu
-**auto-creates the app + team group + grants scopes + saves creds**, zero console.
+<details>
+<summary><b>Guided self-built app</b> (only if <code>--quick</code> didn't get the group scope and you want un-@'d groups)</summary>
 
-The grant **requests the group-message scope `im:message.group_msg` via `addons`** —
-which lands on tenants that honor them (Feishu "gray-scale"). The command then
-**verifies and tells you**:
-
-- OK — granted (most tenants) → the group works **without @-ing the bot**, same as
-  a self-built app; you're done.
-- warn — your tenant dropped it → the command says: `@` the bot in groups, or switch
-  to B for a guaranteed grant.
-
-### B. Guided self-built app — the fallback that always gets the group scope
-
-Only needed if A didn't get the group scope on your tenant and you want un-@'d
-group messages. `claudeteam init` (or `claudeteam feishu connect`) walks you
-through these console steps once:
+`claudeteam feishu connect` (without `--quick`) walks you through the console:
 
 1. **Create the app** — open <https://open.feishu.cn/app> → 创建企业自建应用 → add
-   the **机器人 (bot)** capability → copy the **App ID + App Secret** and paste
-   them when the command prompts.
-2. **Grant scopes in one click** — the command prints a permission deep-link with
-   all 7 scopes pre-selected (including the sensitive `im:message.group_msg`).
-   Open it → 确认.
+   the **机器人 (bot)** capability → copy the **App ID + App Secret**, paste when prompted.
+2. **One-click scopes** — click the deep-link it prints (all 7 scopes incl. the
+   sensitive `im:message.group_msg` pre-selected) → 确认.
 3. **Event** — 事件与回调 → 订阅方式 = **使用长连接** → add the **接收消息** event.
-4. **Publish** — 应用发布 → 创建版本 → 申请发布 → **批准** (if you're the tenant
-   admin you approve your own version instantly; personal-edition apps skip review).
-5. Press **Enter** — the command verifies `im:message.group_msg` landed, creates
-   the team group, and saves App creds → `state/feishu_app.json` (0600) + `chat_id`
-   → `claudeteam.toml`.
+4. **Publish** — 应用发布 → 创建版本 → 申请发布 → **批准** (tenant admins approve their own version instantly; personal-edition apps skip review).
+5. Press **Enter** — the command verifies the scope, creates the group, saves creds → `state/feishu_app.json` (0600) + writes `chat_id`.
 
-**Docker / scripting:** `claudeteam init --no-connect`, then put
-`FEISHU_APP_ID` / `FEISHU_APP_SECRET` into `.env` (env **overrides** the creds
-file) and `chat_id` into `team-data/claudeteam.toml`.
+</details>
 
-Under the hood: a thin `scripts/feishu_channel/` sidecar over the official
-[`@larksuite/channel`](https://www.npmjs.com/package/@larksuite/channel) SDK,
-used for both registration and the WebSocket event ingress.
+> Want one command for Steps 2+3 (default team, no agent edits)?
+> `claudeteam init --quick` — writes the default config and connects Feishu in one go.
 
----
+## Step 4 · Launch + verify
 
-## Verifying the deploy
+```bash
+claudeteam install-hooks      # install slash-command hooks (MUST run before up)
+claudeteam up                 # start the tmux crew + router + watchdog
+claudeteam health             # infra self-check: binaries / env / tmux / router / watchdog
+```
 
-**Autonomous self-check (no human input):** on a fresh `up` the manager runs a
-team roll-call — announces in the group, summons each worker, and every worker
-reports back. **Green = you see the manager's summons plus a report from every
-non-retired worker** in the group.
+**The real signal is your Feishu group**: on a fresh `up` the manager **posts a
+roll-call** and each worker reports in. See that = you're up. Then `@manager 你好`
+→ reply in ~30 s.
 
-Optional manual probes (type these in the group):
+> ⚠️ **Green `health` ≠ a working team** — it checks infrastructure (processes /
+> tmux / daemons), not whether each agent's CLI is actually authenticated. **Go by
+> the group roll-call.** No response? Usually an agent CLI isn't logged in on this
+> machine (run `claude` to log in) or that CLI isn't installed. Optional manual
+> probes (type in the group): `/health` (per-agent + router + watchdog card),
+> `/team` (each agent's ♥ heartbeat < 30 s).
 
-1. `/health` → a card with every agent + router + watchdog green.
-2. `/team` → each agent's ♥ heartbeat fresh (< 30 s).
-3. `@manager` + a task → reply < 30 s, and dispatched workers post `say` cards.
-
-Anything red → [Common failures](#common-failures).
+**Tear down:** `claudeteam down` (stop, keep state) · `claudeteam reset` (also wipe state).
 
 ---
 
@@ -266,8 +186,9 @@ team needed, so you can check a config or playbook edit before `up`.
 
 ## Model backend per agent (credentials + endpoint)
 
-**A first boot needs none of this** — the 3 default agents run on your Claude
-Code OAuth. Come here only when you swap an agent onto a non-Anthropic backend.
+**A first boot needs none of this** — the 2 default agents run on your Claude
+Code OAuth (reusing your local login). Come here only when you swap an agent onto
+a non-Anthropic backend.
 
 The adapters are **provider-agnostic** — nothing about DeepSeek/OpenAI/etc. is
 baked in. You choose the backend through env + config:
@@ -368,6 +289,13 @@ pane; the boss can also send them — they zero-LLM dispatch through the router)
 
 ## Common failures
 
+### `claudeteam feishu connect` hangs / says "cancelled"
+
+A non-interactive terminal (piped / non-TTY) or a Ctrl-C gives "cancelled (no
+input / non-interactive terminal)" — re-run it in an **interactive** terminal.
+`--quick` prints the link + QR before waiting for your confirm; if the browser
+didn't auto-open, click the link the terminal printed.
+
 ### `claude: not found` / `codex: not found` in a pane
 
 Panes inherit the launching shell's `$PATH`. If you opened a fresh terminal and
@@ -376,15 +304,9 @@ shell where the agent CLIs resolve.
 
 ### "Not logged in" in a claude pane (macOS host)
 
-Each pane has its own `~/.claude/.credentials.json` snapshot (per-agent home
-isolation), which can go stale vs the keychain. Fix: `claudeteam down && up`
-re-materialises it.
-
-### Container `router` reports `lark-cli failed (rc=2)` and stalls
-
-Catchup tried `--as user` but the container only has bot OAuth. Ensure
-`CLAUDETEAM_LARK_SEND_AS=bot` is in `docker-compose.yml`'s `environment:` (the
-bundled compose ships it): `docker compose exec claudeteam env | grep CLAUDETEAM_LARK_SEND_AS`.
+Each pane has its own `~/.claude/.credentials.json` snapshot (seeded from your
+local login, per-agent home isolation), which can go stale vs the keychain. Fix:
+`claudeteam down && up` re-materialises it.
 
 ### `router.log` shows "no live events … rotating subscribe" every ~120 s
 
@@ -432,10 +354,9 @@ Creds resolve from one source: `state/feishu_app.json` (written by
 `feishu connect`, 0600), which `feishu/lark.py:subprocess_env()` reads to inject
 `FEISHU_APP_ID`/`SECRET` + a tenant token into both the sidecar (ingress) and
 lark-cli (egress). `ls -l state/feishu_app.json` (expect `-rw-------`); if
-missing, re-run `claudeteam feishu connect`. For Docker, the `.env`
-`FEISHU_APP_ID`/`SECRET` **override** the file (`docker compose exec claudeteam env | grep FEISHU_APP_ID`).
+missing, re-run `claudeteam feishu connect`.
 
-### `worker_codex` shows "pane up but CLI not ready yet"
+### `worker_codex` (or any codex agent) shows "pane up but CLI not ready yet"
 
 Codex sometimes opens with an "update available" prompt blocking the ready marker:
 

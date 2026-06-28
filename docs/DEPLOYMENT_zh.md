@@ -1,187 +1,119 @@
 <p align="center">
-  <a href="DEPLOYMENT.md">English</a> · <b>简体中文</b>
+  <a href="DEPLOYMENT.md">English</a> · <b>简体中文</b> · <a href="DEPLOYMENT_docker_zh.md">Docker 部署 →</a>
 </p>
 
-# 部署指南
+# 部署指南（Host）
 
-把一个 ClaudeTeam 团队跑起来——**host 或 Docker，5 步搞定**。配置、模型后端、故障
-排查参考都在快速开始下面。
+把一个 ClaudeTeam 团队跑起来——**跟着下面 4 步一条条敲就行**。配置、模型后端、故障排查
+在后面。要用 Docker / 服务器部署 → 另见 [Docker 部署](DEPLOYMENT_docker_zh.md)。
 
-> **用 coding agent 来部署？** 告诉它：*读这份文档，然后一步步带我走——而且**要问我、
-> 别瞎猜**（用哪些 agent CLI？host 还是 Docker？我是不是已经有飞书 App 了？）。* 顺利
-> 路径就 5 条命令；agent 的任务是**和你一起**选对选项再执行。
+> **让 coding agent 替你部署？** 告诉它：*读这份文档，一步步带我走；遇到要选的（用哪些
+> agent CLI？我有没有飞书 App？）**先问我、别瞎猜**。*
 
 ---
 
 ## 开始之前
 
-**先选一种模式**——别拿同一个飞书会话同时跑两种，否则飞书会把事件悄悄分给两个订阅者。
+装这几样（`pip` 装不了的）：
 
-| | **Host** | **Docker** |
-|---|---|---|
-| 何时选 | 你的开发机、快速迭代 | 无头 / 服务器 / 多团队 |
-| 宿主需要 | Python ≥3.10、tmux、node+npx、≥1 个 agent CLI | 只要 Docker 20.10+ 和 Compose v2 |
-| 状态存在哪 | `~/.claudeteam`（或 `./state/`） | `./team-data/`（`compose down` 后仍在） |
+- **Python 3.9+** —— macOS 自带的 `/usr/bin/python3`（3.9）就够，不用额外装。
+  Debian/Ubuntu 还要 `sudo apt install -y python3-venv`。
+- **tmux** —— 每个 agent 一个窗口。
+- **node + npx (18+)** —— 跑 `lark-cli`（发消息）+ 飞书 sidecar（注册机器人 + 收事件）。
+- **至少 1 个 agent CLI** —— 装个 `claude` 就够（默认团队全用它）；想混用
+  `codex` / `gemini` / `qwen` / … 是**可选**的（见 [适配表](../README_zh.md#多-cli-适配)）。
+- 一个**飞书 / Lark 账号** —— 个人版就能扫码建号；企业租户能解锁"群里免 @"。
 
-**Host 前置依赖**（Docker 已把这些烤进镜像——选 Docker 就跳过）：
-
-- **Python ≥ 3.10** —— *macOS：系统自带 `/usr/bin/python3` 是 3.9，太旧 →
-  `brew install python@3.12` 或用 pyenv。Debian/Ubuntu：还要
-  `sudo apt install -y python3-venv`，否则 `venv` 会报 `ensurepip is not available`。*
-- **tmux** —— 每个 agent 一个 window。
-- **node + npx (18+)** —— `lark-cli`（发送）+ `scripts/feishu_channel/` sidecar
-  （机器人注册 + 事件入站）。
-- **PATH 上至少 1 个 agent CLI** —— `claude` / `codex` / `pi` / `opencode` / …
-  （见[适配表](../README_zh.md#多-cli-适配)）。
-- 一个**飞书 / Lark 企业租户** —— `claudeteam init` 替你注册应用。
-
-`up` 之后，`claudeteam health` 会把这些（binaries、env、tmux、daemons）逐项报
-✓/✗——用它确认环境，别手动一个个查。
+> 💡 agent **复用你本地已有的登录**：`claude` 在本机登录过，团队里的 claude agent 直接拿来
+> 用，**不用再单独登录**。其它 CLI 同理——本机登录过就行。
 
 ---
 
-## 快速开始 — Host
+## 第 1 步 · 装齐
 
 ```bash
-# 1. 代码 + `claudeteam` CLI（零 Python 依赖）
+# 代码 + claudeteam 命令（-e 是 editable 安装：始终跟着你的代码走，不会卡在旧版本）
 git clone https://github.com/zylMozart/ClaudeTeam.git && cd ClaudeTeam
-python3 -m venv .venv && source .venv/bin/activate      # 任意 Python >=3.10
+python3 -m venv .venv && source .venv/bin/activate    # macOS 系统自带的 3.9 就行
 pip install -e .
 
-# 2. 外部工具（pip 装不了，按你的系统装这几样）：
-#    macOS ： brew install tmux node && npm i -g @larksuite/cli @anthropic-ai/claude-code
-#    Debian： sudo apt install -y tmux nodejs npm && npm i -g @larksuite/cli @anthropic-ai/claude-code
-#    （claude-code = 默认 agent CLI；想用别的 CLI 见 README 适配表，按需再装）
-
-# 3. 配置 + 飞书机器人 —— 先试「点 / 扫一下就建好」（最省事，多数租户连群消息一起搞定）：
-claudeteam init --no-connect                 # 写好 claudeteam.toml，先不自动进引导
-claudeteam feishu connect --quick            # ← 生成授权链接（自动开浏览器，二维码兜底），点/扫一下
-#   确认后飞书自动建好：机器人应用 + 团队群 + 凭证 + chat_id，全程零控制台。
-#   命令会自查群消息权限 im:message.group_msg：
-#     ✅ 拿到了（多数租户都放行）→ 群里【不 @】也能收，彻底齐活；
-#     ⚠️ 本租户没放行 → 它会提示你：群里 @bot，或改走下面的引导式。
-#
-# 想 100% 保证群里免 @、不看租户脸色 → 引导式自建应用（多两步手动，权限最稳）：
-claudeteam init        # 当场带你：控制台建 app+机器人 → 点一键授权链接 → 发版 → 回车自动建群
-
-# 4. 装斜杠命令钩子（必须在 `up` 之前）
-claudeteam install-hooks
-
-# 5. 启动 + 验证
-claudeteam up
-claudeteam health      # 成功 = 每行全绿：binaries、env、tmux、router、watchdog
+# pip 装不了的外部工具：
+#   macOS ： brew install tmux node && npm i -g @larksuite/cli @anthropic-ai/claude-code
+#   Debian： sudo apt install -y tmux nodejs npm && npm i -g @larksuite/cli @anthropic-ai/claude-code
 ```
 
-**起来了的标志** —— 飞书群里**主管发起全员点名、每个 worker 逐一汇报**（自主自检，
-[详见](#验证部署)）。然后发 `/health`，再 `@manager 你好` → 约 30 秒内回复。`health`
-有红？→ [常见故障](#常见故障)。
+> 只装/用你需要的 agent CLI。默认团队全是 `claude-code`，所以装个 `claude` 就能跑通；
+> `codex` 等其它 CLI 按需再装。
 
-**拆除：** `claudeteam down`（停掉，保留状态）· `claudeteam reset`（连状态一起清）。
-
----
-
-## 快速开始 — Docker
-
-同样 5 步骨架。宿主上除了 Docker 什么都不要——它会 bind-mount 你的 Claude OAuth，
-让容器复用。
-
-> **macOS：** 先启动 Docker Desktop（`open -a Docker`，等鲸鱼图标稳定）。daemon 没起
-> 来之前 `docker compose` 会报 `failed to connect to the docker API …`——用
-> `docker info | grep '^Server:'` 确认。
+## 第 2 步 · 配团队
 
 ```bash
-# 1. 代码 + 凭证写进 .env（Docker 没有浏览器步骤）
-git clone https://github.com/zylMozart/ClaudeTeam.git && cd ClaudeTeam
-cp .env.example .env
-$EDITOR .env           # 填 FEISHU_APP_ID + FEISHU_APP_SECRET。
-                       # 还没有 App？在一台 host 上用 `claudeteam feishu connect` 注册一个，
-                       # 把值复制过来。
-
-# 2. 仅 macOS——把 Claude OAuth 从 keychain 落成文件（Linux：本来就是文件）
-mkdir -p ~/.claude
-security find-generic-password -s "Claude Code-credentials" -w > ~/.claude/.credentials.json
-
-# 3. 构建 + 启动容器（镜像已烤进 sidecar 的 node_modules）
-docker compose build && docker compose up -d
-
-# 4. 容器内配置（凭证来自 .env，所以 --no-connect 跳过引导式控制台步骤）
-docker compose exec --workdir /data claudeteam claudeteam init --no-connect
-$EDITOR team-data/claudeteam.toml       # 设 chat_id + 调整 agents
-                                        #   还没有群？在一台能开浏览器的机器上跑
-                                        #   `claudeteam feishu connect` 建群，再把 oc_... 复制过来
-
-# 5. 启动 + 验证
-docker compose exec claudeteam claudeteam install-hooks
-docker compose exec claudeteam claudeteam up
-docker compose exec claudeteam claudeteam health
-docker compose exec claudeteam tmux attach -t ClaudeTeam   # 看 pane；Ctrl+B d 脱离
+claudeteam init --no-connect      # 写出 claudeteam.toml（默认：manager + 1 个 claude worker）
+$EDITOR claudeteam.toml           # 按你装/登录了哪些 CLI 调整 agent（见下）
 ```
 
-**起来了的标志** —— 和 Host 一样：主管在群里跑点名、`claudeteam health` 全绿。
+打开 `claudeteam.toml`，`[team.agents.*]` 就是你的团队。默认两个 `claude-code`，**装了
+claude 就能直接用**。想加别的 CLI 的 worker（你本机**装了、登录了**才加）—— 解开 init 写
+好的注释例子、改改即可：
 
-**Compose 挂载**（完整列表见 `docker-compose.yml`）：`./team-data/`→`/data/`
-（配置 + 状态）、`~/.claude/.credentials.json`（Claude OAuth，RW 以便刷新持久化）、
-`~/.codex`/`~/.kimi`（各 CLI 凭证）、`./src/`→`/app/src/`（热重载）。基础镜像
-**刻意不**烤进 `claude`/`codex`/`kimi`——从 `claudeteam:dev` 派生后装你需要的，或把宿主
-二进制 bind-mount 进去。
+```toml
+[team.agents.worker_codex]
+cli   = "codex-cli"     # 本机装了 codex 再加；没有就别管它
+model = "gpt-5.5"
+role  = "Codex 员工"
+```
 
----
+> 嫌从零配麻烦？[`templates/`](../templates/) 里有现成的领域团队（软件开发 / 科研 / 营销 /
+> 数据 / 内容），拷过来改改。`claudeteam reidentify <agent> --print` 能在 `up` 前**预览**某个
+> agent 渲染出来的身份。
 
-## 飞书机器人（第 3 步详解）
+## 第 3 步 · 连飞书（点 / 扫一下，建好机器人 + 群）
 
-`claudeteam init --quick` / `claudeteam init` 会替你跑 `claudeteam feishu connect`（交互式
-TTY 上）：注册机器人应用 + 建团队群 + 存凭证 + 写 `chat_id`，你基本只需点 / 扫一下。两条路，
-**先试 A，不行再上 B**：
+```bash
+claudeteam feishu connect --quick     # 生成授权链接（自动开浏览器）+ 二维码兜底，点 / 扫一下
+```
 
-### A. `--quick` —— 点 / 扫一下就建好（推荐先试）
+确认后飞书**自动建好**：机器人应用 + 团队群（把你拉进去）+ 凭证 + `chat_id`（写回
+`claudeteam.toml`），全程零控制台。命令随后**自查群消息权限** `im:message.group_msg`：
 
-`claudeteam init --quick`（或 `claudeteam feishu connect --quick`）用 RFC-8628 设备码流注册
-一个 PersonalAgent 应用：终端给**一条链接（自动开浏览器）+ 二维码兜底**，点 / 扫一下 → 确认 →
-飞书**自动建好应用 + 团队群 + 授权 + 存凭证**，全程零控制台。
+- ✅ 拿到了（多数租户都给）→ 群里**不 @ 也能收**，到此结束；
+- ⚠️ 本租户没放行 → 命令提示你：群里 @ 机器人就能用；要群里免 @，改走下面的引导式。
 
-授权时**通过 `addons` 一并申请了群消息权限** `im:message.group_msg`——租户放行（飞书的"灰度"）
-就直接拿到。命令随后**自查**并告诉你拿到没有：
+<details>
+<summary><b>引导式自建应用</b>（只在 <code>--quick</code> 没拿到群权限、而你又要"群里免 @"时才需要）</summary>
 
-- ✅ 拿到了（多数租户都给）→ 群里**不 @ 也能收**，和自建应用一样齐活，到此结束；
-- ⚠️ 本租户没放行 → 命令提示你：群里 @ 机器人就能用，或者改走 B 拿稳的群权限。
+`claudeteam feishu connect`（不带 `--quick`）会在控制台一步步引导你：
 
-### B. 引导式自建应用 —— 群权限 100% 拿得到的兜底
+1. **建应用** —— 开 <https://open.feishu.cn/app> → 创建企业自建应用 → 加**机器人** →
+   复制 **App ID + App Secret**，命令提示时贴回终端。
+2. **一键授权** —— 点命令打印的那条 deep-link（已把全部 7 个权限、含
+   `im:message.group_msg` 勾好）→ 确认。
+3. **事件** —— 事件与回调 → 订阅方式 = **使用长连接** → 加事件**接收消息**。
+4. **发版** —— 应用发布 → 创建版本 → 申请发布 → **批准**（你是管理员就直接批；个人版免审核）。
+5. 按**回车** —— 命令验证权限、建群、把凭证存到 `state/feishu_app.json`（0600）+ 写 `chat_id`。
 
-只有当 A 在你的租户没拿到群权限、而你又要"群里不 @ 也能收"时才需要。`claudeteam init`（或
-`claudeteam feishu connect`）会在控制台引导你做这几步：
+</details>
 
-1. **建应用** —— 打开 <https://open.feishu.cn/app> → 创建企业自建应用 →「添加应用能力」
-   加**机器人** → 复制 **App ID + App Secret**，命令提示时粘贴进去。
-2. **一键授权** —— 命令打印一条权限 deep-link，已把全部 7 个权限（含敏感的
-   `im:message.group_msg`）勾好。打开 → 确认。
-3. **事件** —— 事件与回调 → 订阅方式 = **使用长连接** → 添加事件**接收消息**。
-4. **发版** —— 应用发布 → 创建版本 → 申请发布 → **批准**（你是租户管理员就直接批；个人版免审核）。
-5. 按**回车** —— 命令验证 `im:message.group_msg` 到位、建好团队群、把凭证存到
-   `state/feishu_app.json`（0600）+ `chat_id` 写进 `claudeteam.toml`。
+> 想一条命令搞定第 2+3 步（用默认团队、不改 agent）？`claudeteam init --quick`——写默认配置 +
+> 直接连飞书。
 
-> **Docker / 脚本化：** `claudeteam init --no-connect`，然后把
-> `FEISHU_APP_ID` / `FEISHU_APP_SECRET` 写进 `.env`（env **覆盖**凭证文件）、`chat_id`
-> 写进 `team-data/claudeteam.toml`。
+## 第 4 步 · 起团队 + 验证
 
-底层：`scripts/feishu_channel/` 下一个薄薄的 sidecar，包了官方
-[`@larksuite/channel`](https://www.npmjs.com/package/@larksuite/channel) SDK，注册和
-WebSocket 事件入站都走它。
+```bash
+claudeteam install-hooks      # 装斜杠命令钩子（必须在 up 之前）
+claudeteam up                 # 起 tmux 团队 + router + watchdog
+claudeteam health             # 基础设施自检：binaries / env / tmux / router / watchdog
+```
 
----
+**真正起来了的判据是看飞书群**：一次全新 `up` 后，主管会**发起全员点名**、每个 worker 逐一
+在群里汇报。看到这个 = 成。然后 `@manager 你好` → 约 30 秒内回复。
 
-## 验证部署
+> ⚠️ **`health` 全绿 ≠ 团队能用**——它只查基础设施（进程/tmux/守护），不查每个 agent 的 CLI
+> 是否真登录可用。**以群里点名为准**。点不动？多半是某个 agent CLI 本机没登录（跑一下
+> `claude` 登录）、或那个 CLI 没装。可选手动探针（群里输入）：`/health`（每 agent + router +
+> watchdog 卡片）、`/team`（每 agent ♥ 心跳 < 30 秒）。
 
-**自主自检（无需真人）：** 一次全新的 `up` 之后，主管会跑一轮全员点名——在群里宣布、
-逐一召唤每个 worker，每个 worker 各自回报。**绿 = 你在群里看到主管的召唤 + 每个未退休
-worker 的汇报**。
-
-可选的手动探针（在群里输入）：
-
-1. `/health` → 一张卡，每个 agent + router + watchdog 都绿。
-2. `/team` → 每个 agent 的 ♥ 心跳新鲜（< 30 秒）。
-3. `@manager` + 一个任务 → 30 秒内回复，被派单的 worker 发 `say` 卡。
-
-有任何红 → [常见故障](#常见故障)。
+**拆除：** `claudeteam down`（停掉、保留状态）· `claudeteam reset`（连状态一起清）。
 
 ---
 
@@ -235,8 +167,8 @@ worker_to_worker  = true                      # 群里显示 worker 之间的互
 
 ## 每个 agent 的模型后端（凭证 + 端点）
 
-**首次启动这些都不用** —— 3 个默认 agent 跑在你的 Claude Code OAuth 上。只有当你把某个
-agent 切到非 Anthropic 后端时才来看这一节。
+**首次启动这些都不用** —— 默认那两个 agent 跑在你的 Claude Code OAuth 上（复用本机登录）。
+只有当你把某个 agent 切到非 Anthropic 后端时才来看这一节。
 
 适配器是**provider 无关的**——DeepSeek/OpenAI/等等没有任何东西被写死在里面。后端由
 env + config 选定：
@@ -333,6 +265,12 @@ export CLAUDETEAM_STATE_DIR=/path/to/team-b/state && cd /path/to/team-b && claud
 
 ## 常见故障
 
+### `claudeteam feishu connect` 没反应 / 报"已取消"
+
+终端非交互（管道 / 非 TTY）或你按了 Ctrl-C，会得到"已取消（无输入 / 非交互终端）"——在一个
+**可交互的终端**里重跑即可。`--quick` 那条会先打印链接 + 二维码再等你确认；浏览器没自动开
+就手动点终端里那条链接。
+
 ### pane 里 `claude: not found` / `codex: not found`
 
 pane 继承启动它的那个 shell 的 `$PATH`。如果你开了个新终端、忘了
@@ -341,14 +279,8 @@ pane 继承启动它的那个 shell 的 `$PATH`。如果你开了个新终端、
 
 ### claude pane 报 "Not logged in"（macOS host）
 
-每个 pane 有自己的 `~/.claude/.credentials.json` 快照（每 agent 的 home 隔离），它相对
-keychain 可能过期。修法：`claudeteam down && up` 重新落一份。
-
-### 容器 `router` 报 `lark-cli failed (rc=2)` 卡住
-
-catchup 试了 `--as user`，但容器只有 bot OAuth。确保 `CLAUDETEAM_LARK_SEND_AS=bot`
-在 `docker-compose.yml` 的 `environment:` 里（自带的 compose 已经有）：
-`docker compose exec claudeteam env | grep CLAUDETEAM_LARK_SEND_AS`。
+每个 pane 有自己的 `~/.claude/.credentials.json` 快照（每 agent 的 home 隔离），它从你
+本机登录态种出来、相对 keychain 可能过期。修法：`claudeteam down && up` 重新落一份。
 
 ### `router.log` 每 ~120 秒打印 "no live events … rotating subscribe"
 
@@ -392,10 +324,9 @@ claudeteam up
 `state/feishu_app.json`（由 `feishu connect` 写入，0600），`feishu/lark.py:subprocess_env()`
 读它，往 sidecar（入站）和 lark-cli（出站）注入 `FEISHU_APP_ID`/`SECRET` + 一个 tenant
 token。`ls -l state/feishu_app.json`（期望 `-rw-------`）；缺了就重跑
-`claudeteam feishu connect`。Docker 下，`.env` 的 `FEISHU_APP_ID`/`SECRET` **覆盖**这个
-文件（`docker compose exec claudeteam env | grep FEISHU_APP_ID`）。
+`claudeteam feishu connect`。
 
-### `worker_codex` 显示 "pane up but CLI not ready yet"
+### `worker_codex`（或别的 codex agent）显示 "pane up but CLI not ready yet"
 
 Codex 有时开机带一个 "update available" 提示，挡住了 ready 标记：
 

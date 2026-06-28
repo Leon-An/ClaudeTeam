@@ -8,7 +8,7 @@ own their own argv parsing and side effects.
 from __future__ import annotations
 
 import sys
-from typing import Callable
+from typing import Callable, Optional
 
 from claudeteam.commands import (
     init, send, inbox, read, status, log, team, workspace,
@@ -19,7 +19,10 @@ from claudeteam.commands import (
 from claudeteam.util import error_exit
 
 
-CommandHandler = Callable[[list[str]], int | None]
+# Runtime type alias (evaluated at import) — keep it PEP 604-free so the module
+# loads on Python 3.9 too: `int | None` would TypeError there. Annotations
+# elsewhere are fine (they're strings under `from __future__ import annotations`).
+CommandHandler = Callable[[list[str]], Optional[int]]
 
 
 # Subcommand registry, structured as ordered (group_label, [(name, fn)…])

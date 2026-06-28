@@ -69,11 +69,15 @@ model = "sonnet"
 role  = "Claude Code 员工"
 card_color = "green"
 
-[team.agents.worker_codex]
-cli   = "codex-cli"
-model = "gpt-5.5"
-role  = "Codex 员工"
-card_color = "purple"
+# 默认就上面这两个 claude-code —— 装了 claude 就能直接跑，零额外登录（agent 复用你
+# 本地的 claude 登录）。ClaudeTeam 的真正价值是混用多种 agent CLI，但那是【可选】的：
+# 你本机装了哪些、登录了哪些 CLI，就解开下面注释、按需加 worker（codex / gemini / …）。
+# 例（装了 codex 再加；没有就别管它）：
+# [team.agents.worker_codex]
+# cli   = "codex-cli"
+# model = "gpt-5.5"
+# role  = "Codex 员工"
+# card_color = "purple"
 
 # ── [chat.publish]  群里能看到什么消息 ─────────────────────
 # sender→receiver 维度过滤; 角色: user (老板) / manager / worker
