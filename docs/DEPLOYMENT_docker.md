@@ -17,17 +17,28 @@ troubleshooting live in the [Host deploy](DEPLOYMENT.md) guide.
 
 ## Step 1 · Code + credentials in `.env`
 
-There's no browser inside the container, so the scan / console step can't run
-there — the Feishu app credentials come from `.env`:
-
 ```bash
 git clone https://github.com/zylMozart/ClaudeTeam.git && cd ClaudeTeam
 cp .env.example .env
 $EDITOR .env          # set FEISHU_APP_ID + FEISHU_APP_SECRET
-#   No app yet? Register once on a machine with a browser (or a host) via
-#   `claudeteam feishu connect` (or --quick), then copy app_id / app_secret
-#   from state/feishu_app.json here.
 ```
+
+> **No bot/app yet? — `--quick` is the natural Docker default.**
+> `claudeteam feishu connect --quick` is a one-scan PersonalAgent QR — the
+> terminal QR works **inside this headless container**, zero console — so it's the
+> easy path here: it builds the bot app + team group + creds + `chat_id` straight
+> from the container (skip the `.env` creds edit above; see Step 4). The one catch:
+> Feishu won't grant a personal app `im:message.group_msg`, so **groups need @bot**
+> (DMs unaffected). Want the bot to reply in groups **without** an @? That needs the
+> no-flag browser automation, which **can't run in this headless container** — so:
+>
+> 1. **Run `claudeteam feishu connect` (no flag) on a desktop** — on a
+>    Mac/Windows/Linux-desktop box (or a host install) it drives the Feishu console
+>    in a **headed browser** to create + scope + publish a self-built app with
+>    `im:message.group_msg`. Then copy `app_id` / `app_secret` from
+>    `state/feishu_app.json` into `.env` here (and its `chat_id` into
+>    `claudeteam.toml`, Step 4). `--manual` is the same app via console clicks you
+>    do from any browser.
 
 ## Step 2 · Mount sources must exist first (important)
 
@@ -55,11 +66,17 @@ docker compose build && docker compose up -d
 ## Step 4 · Configure + launch inside the container
 
 ```bash
-# creds come from .env, so init uses --no-connect (skips the console flow)
+# no group yet? the easy path runs --quick right in the container (terminal QR;
+# groups then need @bot). It writes both the creds and the group chat_id, so you
+# can skip the init --no-connect + .env/chat_id edits entirely:
+docker compose exec claudeteam claudeteam feishu connect --quick
+
+# OR, if you already set creds in .env (e.g. a self-built app you built on a
+# desktop host for un-@'d groups), init uses --no-connect to skip the connect flow:
 docker compose exec --workdir /data claudeteam claudeteam init --no-connect
 $EDITOR team-data/claudeteam.toml       # set chat_id + tweak agents to the CLIs you have
-#   no group yet? run `claudeteam feishu connect` on a desktop host to create it,
-#   then copy its oc_... here.
+#   for un-@'d groups, build the app on a desktop host with `claudeteam feishu
+#   connect` (no flag) / `--manual`, then copy its oc_... here.
 
 docker compose exec claudeteam claudeteam install-hooks
 docker compose exec claudeteam claudeteam up
@@ -87,6 +104,16 @@ from `claudeteam:dev` and install those, or bind-mount the host binary.
 ---
 
 ## Container-specific failures
+
+### `claudeteam feishu connect` errors / opens no browser in the container
+
+Expected for the **no-flag** connect mode — it browser-automates the Feishu console
+and needs a **headed desktop browser**, which the headless container doesn't have.
+In the container, use `claudeteam feishu connect --quick` instead (terminal QR works
+here; groups then need @bot). Only if you need the bot to reply in groups **without**
+an @: run `claudeteam feishu connect` (no flag) / `--manual` on a **desktop machine /
+host** and bring its `state/feishu_app.json` creds (→ `.env`) + group `chat_id`
+(→ `claudeteam.toml`) into the container. See Step 1.
 
 ### `router` reports `lark-cli failed (rc=2)` and stalls
 

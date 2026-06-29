@@ -22,7 +22,8 @@
 - **node + npx (18+)** —— 跑 `lark-cli`（发消息）+ 飞书 sidecar（注册机器人 + 收事件）。
 - **至少 1 个 agent CLI** —— 装个 `claude` 就够（默认团队全用它）；想混用
   `codex` / `gemini` / `qwen` / … 是**可选**的（见 [适配表](../README_zh.md#多-cli-适配)）。
-- 一个**飞书 / Lark 账号** —— 个人版就能扫码建号；企业租户能解锁"群里免 @"。
+- 一个**飞书 / Lark 账号** —— `--quick` 扫一下就能建号（群里 @ 机器人即可）；想要"群里免 @"
+  就去掉 `--quick`，用浏览器自动化建**企业自建应用**（需桌面浏览器）。
 
 > 💡 agent **复用你本地已有的登录**：`claude` 在本机登录过，团队里的 claude agent 直接拿来
 > 用，**不用再单独登录**。其它 CLI 同理——本机登录过就行。
@@ -67,22 +68,37 @@ role  = "Codex 员工"
 > 数据 / 内容），拷过来改改。`claudeteam reidentify <agent> --print` 能在 `up` 前**预览**某个
 > agent 渲染出来的身份。
 
-## 第 3 步 · 连飞书（点 / 扫一下，建好机器人 + 群）
+## 第 3 步 · 连飞书（扫一下，建好机器人 + 群）
 
 ```bash
-claudeteam feishu connect --quick     # 生成授权链接（自动开浏览器）+ 二维码兜底，点 / 扫一下
+claudeteam feishu connect --quick     # 扫一次码就行，哪台机器都能跑（群里要 @ 机器人）
 ```
 
-确认后飞书**自动建好**：机器人应用 + 团队群（把你拉进去）+ 凭证 + `chat_id`（写回
-`claudeteam.toml`），全程零控制台。命令随后**自查群消息权限** `im:message.group_msg`：
+**`--quick` 最省事**：扫一个二维码、零控制台、**任何机器都能跑**（含无头服务器）。命令会建好
+机器人应用 + 团队群（把你拉进去）+ 凭证 + `chat_id`（写回 `claudeteam.toml`）。唯一代价：个人版
+（PersonalAgent）应用拿不到 `im:message.group_msg`，所以**群里得 @ 机器人**才会回——私聊不受
+影响，想先快速跑通也够用。
 
-- ✅ 拿到了（多数租户都给）→ 群里**不 @ 也能收**，到此结束；
-- ⚠️ 本租户没放行 → 命令提示你：群里 @ 机器人就能用；要群里免 @，改走下面的引导式。
+**想让机器人在群里【免 @】？** 去掉 `--quick`：
+
+```bash
+claudeteam feishu connect             # 浏览器自动建一个「群里免 @」的企业自建应用
+```
+
+不带参数时，它开一个**真实（有界面）浏览器**，驱动飞书控制台**创建 + 授权 + 订阅 + 发布**一个
+持有 `im:message.group_msg` 的企业自建应用——于是机器人**群里不 @ 也能收**。只需扫**一次**登录
+二维码，随后 7 个控制台步骤自动跑完；界面一旦变了就**自动退回 `--manual`**。**需要桌面浏览器**
+（见下方无头服务器说明）。另有 **`--manual`**：控制台一步步手动引导（贴 App ID/Secret、点一键
+授权 deep-link、发版）——浏览器自动化跑不了、或你更想自己点时的最稳兜底。
+
+> ⚠️ **无头服务器**：不带参数的浏览器自动化要**桌面浏览器**，在无头主机上跑不了——要么用
+> `--quick`（群里 @ 机器人），要么先在一台**有桌面的机器**上跑 `claudeteam feishu connect` 建好
+> 应用 + 群，再把凭证（`state/feishu_app.json`）+ `chat_id` 拷到服务器。（无头 + 终端二维码在规划中。）
 
 <details>
-<summary><b>引导式自建应用</b>（只在 <code>--quick</code> 没拿到群权限、而你又要"群里免 @"时才需要）</summary>
+<summary><b><code>--manual</code> 控制台手动引导</b>（浏览器自动化跑不了、或你更想自己点的时候）</summary>
 
-`claudeteam feishu connect`（不带 `--quick`）会在控制台一步步引导你：
+`claudeteam feishu connect --manual` 会在控制台一步步引导你：
 
 1. **建应用** —— 开 <https://open.feishu.cn/app> → 创建企业自建应用 → 加**机器人** →
    复制 **App ID + App Secret**，命令提示时贴回终端。
@@ -95,7 +111,7 @@ claudeteam feishu connect --quick     # 生成授权链接（自动开浏览器�
 </details>
 
 > 想一条命令搞定第 2+3 步（用默认团队、不改 agent）？`claudeteam init --quick`——写默认配置 +
-> 直接连飞书。
+> 扫码连飞书（想群里免 @ 就用 `claudeteam init`，走浏览器自动化）。
 
 ## 第 4 步 · 起团队 + 验证
 
@@ -295,8 +311,10 @@ cd /path/to/team-b && claudeteam up
 ### `claudeteam feishu connect` 没反应 / 报"已取消"
 
 终端非交互（管道 / 非 TTY）或你按了 Ctrl-C，会得到"已取消（无输入 / 非交互终端）"——在一个
-**可交互的终端**里重跑即可。`--quick` 那条会先打印链接 + 二维码再等你确认；浏览器没自动开
-就手动点终端里那条链接。
+**可交互的终端**里重跑即可。不带参数的（浏览器自动化）模式要**桌面浏览器**，无头服务器上跑不了
+——在那种机器上请到一台有桌面的机器上跑，再把 `state/feishu_app.json` + `chat_id` 拷过去
+（或改用不需要浏览器的 `--quick` / `--manual`）。控制台界面在它脚下变了，它会自动退回
+`--manual`；你也可以直接指定 `--manual` 自己点一遍。`--quick` 会先打印二维码再等你扫。
 
 ### pane 里 `claude: not found` / `codex: not found`
 

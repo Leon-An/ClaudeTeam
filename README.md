@@ -59,14 +59,19 @@ Prerequisites, install, and the full step-by-step (host & Docker) live in
 
 ```bash
 claudeteam init --no-connect       # write claudeteam.toml (default: manager + 1 claude worker)
-claudeteam feishu connect --quick  # tap/scan once → auto-creates the bot app + your team group
+claudeteam feishu connect --quick  # one scan, runs anywhere — builds the bot + your team group (you @ the bot in groups)
 claudeteam install-hooks
 claudeteam up                      # start the crew; the manager runs a roll-call in your group
 ```
 
-Then say `你好` in the group (no `@` needed — plain messages reach the manager). Agents **reuse
-your existing local CLI login**, and green `health` only means infra is up — the real signal is
-the manager's roll-call.
+Then say `你好` in the group (no `@` needed for DMs; **in `--quick` groups you @ the bot**).
+Agents **reuse your existing local CLI login**, and green `health` only means infra is up — the
+real signal is the manager's roll-call.
+
+> Want the bot to reply in groups _without_ an @? Drop `--quick`: `claudeteam feishu connect`
+> browser-builds a self-built app holding `im:message.group_msg`. It needs a desktop browser —
+> on a headless server run it on a desktop and copy the creds over — see
+> [Feishu bot setup](#feishu-bot-setup).
 
 ---
 
@@ -120,13 +125,29 @@ role = "数据分析员工"
 
 ## Feishu bot setup
 
-`claudeteam feishu connect --quick` registers a bot, auto-creates your team group, and saves
-the `chat_id` — a single tap/scan, zero console. It requests the group-message scope
-(`im:message.group_msg`) too, which lands on most tenants → the group works **without `@`-ing the
-bot**; the command verifies and tells you if your tenant didn't grant it. For a tenant that
-doesn't, the guided self-built-app flow (`claudeteam feishu connect`) gets it for sure.
+`claudeteam feishu connect` has **three modes** — all create the bot, auto-create your team group,
+and save the `chat_id`:
 
-→ Full walkthrough (both paths, scopes, events, publishing): **[docs/DEPLOYMENT.md → Step 3](docs/DEPLOYMENT.md)**.
+- **`claudeteam feishu connect --quick`** (the easy path) — one-scan **PersonalAgent** device-flow
+  QR, **zero console**, and it **runs on any machine** (incl. headless servers / Docker containers).
+  It builds the bot app + team group (invites you) + creds + `chat_id`. The one catch: a PersonalAgent
+  app can't get `im:message.group_msg`, so in **groups you `@` the bot** to get a reply — DMs are
+  unaffected, and it's fine to start here.
+- **`claudeteam feishu connect`** (no flag) — for the bot to reply in groups **without** an @:
+  browser-automates a **self-built app** (企业自建应用). It opens a real (headed) browser and drives
+  the Feishu developer console to create the app, import the permission scopes, subscribe the message
+  event, and **publish** it. The result holds `im:message.group_msg`, so the bot **replies to un-@'d
+  group messages**. You scan the login QR **once**; the 7 console stages auto-run; on any console-UI
+  change it **falls back to `--manual`**. Needs a desktop browser.
+- **`--manual`** — the same self-built app, **guided step-by-step** in the console (paste App
+  ID/Secret, click a one-click permission deep-link, publish). No browser automation; the robust
+  fallback.
+
+> **Headless?** `--quick` works headless. The no-flag browser automation needs a desktop browser, so
+> on a headless server run `connect` on a desktop machine and copy the saved creds
+> (`state/feishu_app.json`) + `chat_id` over.
+
+→ Full walkthrough (all modes, scopes, events, publishing): **[docs/DEPLOYMENT.md → Step 3](docs/DEPLOYMENT.md)**.
 
 Under the hood: a thin sidecar at `scripts/feishu_channel/` over the official
 [`@larksuite/channel`](https://www.npmjs.com/package/@larksuite/channel) SDK, used for both

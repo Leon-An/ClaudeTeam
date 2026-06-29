@@ -16,16 +16,24 @@
 
 ## 第 1 步 · 代码 + 凭证写进 `.env`
 
-容器里没浏览器，扫码 / 控制台那步在容器内做不了，所以飞书 App 的凭证走 `.env`：
-
 ```bash
 git clone https://github.com/zylMozart/ClaudeTeam.git && cd ClaudeTeam
 cp .env.example .env
 $EDITOR .env          # 填 FEISHU_APP_ID + FEISHU_APP_SECRET
-#   还没有 App？在一台能开浏览器的机器（或一个 host）上跑一次
-#   `claudeteam feishu connect`（或 --quick）注册，把 state/feishu_app.json 里的
-#   app_id / app_secret 复制过来。
 ```
+
+> **还没有 bot/App？——`--quick` 是 Docker 下最自然的选择。**
+> `claudeteam feishu connect --quick` 是一次扫码的 PersonalAgent 二维码 —— 终端二维码在
+> **这个无头容器里就能用**、零控制台 —— 所以这里走它最省事：直接在容器里建好机器人应用 +
+> 团队群 + 凭据 + `chat_id`（上面的 `.env` 凭证编辑可省，见第 4 步）。唯一的代价：飞书不会给
+> 个人应用 `im:message.group_msg`，所以**群里要 @bot**（私聊不受影响）。想让机器人群里**不 @**
+> 也能回？那要靠不带 flag 的浏览器自动化，而它**在这个无头容器里跑不起来** —— 所以：
+>
+> 1. **在桌面机上跑 `claudeteam feishu connect`（不带 flag）** —— 在一台 Mac/Windows/Linux
+>    桌面机（或某个 host 安装）上，它用**有界面的浏览器**驱动飞书控制台创建 + 配权限 + 发版
+>    一个带 `im:message.group_msg` 的自建应用。再把 `state/feishu_app.json` 里的 `app_id` /
+>    `app_secret` 复制进这里的 `.env`（`chat_id` 复制进 `claudeteam.toml`，见第 4 步）。
+>    `--manual` 是同一个自建应用，只是控制台点击改成你自己在任意浏览器里手点。
 
 ## 第 2 步 · 挂载源要先存在（重要）
 
@@ -51,11 +59,16 @@ docker compose build && docker compose up -d
 ## 第 4 步 · 容器内配置 + 起团队
 
 ```bash
-# 凭证来自 .env，所以 init 用 --no-connect（跳过控制台引导）
+# 还没有群？最省事就在容器里跑 --quick（终端二维码；群里随后要 @bot）。它会把凭证和群
+# chat_id 都写好，所以可以完全跳过下面的 init --no-connect 和 .env/chat_id 编辑：
+docker compose exec claudeteam claudeteam feishu connect --quick
+
+# 或者，如果你已经在 .env 里填了凭证（比如为了群里免 @ 在桌面机上建好的自建应用），
+# init 就用 --no-connect 跳过 connect 引导：
 docker compose exec --workdir /data claudeteam claudeteam init --no-connect
 $EDITOR team-data/claudeteam.toml       # 设 chat_id + 按你有的 CLI 调整 agent
-#   还没有群？在一台能开浏览器的机器上跑 `claudeteam feishu connect` 建群，
-#   把输出的 oc_... 填进来。
+#   想群里免 @，就在桌面机/host 上跑 `claudeteam feishu connect`（不带 flag）/ `--manual`
+#   建好应用，把输出的 oc_... 填进来。
 
 docker compose exec claudeteam claudeteam install-hooks
 docker compose exec claudeteam claudeteam up
@@ -80,6 +93,14 @@ docker compose exec claudeteam tmux attach -t ClaudeTeam   # 看 pane；Ctrl+B d
 ---
 
 ## 容器专属故障
+
+### `claudeteam feishu connect` 在容器里报错 / 不弹浏览器
+
+**不带 flag** 的 connect 模式属正常 —— 它要用浏览器自动化操作飞书控制台，需要**有界面的桌面
+浏览器**，无头容器没有。在容器里改用 `claudeteam feishu connect --quick`（终端二维码在这能用；
+群里随后要 @bot）。只有当你需要机器人群里**不 @** 也能回时，才在**桌面机 / host** 上跑不带 flag
+的 `claudeteam feishu connect` / `--manual`，再把它的 `state/feishu_app.json` 凭证（→ `.env`）+
+群 `chat_id`（→ `claudeteam.toml`）带进容器。见第 1 步。
 
 ### `router` 报 `lark-cli failed (rc=2)` 卡住
 

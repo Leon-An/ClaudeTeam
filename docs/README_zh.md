@@ -58,13 +58,17 @@
 
 ```bash
 claudeteam init --no-connect       # 写 claudeteam.toml（默认：manager + 1 个 claude worker）
-claudeteam feishu connect --quick  # 点 / 扫一下，自动建好机器人应用 + 你的团队群
+claudeteam feishu connect --quick  # 扫一次码、哪台机器都能跑——建好机器人 + 你的团队群（群里要 @bot）
 claudeteam install-hooks
 claudeteam up                      # 起团队；主管在群里发起全员点名
 ```
 
-之后在群里直接发 `你好`（不用 `@`）。Agent **复用你本地已有的 CLI 登录**；`health` 绿只代表
-基础设施起了，真正的判据是主管那轮**全员点名**。
+之后在群里直接发 `你好`（私聊不用 `@`；**`--quick` 模式下群里要 @bot**）。Agent **复用你本地已有
+的 CLI 登录**；`health` 绿只代表基础设施起了，真正的判据是主管那轮**全员点名**。
+
+> 想让机器人群里**不 @** 也能回？去掉 `--quick`：`claudeteam feishu connect` 会用浏览器建一个带
+> `im:message.group_msg` 的自建应用。它要有桌面浏览器 —— 无头服务器上就在桌面机器上跑、再把凭据
+> 拷过去 —— 见[飞书机器人配置](#飞书机器人配置)。
 
 ---
 
@@ -118,12 +122,23 @@ role = "数据分析员工"
 
 ## 飞书机器人配置
 
-`claudeteam feishu connect --quick` 注册机器人、自动建好你的团队群、写好 `chat_id` —— 点 / 扫
-一下，零控制台。它会一并申请群消息权限（`im:message.group_msg`），多数租户都能拿到 → 群里
-**不 @ 也能收**；命令会自查、没拿到会提示你。租户没放行的，走引导式自建应用
-（`claudeteam feishu connect`）一定拿得到。
+`claudeteam feishu connect` 有**三种模式** —— 都会建机器人、自动建好你的团队群、写好 `chat_id`：
 
-→ 完整步骤（两条路、权限、事件、发版）：**[docs/DEPLOYMENT_zh.md → 第 3 步](DEPLOYMENT_zh.md)**。
+- **`claudeteam feishu connect --quick`**（最省事的路）—— 一次扫码的**个人版应用**（device-flow
+  二维码），**零控制台**，而且**哪台机器都能跑**（含无头服务器 / Docker 容器）。它建好机器人应用 +
+  团队群（把你拉进群）+ 凭据 + `chat_id`。唯一的代价：个人版应用拿不到 `im:message.group_msg`，所以
+  **群里要 @bot** 才会回 —— 私聊不受影响，先从这里起步完全可以。
+- **`claudeteam feishu connect`**（不带 flag）—— 想让机器人群里**不 @** 也能回，就用它：浏览器自动化
+  建**自建应用**（企业自建应用）。它开一个真实（有界面的）浏览器，驱动飞书开发者后台创建应用、导入
+  权限 scope、订阅消息事件、并**发版**。成品带 `im:message.group_msg`，所以机器人**群里不 @ 也能回**。
+  你只**扫一次**登录码，7 个控制台阶段自动跑；撞上后台改版会**自动回退到 `--manual`**。需要桌面浏览器。
+- **`--manual`** —— 同样是自建应用，但在控制台里**一步步手动引导**（粘 App ID/Secret、点一键授权
+  深链、发版）。无浏览器自动化；最稳的兜底。
+
+> **无头环境？** `--quick` 在无头环境照样能跑。不带 flag 的浏览器自动化要桌面浏览器，所以无头服务器
+> 上就在桌面机器跑 `connect`、再把存好的凭据（`state/feishu_app.json`）+ `chat_id` 拷过去。
+
+→ 完整步骤（全部模式、权限、事件、发版）：**[docs/DEPLOYMENT_zh.md → 第 3 步](DEPLOYMENT_zh.md)**。
 
 底层：`scripts/feishu_channel/` 下一个薄薄的 sidecar 包了官方
 [`@larksuite/channel`](https://www.npmjs.com/package/@larksuite/channel) SDK，注册和 WebSocket

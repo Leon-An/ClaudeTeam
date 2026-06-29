@@ -26,8 +26,9 @@ Install these (the bits `pip` can't):
 - **≥ 1 agent CLI** — `claude` alone is enough (the default team uses only it);
   mixing in `codex` / `gemini` / `qwen` / … is **optional** (see the
   [adapter table](../README.md#multi-cli-adapter)).
-- A **Feishu / Lark account** — a personal one can scan-register; an enterprise
-  tenant unlocks "un-@'d in groups".
+- A **Feishu / Lark account** — `--quick` scan-registers anywhere (you @ the bot in
+  groups); for "un-@'d in groups", drop `--quick` and let the browser automation build an
+  enterprise self-built app (needs a desktop browser).
 
 > 💡 Agents **reuse your existing local login**: if `claude` is logged in on this
 > machine, the claude agents use it directly — **no separate login**. Same for any
@@ -76,24 +77,42 @@ role  = "Codex worker"
 > and tweak. `claudeteam reidentify <agent> --print` previews an agent's rendered
 > identity before `up`.
 
-## Step 3 · Connect Feishu (tap/scan once → bot + group built)
+## Step 3 · Connect Feishu (scan once → bot + group built)
 
 ```bash
-claudeteam feishu connect --quick     # prints an auth link (auto-opens browser) + a QR; tap/scan
+claudeteam feishu connect --quick     # one scan, runs anywhere (you @ the bot in groups)
 ```
 
-On confirm, Feishu **auto-creates** the bot app + team group (invites you) + creds
-+ `chat_id` (written back to `claudeteam.toml`), zero console. The command then
-**checks the group-message scope** `im:message.group_msg`:
+**`--quick` is the easy path**: scan one QR, zero console, **runs on any machine** (incl.
+headless servers). It creates the bot app + team group (invites you) + creds + `chat_id`
+(written back to `claudeteam.toml`). The one catch: a **PersonalAgent** app can't get
+`im:message.group_msg`, so **in groups you @ the bot** to get a reply — DMs are unaffected,
+and it's fine to start here.
 
-- ✅ granted (most tenants) → the group works **without @-ing the bot**; you're done.
-- ⚠️ your tenant dropped it → the command tells you: `@`-ing the bot in groups
-  works; for un-@'d groups, use the guided flow below.
+**Want the bot to reply in groups _without_ an @?** Drop `--quick`:
+
+```bash
+claudeteam feishu connect             # browser-builds an enterprise app that needs no @
+```
+
+With no flag it opens a **real (headed) browser** and drives the Feishu console to create +
+scope + subscribe + **publish** an enterprise self-built app holding `im:message.group_msg`
+— then the bot **replies to un-@'d group messages**. Scan the login QR **once**; the 7
+console stages auto-run; on any console-UI change it **falls back to `--manual`**. Needs a
+**desktop browser** (see the headless note below). There's also **`--manual`** — the
+step-by-step guided console flow (paste App ID/Secret, click the one-click permission
+deep-link, publish) — the robust fallback when the browser automation can't run.
+
+> ⚠️ **Headless servers:** the no-flag browser automation needs a desktop browser, so it
+> **can't run on a headless host** — either use `--quick` (you @ the bot in groups), or run
+> `claudeteam feishu connect` on a **desktop machine** to build the app + group, then copy
+> the saved creds (`state/feishu_app.json`) + `chat_id` into the server's config. (Headless +
+> terminal-QR is planned.)
 
 <details>
-<summary><b>Guided self-built app</b> (only if <code>--quick</code> didn't get the group scope and you want un-@'d groups)</summary>
+<summary><b><code>--manual</code> guided console flow</b> (if the browser automation can't run or you'd rather click it yourself)</summary>
 
-`claudeteam feishu connect` (without `--quick`) walks you through the console:
+`claudeteam feishu connect --manual` walks you through the console:
 
 1. **Create the app** — open <https://open.feishu.cn/app> → 创建企业自建应用 → add
    the **机器人 (bot)** capability → copy the **App ID + App Secret**, paste when prompted.
@@ -106,7 +125,8 @@ On confirm, Feishu **auto-creates** the bot app + team group (invites you) + cre
 </details>
 
 > Want one command for Steps 2+3 (default team, no agent edits)?
-> `claudeteam init --quick` — writes the default config and connects Feishu in one go.
+> `claudeteam init --quick` — writes the default config and scan-connects Feishu in one go
+> (use `claudeteam init` for the no-@ browser flow).
 
 ## Step 4 · Launch + verify
 
@@ -322,8 +342,12 @@ pane; the boss can also send them — they zero-LLM dispatch through the router)
 
 A non-interactive terminal (piped / non-TTY) or a Ctrl-C gives "cancelled (no
 input / non-interactive terminal)" — re-run it in an **interactive** terminal.
-`--quick` prints the link + QR before waiting for your confirm; if the browser
-didn't auto-open, click the link the terminal printed.
+The DEFAULT (browser-automated) mode needs a **desktop browser**, so it can't run
+on a headless server — there, run it on a desktop machine and copy
+`state/feishu_app.json` + `chat_id` over (or use `--quick` / `--manual`, which need
+no browser). If the console UI changed under it, the default mode falls back to
+`--manual`; you can also force `--manual` to click through it yourself. `--quick`
+prints its QR before waiting for your scan.
 
 ### `claude: not found` / `codex: not found` in a pane
 
