@@ -54,7 +54,15 @@ function openBrowser(url) {
 // `addons` (additive — Feishu can't drop base permissions). Tunable here:
 //   im:message:send_as_bot — crews post cards into the group as the bot
 //   im:message             — read inbound message content
-//   im:message.group_msg   — deliver un-@'d group chatter (crews talk freely)
+//   im:message.group_msg   — deliver un-@'d group chatter (crews talk freely).
+//                            SENSITIVE: granted on personal editions (owner==admin
+//                            auto-approves) so un-@'d works there, but a stricter
+//                            tenant may drop it on a one-scan --quick app — which is
+//                            why we ALSO request the non-sensitive fallback:
+//   im:message.group_at_msg:readonly — deliver @'d group messages. So that even when
+//                            group_msg is dropped, @bot-in-groups still works instead
+//                            of a silently-dead group.
+//   im:message.p2p_msg:readonly — deliver 1:1 DMs to the bot
 //   im:chat                — create the team group + invite the owner
 //   application:...self_manage — read the app's own scopes (the `scopes` verify)
 //                            + resolve its owner to invite (create-group); a fresh
@@ -63,6 +71,8 @@ const TENANT_SCOPES = [
   "im:message:send_as_bot",
   "im:message",
   "im:message.group_msg",
+  "im:message.group_at_msg:readonly",
+  "im:message.p2p_msg:readonly",
   "im:chat",
   "application:application:self_manage",
 ];

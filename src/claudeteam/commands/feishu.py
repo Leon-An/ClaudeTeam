@@ -16,8 +16,11 @@ team group. Three modes:
     scope incl. `im:message.group_msg`). The robust fallback; no Playwright.
 
   • `--quick` — **one-scan PersonalAgent** (`@larksuite/channel` device-flow QR).
-    Zero console clicks, but Feishu won't grant a PersonalAgent app
-    `im:message.group_msg`, so in GROUPS users must @ the bot. Fine for DM-only use.
+    Zero console clicks. The addons request BOTH `im:message.group_msg` (un-@'d)
+    and `im:message.group_at_msg` (@'d). Whether the *sensitive* group_msg lands is
+    tenant-dependent: a **personal edition** (you're the admin, so it auto-approves)
+    gets it → even un-@'d group messages work; a stricter tenant may drop it →
+    @'d-only via group_at_msg. `connect` verifies after register + tells you which.
 
 Both persist App creds → `state/feishu_app.json` (0600) + `chat_id` →
 `claudeteam.toml`, so `claudeteam up` then just works. The sidecar's machine
@@ -73,8 +76,8 @@ _REQUIRED_SCOPES = frozenset({
 _DEEPLINK_SCOPES = (
     "im:message:send_as_bot",
     "im:message.group_msg",
-    "im:message.group_at_msg",
-    "im:message.p2p_msg",
+    "im:message.group_at_msg:readonly",
+    "im:message.p2p_msg:readonly",
     "im:chat",
     "im:resource",
     "application:application:self_manage",
@@ -295,20 +298,22 @@ def _connect_quick(argv: list[str]) -> int:
                         owner_open_id=owner, tenant=tenant)
     print(f"✅ 应用已注册并保存凭据：{app_id}")
 
-    # --quick DOES request im:message.group_msg via the register `addons`; whether
-    # it lands is tenant-dependent (Feishu "gray-scale"). So this is NOT "can't" —
-    # it's verify-and-tell: ✅ granted (many tenants) → un-@'d group works; ⚠️ the
-    # tenant dropped the addon → @bot or switch to the guided self-built app.
+    # The addons request BOTH group_msg (un-@'d) and group_at_msg (@'d). Which the
+    # tenant grants is the open question: a personal edition (owner==admin) auto-
+    # approves the sensitive group_msg → un-@'d works; a stricter tenant may keep
+    # only group_at_msg → @'d-only. The scope-read returns a broad template bundle,
+    # so it's a hint not proof — the real check is a live group message after `up`.
     granted = _granted_scopes(app_id, app_secret)
-    if granted is None:
-        print("ℹ️  暂时读不到已授权权限（个人版要发版/审批后才能自查）——先继续建群。"
-              "若群里【不 @】收不到消息，说明本租户没放行一键授权的 im:message.group_msg，"
-              "改用 `claudeteam feishu connect`（自建应用）即可群里免 @。")
-    elif "im:message.group_msg" not in granted:
-        print("⚠️  本租户没给一次扫码授予 im:message.group_msg（addons 被丢弃）：群里**要 @bot**"
-              "才收得到（斜杠命令同理）。要群里免 @，改用 `claudeteam feishu connect`（自建应用）。")
+    if granted and "im:message.group_msg" in granted:
+        print("✅ 已申请到免 @ 的 im:message.group_msg + @ 的 group_at_msg。个人版一般免 @ 也能收——"
+              "`up` 后群里发条【不 @】的试试；收不到就是本租户没真放行敏感权限，那就 @bot，"
+              "或改用 `claudeteam feishu connect`（自建应用）拿稳的免 @。")
+    elif granted and "im:message.group_at_msg:readonly" in granted:
+        print("✅ 已授予 @ 的 im:message.group_at_msg → 群里 **@bot** 能收（没拿到免 @ 的 "
+              "im:message.group_msg；要免 @ 改用 `claudeteam feishu connect` 自建应用）。")
     else:
-        print("✅ 群消息权限到位（含 im:message.group_msg → 群里不 @ 也能收，一次扫码全搞定）")
+        print("ℹ️  暂时读不到已授权权限——先建群。`up` 后群里发条试试；@bot 都收不到再改用 "
+              "`claudeteam feishu connect`（自建应用）。")
     return _create_group_and_persist(app_id, app_secret, group_name, owner=owner)
 
 
