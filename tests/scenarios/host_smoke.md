@@ -16,27 +16,31 @@
 > 发消息，再用 `chat-messages-list` / `state/facts/inbox.json` / `tmux capture-pane`
 > 验响应；§3–§7 全是你能自己跑的具体命令。但有 **3 步你做不了、要交给你的人做一次**：
 >
-> 1. **扫码注册 bot + 建群**——`claudeteam feishu connect`（`claudeteam init`
->    会自动跑），在飞书里扫一次码即可建 App、自动建群并把你拉进去、写好
->    `state/feishu_app.json` + `chat_id`。见 [feishu_connect.md](feishu_connect.md)。
+> 1. **注册 bot + 建群**——`claudeteam feishu connect --quick`（`claudeteam init` 会自动跑）。
+>    默认**扫一次登录码**就建好 bot 应用 + 团队群、把你拉进去、写好
+>    `state/feishu_app.json` + `chat_id`，零控制台、任意机器（含无界面服务器）都能跑。
+>    群里免 @ 能否收随租户而定（个人版免 @ 也能收，严格租户则群里 @bot）。要跨租户**保证**
+>    群里免 @ 也能收，改走无参的浏览器自动建自建应用（持 `im:message.group_msg`，需桌面浏览器）。
+>    见 [feishu_connect.md](feishu_connect.md)。
 > 2. **用户 OAuth（§2）**——要在浏览器点「授权」，agent 代不了。
 > 3. **各 agent CLI 登录**——`claude` / `codex` 等要有登录好的账号（或按
 >    [agent_auth 的 `.env` 方案](slash_matrix.md) 配长期 token / api key）。
 >
 > 这 3 步真人做完一次后，下面整条龙你自己驱动。**完整旅程**：先按
 > [`docs/DEPLOYMENT.md`](../../docs/DEPLOYMENT.md) 装好（含 `claudeteam feishu
-> connect` 扫码注册 bot，见 [feishu_connect.md](feishu_connect.md)）→ 再从本篇
-> §0 起跑。
+> connect` 扫一次登录码注册 bot，见 [feishu_connect.md](feishu_connect.md)）→ 再从
+> 本篇 §0 起跑。
 
 ## 适用范围
 
 - 平台：macOS（Apple Silicon 或 Intel）。Linux 主机大部分通用，但 keychain 部分要换成文件路径
 - 已装：Python 3.10+（macOS 上推荐 `/opt/homebrew/bin/python3.14`）、tmux、node + npx、`claude` 或 `codex` 在 PATH 中
-- 已跑：`claudeteam feishu connect`（扫码注册 bot + 自动建群），凭证落在
-  `state/feishu_app.json`、`chat_id` 已写进 `claudeteam.toml`；事件入站走
-  `scripts/feishu_channel/sidecar.js run`（官方 WebSocket）。详见
+- 已跑：`claudeteam feishu connect --quick`（默认：扫一次登录码 → 建 bot 应用 + 建群），
+  凭证落在 `state/feishu_app.json`、`chat_id` 已写进 `claudeteam.toml`；事件入站走
+  `scripts/feishu_channel/sidecar.js run`（官方 WebSocket）。要跨租户保证群里免 @ 也能收，
+  改走无参的浏览器自动建自建应用（持 `im:message.group_msg`，需桌面浏览器）。详见
   [feishu_connect.md](feishu_connect.md)
-- 机器人已在目标群、你（扫码人）也在群里
+- 机器人已在目标群、你（注册人）也在群里
 
 ## 0. 前置环境变量（每次新开终端都要设）
 

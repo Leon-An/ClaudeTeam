@@ -120,10 +120,10 @@ DROP `bot_self`，避免回声循环。
 
 本机部署不走容器路径，而是依赖 macOS keychain。两套机制：
 
-1. **bot 凭证（App ID/Secret）**：`claudeteam feishu connect` 扫码后写进
-   `state/feishu_app.json`（0600）；出站发卡靠 `feishu/lark.py:subprocess_env()`
-   从这个文件注入 `FEISHU_APP_ID/SECRET` + tenant token。见
-   [feishu_connect.md](feishu_connect.md)
+1. **bot 凭证（App ID/Secret）**：`claudeteam feishu connect --quick`（默认：扫一次登录码 →
+   建 bot 应用 + 团队群）把 App ID/Secret 写进 `state/feishu_app.json`（0600）；
+   出站发卡靠 `feishu/lark.py:subprocess_env()` 从这个文件注入
+   `FEISHU_APP_ID/SECRET` + tenant token。见 [feishu_connect.md](feishu_connect.md)
 2. **user 凭证**（用于 `--as user` 模拟用户发消息）：keychain 里 service
    `lark-cli-credentials`，account `<user_open_id>`。设备授权流程见
    [host_smoke.md](host_smoke.md) 第 2 节

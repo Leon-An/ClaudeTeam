@@ -20,8 +20,10 @@
 
 → **[feishu_connect.md](feishu_connect.md)**
 
-一次扫码（`claudeteam init` 自动跑 `feishu connect`）建好飞书 App + 团队群 +
-落凭证，并验证 `sidecar.js run` 事件入站通了。host_smoke 默认你已跑过本篇。
+默认走 `claudeteam feishu connect --quick`（`claudeteam init` 自动跑 `feishu connect`）：
+扫一次登录码 → 建 bot 应用 + 团队群 + 落凭证，并验证 `sidecar.js run` 事件入站通了
+（群里实发一条 manager 能回；免 @ 与否随租户而定）。想跨租户保证群里免 @ 也能收，走
+浏览器自动建的自建应用（持 `im:message.group_msg`，需桌面浏览器）。host_smoke 默认你已跑过本篇。
 
 ## 入口：刚部署完想 1 分钟过一遍
 
