@@ -21,13 +21,15 @@ isn't running (use `up`).
 from __future__ import annotations
 
 from claudeteam.runtime import config, lifecycle, tmux
-from claudeteam.util import error_exit, usage_error, warn
+from claudeteam.util import error_exit, maybe_print_help, usage_error, warn
 
 
 USAGE = "usage: claudeteam restart <agent>"
 
 
 def main(argv: list[str]) -> int:
+    if maybe_print_help(argv, USAGE):
+        return 0
     if len(argv) < 1:
         return usage_error(USAGE)
     agent = argv[0]

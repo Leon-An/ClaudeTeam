@@ -290,11 +290,25 @@ async function scrollToBottom(page) {
 async function clickAnyButton(scope, names, opts = {}) {
   const timeout = opts.timeout || 8000;
   let lastErr;
+  // Proven path FIRST (don't regress what works): accessible-role button.
   for (const name of names) {
     try {
       await scope.getByRole('button', { name }).first().click({ timeout });
       return name;
     } catch (e) { lastErr = e; }
+  }
+  // Multi-strategy fallbacks (idea borrowed from Hoper-J/feishu-bot-bootstrap):
+  // Feishu frequently renders a "button" as a non-semantic <div>/<span>, which
+  // getByRole('button') misses. Try exact text, then a clickable-tag :has-text,
+  // so a relabel-to-div doesn't hard-fail when the visible text is unchanged.
+  for (const name of names) {
+    for (const loc of [
+      scope.getByText(name, { exact: true }).first(),
+      scope.locator(`:is([role="button"],a,span,div):has-text("${name}")`).last(),
+    ]) {
+      try { await loc.click({ timeout: 2500 }); return name; }
+      catch (e) { lastErr = e; }
+    }
   }
   throw lastErr || new Error(`no button matched any of: ${names.join(' / ')}`);
 }
@@ -609,6 +623,10 @@ async function stage_publish(page, _ctx, state) {
   }
   await page.waitForTimeout(6000);  // form lazy-renders; 1s isn't enough
   await scrollToBottom(page);
+  // Detect with an UNSCOPED Save (at this point the data-range dialog isn't
+  // open yet, so there's exactly one Save — isDisabled() is reliable). The
+  // CLICK below is scoped to the page rail to dodge a strict 2-match if the
+  // dialog is still open.
   const pageSave = page.getByRole('button', { name: 'Save', exact: true });
   if (await pageSave.isDisabled().catch(() => false)) {
     log('  Save disabled — running data-range reconfigure subroutine');
@@ -616,44 +634,56 @@ async function stage_publish(page, _ctx, state) {
     // link visual, hence using getByRole('button', { name: 'Configure' }))
     await page.getByRole('button', { name: 'Configure', exact: true }).first().click();
     await page.waitForTimeout(2000);
-    // Side dialog opens. There may be multiple unconfigured tabs in the
-    // sidebar — Contacts is usually pre-configured, others (e.g.
-    // Organization-Resources-Member and Department) need manual config.
-    // Loop: while sidebar has any unconfigured tab (red dot), enter that
-    // tab → inner Configure → All → inner Save.
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const dialog = page.locator('[role="dialog"]').first();
-      // Has the right pane shown the "Not configured" red badge?
-      const needsConfig = await dialog.getByText('Not configured', { exact: true })
-        .first().isVisible({ timeout: 1000 }).catch(() => false);
-      if (!needsConfig) break;
-      // Inner Configure → edit mode
-      await dialog.getByRole('button', { name: 'Configure', exact: true }).first()
-        .click({ timeout: 5000 });
-      await page.waitForTimeout(1500);
-      // Pick "All" radio (default is Filter, which stays Save-disabled)
-      await dialog.getByText('All', { exact: true }).first().click();
+    // The dialog lists scope GROUPS in a left rail as
+    // `.privilege-left__menu-item--selectable` (confirmed from a DOM dump).
+    // Configure EVERY group rather than guessing red-dots: click each tab →
+    // pick its data range = "All" → Save. Re-saving an already-configured
+    // group is a harmless no-op, so iterating all is robust + simple.
+    const drDialog = page.locator('[role="dialog"]').first();
+    const tabs = drDialog.locator('.privilege-left__menu-item--selectable');
+    const tabCount = await tabs.count().catch(() => 0);
+    log(`  data-range: configuring ${tabCount} scope group(s)`);
+    for (let i = 0; i < tabCount; i++) {
+      await tabs.nth(i).click({ timeout: 4000 }).catch(() => {});
       await page.waitForTimeout(1000);
-      // Inner Save
-      await dialog.getByRole('button', { name: 'Save', exact: true }).click();
-      await page.waitForTimeout(2500);
-      // If sidebar has another red-dotted tab, click it; otherwise the
-      // dialog will auto-close on the next tick.
-      const nextRedTab = dialog.locator('div[class*="tab"], div[class*="sidebar"]')
-        .filter({ has: page.locator('[class*="red"], [class*="error"], [class*="danger"]') })
-        .first();
-      if (await nextRedTab.isVisible({ timeout: 500 }).catch(() => false)) {
-        await nextRedTab.click().catch(() => {});
-        await page.waitForTimeout(1500);
+      // Some groups open in a view-mode with an inner Configure — try, optional.
+      await drDialog.getByRole('button', { name: 'Configure', exact: true }).first()
+        .click({ timeout: 1500 }).catch(() => {});
+      await page.waitForTimeout(800);
+      // Select "All" for EVERY data-range group in this tab — a tab can list
+      // MULTIPLE groups (e.g. Member + Department), each with its own All /
+      // Filter radio; leaving any one on "Filter" (empty form) keeps the
+      // page-level Save disabled.
+      // Use Playwright's .check() on the real <input type="radio"> inside each
+      // "All" wrapper — the canonical radio select (clicks + verifies checked),
+      // far more reliable than clicking the <label>. force bypasses the
+      // custom-UI visibility. Every "All" group in the tab gets checked.
+      const allInputs = drDialog.locator('.ud__radio__wrapper')
+        .filter({ hasText: /^All$/ }).locator('input[type="radio"]');
+      const nAll = await allInputs.count().catch(() => 0);
+      for (let k = 0; k < nAll; k++) {
+        await allInputs.nth(k).check({ force: true, timeout: 2500 }).catch(() => {});
+        await page.waitForTimeout(250);
       }
+      await page.waitForTimeout(400);
+      // Save this group (the dialog's own size-sm Save).
+      await drDialog.getByRole('button', { name: 'Save', exact: true }).first()
+        .click({ timeout: 4000 }).catch(() => {});
+      await page.waitForTimeout(1500);
     }
-    // Close side dialog if still open
+    // Close the dialog so only the page-level Save remains (avoids the strict
+    // "2 Save buttons" match on the page Save below).
     await page.keyboard.press('Escape').catch(() => {});
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(1000);
+    await drDialog.getByRole('button', { name: 'Close' }).first()
+      .click({ timeout: 1000 }).catch(() => {});
+    await page.waitForTimeout(1000);
     await scrollToBottom(page);
   }
-  // Now page-level Save should be enabled
-  await pageSave.click({ timeout: 10000 });
+  // Now page-level Save should be enabled. Scope the click to the page rail so
+  // a still-open data-range dialog's Save can't trigger a strict 2-match.
+  await page.locator('#app-layout-main')
+    .getByRole('button', { name: 'Save', exact: true }).first().click({ timeout: 10000 });
   await page.waitForTimeout(3000);
   // "Submit the release request?" confirm dialog auto-pops
   const confirmDialog = page.locator('[role="dialog"]').first();
@@ -892,6 +922,9 @@ async function runStage(page, context, stage, state) {
   } catch (e) {
     state.lastError = { stage: stage.id, message: e.message, at: new Date().toISOString() };
     saveState(state);
+    // Screenshot the failure so the operator/agent can SEE which control
+    // drifted (create used to skip this — only drive wrote the handoff).
+    try { await writeFailureHandoff(page, state, stage, e); } catch (_e) {}
     throw e;
   }
   state.completedStages = state.completedStages || [];
@@ -952,6 +985,14 @@ async function writeFailureHandoff(page, state, stage, err) {
     // fullPage can fail on oversized/detached pages — fall back to viewport
     try { await page.screenshot({ path: shot }); shotPath = shot; } catch (e2) {}
   }
+  // Dump the open dialog's HTML (or the body) so the agent can read exact class
+  // names when a screenshot isn't enough to pin a selector.
+  try {
+    let html = '';
+    try { html = await page.locator('[role="dialog"]').first().evaluate(el => el.outerHTML); }
+    catch (e) { html = await page.evaluate(() => document.body.innerHTML.slice(0, 300000)); }
+    fs.writeFileSync(path.join(STATE_DIR, `${state.appName}.${stage.id}.dom.html`), html || '');
+  } catch (e) {}
   const currentUrl = (() => { try { return page.url(); } catch (e) { return null; } })();
   const handoff = {
     appName: state.appName,

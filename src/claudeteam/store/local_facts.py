@@ -22,8 +22,9 @@ left by a half-written previous crash so the file stays forward-readable.
 Originally pulled from the old `claudeteam.storage.local_facts` (~187 LOC).
 Each public function corresponds to one CLI surface: `claudeteam send` →
 `append_message`, `inbox` → `list_messages`, `read` → `mark_read`,
-`status` → `upsert_status` / `get_status`, `team` → `list_all_statuses`
-+ `all_heartbeats`, `log`/`workspace` → `append_log` / `list_logs`.
+`status` → `upsert_status` / `get_status` (read per roster, never enumerated),
+heartbeats → `touch_heartbeat` / `all_heartbeats`, `log`/`workspace` →
+`append_log` / `list_logs`.
 """
 from __future__ import annotations
 
@@ -150,12 +151,6 @@ def upsert_status(agent: str, status: str, task: str, *, blocker: str = "") -> N
 
 def get_status(agent: str) -> dict | None:
     return read_json(_status_file(), {"agents": {}}).get("agents", {}).get(agent)
-
-
-def list_all_statuses() -> list[dict]:
-    """Latest status row for every agent that ever upserted, sorted by name."""
-    data = read_json(_status_file(), {"agents": {}})
-    return [data["agents"][a] for a in sorted(data.get("agents", {}))]
 
 
 # ── heartbeats ────────────────────────────────────────────────────────

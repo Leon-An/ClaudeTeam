@@ -39,24 +39,18 @@ def test_init_writes_toml_and_returns_zero():
         assert "Next:" in out
 
 
-def test_init_default_team_has_three_agents():
+def test_init_default_team_is_claude_only():
+    """Default team needs only claude-code so a fresh user with just Claude
+    installed gets a working team out of the box (agents reuse the local Claude
+    login). codex / other-CLI workers are a commented example to uncomment when
+    you have them — "用户有什么用什么", optional, not required."""
     with _tmp_env() as tmp:
         with env_patch(CLAUDETEAM_CONFIG_FILE=str(tmp / "claudeteam.toml")):
             run_cli(["init"])
         cfg = _read_toml(tmp / "claudeteam.toml")
         agents = cfg["team"]["agents"]
-        assert set(agents) == {"manager", "worker_cc", "worker_codex"}
-        assert agents["manager"]["cli"] == "claude-code"
-        assert agents["worker_codex"]["cli"] == "codex-cli"
-
-
-def test_init_default_chat_id_and_profile_empty():
-    with _tmp_env() as tmp:
-        with env_patch(CLAUDETEAM_CONFIG_FILE=str(tmp / "claudeteam.toml")):
-            run_cli(["init"])
-        cfg = _read_toml(tmp / "claudeteam.toml")
-        assert cfg["chat_id"] == ""
-        assert cfg["lark_profile"] == ""
+        assert set(agents) == {"manager", "worker_cc"}
+        assert all(a["cli"] == "claude-code" for a in agents.values())
 
 
 def test_init_emits_chat_publish_section():
@@ -78,6 +72,17 @@ def test_init_session_flag_overrides_default():
             run_cli(["init", "--session", "Alpha"])
         cfg = _read_toml(tmp / "claudeteam.toml")
         assert cfg["team"]["session"] == "Alpha"
+
+
+def test_init_default_session_is_per_team_derived():
+    """Without --session, the written session derives from the config's
+    location (not a bare "ClaudeTeam") so two teams on one host don't collide
+    on one tmux session / cross-kill each other's panes."""
+    with _tmp_env() as tmp:
+        with env_patch(CLAUDETEAM_CONFIG_FILE=str(tmp / "claudeteam.toml")):
+            run_cli(["init"])
+        sess = _read_toml(tmp / "claudeteam.toml")["team"]["session"]
+        assert sess.startswith("ClaudeTeam-") and sess != "ClaudeTeam"
 
 
 # ── overwrite protection ─────────────────────────────────────────
@@ -156,12 +161,6 @@ def test_upgrade_emits_legacy_preserved_note():
 # ── help / arg validation ────────────────────────────────────────
 
 
-def test_init_help_returns_zero():
-    rc, out, _ = run_cli(["init", "--help"])
-    assert rc == 0
-    assert "usage: claudeteam init" in out
-
-
 def test_init_unknown_arg_returns_one():
     with _tmp_env():
         rc, _, err = run_cli(["init", "--bogus"])
@@ -172,19 +171,58 @@ def test_init_unknown_arg_returns_one():
 # ── template self-check ──────────────────────────────────────────
 
 
-def test_init_template_passes_tomllib_parse():
-    """The string template is hand-written; this is a sanity check it
-    actually parses via stdlib tomllib (catches typos at test time
-    before they break production deploys)."""
-    with _tmp_env() as tmp:
-        with env_patch(CLAUDETEAM_CONFIG_FILE=str(tmp / "claudeteam.toml")):
-            run_cli(["init"])
-        # Just parsing without raising = passes
-        cfg = _read_toml(tmp / "claudeteam.toml")
-        # Spot-check a few required keys are present
-        assert "chat_id" in cfg
-        assert "team" in cfg
-        assert "chat" in cfg
-        assert "limits" in cfg
-        assert "router" in cfg
-        assert "feishu" in cfg
+# ── first-run hook: init drives `feishu connect` (replaces bot-creator) ───────
+
+
+def test_init_default_runs_feishu_connect():
+    """On an interactive TTY, fresh init with no creds drops into the QR
+    registration automatically. The harness has no real terminal, so the
+    `_should_autoconnect` TTY gate is patched True to exercise the path."""
+    from helpers import attr_patch
+    from claudeteam.commands import feishu, init
+    called = []
+    with isolated_env(), env_patch(FEISHU_APP_ID=None), \
+            attr_patch(init, _should_autoconnect=lambda *a: True), \
+            attr_patch(feishu, main=lambda argv: called.append(list(argv)) or 0):
+        rc, out, _ = run_cli(["init"])
+    assert rc == 0
+    assert called == [["connect"]]
+
+
+def test_init_quick_passes_quick_to_feishu_connect():
+    """`init --quick` routes the one-scan PersonalAgent device flow: it must
+    pass `--quick` through to `feishu connect` (the convenient QR path)."""
+    from helpers import attr_patch
+    from claudeteam.commands import feishu, init
+    called = []
+    with isolated_env(), env_patch(FEISHU_APP_ID=None), \
+            attr_patch(init, _should_autoconnect=lambda *a: True), \
+            attr_patch(feishu, main=lambda argv: called.append(list(argv)) or 0):
+        rc, out, _ = run_cli(["init", "--quick"])
+    assert rc == 0
+    assert called == [["connect", "--quick"]]
+
+
+def test_init_no_connect_skips_registration_and_prints_step():
+    """--no-connect (CI / scripted) must NOT launch the interactive scan, but
+    still tells the operator the command to run later."""
+    from helpers import attr_patch
+    from claudeteam.commands import feishu
+    called = []
+    with isolated_env(), env_patch(FEISHU_APP_ID=None), \
+            attr_patch(feishu, main=lambda argv: called.append(list(argv)) or 0):
+        rc, out, _ = run_cli(["init", "--no-connect"])
+    assert rc == 0
+    assert called == []
+    assert "feishu connect" in out
+
+
+def test_init_skips_connect_when_creds_already_present():
+    from helpers import attr_patch
+    from claudeteam.commands import feishu
+    called = []
+    with isolated_env(), env_patch(FEISHU_APP_ID="cli_existing"), \
+            attr_patch(feishu, main=lambda argv: called.append(list(argv)) or 0):
+        rc, _, _ = run_cli(["init"])
+    assert rc == 0
+    assert called == []

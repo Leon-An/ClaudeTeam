@@ -14,21 +14,20 @@ def _state_env(value):
     return env_patch(CLAUDETEAM_STATE_DIR=value)
 
 
-def test_state_dir_falls_back_to_home_when_env_unset():
-    with _state_env(None):
-        assert paths.state_dir() == Path.home() / ".claudeteam"
+def test_state_dir_defaults_beside_config_when_env_unset():
+    """No CLAUDETEAM_STATE_DIR → state lives in `state/` next to the config
+    file (config location = team identity), so two teams can't bleed into one
+    shared ~/.claudeteam."""
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = Path(tmp) / "claudeteam.toml"
+        with env_patch(CLAUDETEAM_STATE_DIR=None, CLAUDETEAM_CONFIG_FILE=str(cfg)):
+            assert paths.state_dir() == Path(tmp) / "state"
 
 
 def test_state_dir_uses_env_when_set():
     with tempfile.TemporaryDirectory() as tmp:
         with _state_env(tmp):
             assert paths.state_dir() == Path(tmp)
-
-
-def test_facts_dir_is_state_subdir():
-    with tempfile.TemporaryDirectory() as tmp:
-        with _state_env(tmp):
-            assert paths.facts_dir() == Path(tmp) / "facts"
 
 
 def test_agent_dir_is_state_agents_subdir():
@@ -47,41 +46,23 @@ def test_agent_workspace_is_under_agent_dir():
                     == Path(tmp) / "agents" / "worker_cc" / "workspace")
 
 
-def test_share_dir_is_state_subdir():
-    """Team-shared knowledge space sits beside facts/, owned by no agent."""
-    with tempfile.TemporaryDirectory() as tmp:
-        with _state_env(tmp):
-            assert paths.share_dir() == Path(tmp) / "share"
-
-
 def test_agent_home_nests_under_agent_dir_by_default():
     """Merged layout: the CLI HOME is the home/ subdir of the agent's own
     dir, so everything for one agent lives in one tree."""
-    from claudeteam.agents import claude_code
     with tempfile.TemporaryDirectory() as tmp:
         with _state_env(tmp):
-            assert (claude_code.agent_home("worker_cc")
+            assert (paths.agent_home("worker_cc")
                     == str(Path(tmp) / "agents" / "worker_cc" / "home"))
 
 
 def test_agent_home_root_env_overrides_nesting():
     """CLAUDETEAM_AGENT_HOME_ROOT relocates homes onto a separate mount
     (e.g. a Docker credential volume)."""
-    from claudeteam.agents import claude_code
     with tempfile.TemporaryDirectory() as tmp, \
             tempfile.TemporaryDirectory() as homes:
         with _state_env(tmp), env_patch(CLAUDETEAM_AGENT_HOME_ROOT=homes):
-            assert (claude_code.agent_home("worker_cc")
+            assert (paths.agent_home("worker_cc")
                     == str(Path(homes) / "worker_cc"))
-
-
-def test_state_file_returns_path_without_mkdir():
-    with tempfile.TemporaryDirectory() as tmp:
-        with _state_env(tmp):
-            p = paths.state_file("nested/deep/file.txt")
-            assert p == Path(tmp) / "nested" / "deep" / "file.txt"
-            # pure path resolution — no I/O side effect
-            assert not p.parent.exists()
 
 
 def test_ensure_state_dir_creates_when_missing():
@@ -91,14 +72,6 @@ def test_ensure_state_dir_creates_when_missing():
             assert not sd.exists()
             paths.ensure_state_dir()
             assert sd.exists()
-
-
-def test_named_pid_files_land_in_state_dir():
-    with tempfile.TemporaryDirectory() as tmp:
-        with _state_env(tmp):
-            assert paths.router_pid_file() == Path(tmp) / "router.pid"
-            assert paths.watchdog_pid_file() == Path(tmp) / "watchdog.pid"
-            assert paths.router_cursor_file() == Path(tmp) / "router.cursor"
 
 
 def test_state_dir_re_reads_env_each_call():

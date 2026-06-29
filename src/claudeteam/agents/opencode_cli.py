@@ -19,7 +19,7 @@ import json
 import shlex
 
 from .base import CliAdapter, OPENAI_COMPAT_AUTH
-from .claude_code import agent_home
+from claudeteam.runtime.paths import agent_home
 
 
 class OpencodeAdapter(CliAdapter):

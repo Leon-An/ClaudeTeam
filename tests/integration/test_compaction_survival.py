@@ -39,7 +39,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from helpers import isolated_env, run_cli
-from claudeteam.agents import claude_code, identity
+from claudeteam.agents import identity
+from claudeteam.runtime import paths
 from claudeteam.store import tasks
 
 
@@ -57,7 +58,7 @@ _TEAM = {"agents": {"worker_cc": {"cli": "claude-code", "model": "sonnet",
 def _claude_md(agent: str) -> str:
     """The agent's always-loaded native memory file — the one channel that
     survives /compact. Read it the way Claude Code would on the next turn."""
-    path = Path(claude_code.agent_home(agent)) / ".claude" / "CLAUDE.md"
+    path = Path(paths.agent_home(agent)) / ".claude" / "CLAUDE.md"
     return path.read_text(encoding="utf-8")
 
 

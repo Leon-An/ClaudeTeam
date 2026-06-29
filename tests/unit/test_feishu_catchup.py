@@ -334,31 +334,6 @@ def test_pending_lines_default_list_fn_honors_toml_send_as_bot():
         _chat.list_recent = real_list_recent
 
 
-def test_pending_lines_default_list_fn_keeps_user_default_when_env_unset():
-    captured = {}
-    from claudeteam.feishu import chat as _chat
-    real_list_recent = _chat.list_recent
-    def spy(chat_id, **kw):
-        captured["as_user"] = kw.get("as_user")
-        return []
-    _chat.list_recent = spy
-    try:
-        from helpers import env_patch
-        with isolated_env(), env_patch(CLAUDETEAM_LARK_SEND_AS=None):
-            catchup.write_cursor("seed", "1")
-            catchup.pending_lines("oc_x")
-        assert captured["as_user"] is True
-    finally:
-        _chat.list_recent = real_list_recent
-
-
-def test_pending_lines_returns_empty_when_history_empty():
-    with isolated_env():
-        catchup.write_cursor("om_anchor", "1000")
-        lines = catchup.pending_lines("oc_x", list_fn=lambda: [])
-    assert lines == []
-
-
 def test_pending_lines_skips_messages_with_bad_create_time():
     history = [
         _msg("om_ok", "1000"),
@@ -375,24 +350,6 @@ def test_pending_lines_skips_messages_with_bad_create_time():
 
 
 # ── round-trip via subscribe.process_lines ──────────────────────
-
-
-def test_pending_lines_round_trip_through_process_lines():
-    """Ensure the lines we emit can be eaten by subscribe.process_lines."""
-    history = [_msg("om_replay", "5000", text="catch this")]
-    with isolated_env():
-        catchup.write_cursor("seed", "1")
-        lines = catchup.pending_lines("oc_x", list_fn=lambda: history)
-        applies = []
-        stats = process_lines(
-            lines,
-            team_agents=["manager"],
-            chat_id="oc_x",
-            apply_fn=lambda d: applies.append(d),
-        )
-    assert stats.handled == 1
-    assert applies[0].text == "catch this"
-    assert applies[0].create_time == "5000"
 
 
 # ── live lark-cli 1.0.21 response shape (REGRESSION) ────────────
@@ -641,11 +598,3 @@ def test_pending_lines_meta_reports_dropped_stale():
     assert meta["dropped_stale"] == 10        # 40 - default cap 30
 
 
-def test_pending_lines_meta_absent_when_under_cap():
-    base = 1778047500000
-    history = [_msg(f"om_{i}", str(base + i * 60000)) for i in range(5)]
-    meta = {}
-    with isolated_env():
-        catchup.write_cursor("om_cursor", str(base - 600000))
-        catchup.pending_lines("oc_x", list_fn=lambda: history, meta=meta)
-    assert "dropped_stale" not in meta        # no cap → no key

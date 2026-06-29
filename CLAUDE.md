@@ -86,7 +86,7 @@ steps (Feishu app, user OAuth, CLI login) need a human.  Install first via
 ## How modules cooperate (the message flow)
 
 ```
-Feishu chat               feishu/subscribe.py    ←─── lark-cli event +subscribe (Popen)
+Feishu chat               feishu/subscribe.py    ←─── node scripts/feishu_channel/sidecar.js run (Popen)
    │                              │
    │ user types in group          │ NDJSON line
    ▼                              ▼
@@ -109,8 +109,9 @@ Feishu chat               feishu/subscribe.py    ←─── lark-cli event +su
 ```
 
 `commands/router.py` is the daemon entry that wraps `subscribe.process_lines`
-around `lark-cli event +subscribe` stdout.  Tests use a list-of-lines
-fixture instead of a real subprocess.
+around `node scripts/feishu_channel/sidecar.js run` stdout (official
+`@larksuite/channel` WebSocket → NDJSON; lark-cli is now egress-only).
+Tests use a list-of-lines fixture instead of a real subprocess.
 
 ## Patterns that show up everywhere
 
@@ -150,8 +151,9 @@ fixture instead of a real subprocess.
   Console-script entry is `pyproject.toml` →
   `claudeteam = "claudeteam.cli:main"`. The only thing allowed under
   `scripts/` is self-contained external utilities (e.g. the bundled
-  Playwright bot creator at `scripts/feishu_bot_creator/`) — they have
-  their own `package.json` / runtime and never import claudeteam.
+  `@larksuite/channel` sidecar at `scripts/feishu_channel/`, used for
+  both `feishu connect` registration and the WebSocket event ingress) —
+  they have their own `package.json` / runtime and never import claudeteam.
 - Don't reach into other modules' module-level globals from tests.
   Use the injectable kwargs (`run=`, `popen=`, `tmux_inject=`).
 - Don't add docs/ subfolders for every concern.  This file + README.md

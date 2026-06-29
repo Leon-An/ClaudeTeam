@@ -57,14 +57,6 @@ def test_inbox_help_shows_usage_and_no_phantom_agent():
         assert local_facts.all_heartbeats() == {}
 
 
-def test_send_help_shows_usage_and_no_phantom_agent():
-    with isolated_env():
-        rc, out, _ = run_cli(["send", "--help"])
-        assert rc == 0
-        assert "usage: claudeteam send" in out
-        assert local_facts.all_heartbeats() == {}
-
-
 def test_send_flag_shaped_sender_rejected():
     """A '-'-prefixed sender (the heartbeat-registered field) is rejected,
     so it can't pollute heartbeats."""

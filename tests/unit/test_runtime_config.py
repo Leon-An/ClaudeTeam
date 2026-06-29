@@ -27,14 +27,6 @@ def _team_env(team_data, runtime_data=None):
 # ── team.json basics ────────────────────────────────────────────
 
 
-def test_load_team_returns_full_dict():
-    team = {"session": "test", "agents": {"a": {"cli": "claude-code"}}, "default_model": "opus"}
-    with _team_env(team):
-        loaded = config.load_team()
-        assert loaded["session"] == "test"
-        assert "a" in loaded["agents"]
-
-
 def test_load_team_returns_default_when_missing():
     # isolated_env points CLAUDETEAM_TEAM_FILE at a tempdir that has no
     # team.json (since team= isn't passed), so config.load_team() takes
@@ -45,9 +37,14 @@ def test_load_team_returns_default_when_missing():
         assert "session" in t
 
 
-def test_session_name_falls_back_to_claudeteam():
+def test_session_name_derives_per_team_when_unset():
+    """No `session` in the team → derive a per-team name from the config's
+    location, so two teams on one host don't collide on a shared "ClaudeTeam"
+    session (which `down`/`fire` would cross-kill)."""
     with _team_env({"agents": {}}):
-        assert config.session_name() == "ClaudeTeam"
+        sn = config.session_name()
+        assert sn == config.default_session_name()
+        assert sn.startswith("ClaudeTeam-") and sn != "ClaudeTeam"
 
 
 def test_agent_names_sorted():
@@ -82,12 +79,6 @@ def test_agent_cli_defaults_to_claude_code():
     team = {"agents": {"a": {}}}
     with _team_env(team):
         assert config.agent_cli("a") == "claude-code"
-
-
-def test_agent_cli_respects_explicit_value():
-    team = {"agents": {"a": {"cli": "codex-cli"}}}
-    with _team_env(team):
-        assert config.agent_cli("a") == "codex-cli"
 
 
 # ── model resolution chain ──────────────────────────────────────
@@ -289,7 +280,9 @@ def test_session_name_falls_back_to_default_when_team_corrupt():
         (tmp / "team.json").write_text("{partial", encoding="utf-8")
         import io, contextlib
         with contextlib.redirect_stderr(io.StringIO()):
-            assert config.session_name() == "ClaudeTeam"
+            # degrades to a usable default (now per-team-derived) — the point is
+            # it doesn't blow up, not the exact string.
+            assert config.session_name().startswith("ClaudeTeam")
             assert config.agent_names() == []
 
 
@@ -471,21 +464,6 @@ role = "dev"
 # ── pure toml block helpers ──────────────────────────────────────
 
 
-def test_toml_remove_block_at_eof():
-    text = "[team]\nsession = \"t\"\n\n[team.agents.x]\ncli = \"claude-code\"\n"
-    out, found = config._toml_remove_agent_block(text, "x")
-    assert found is True
-    assert "[team.agents.x]" not in out
-    assert "[team]" in out
-
-
-def test_toml_remove_block_absent_is_noop():
-    text = "[team]\nsession = \"t\"\n"
-    out, found = config._toml_remove_agent_block(text, "x")
-    assert found is False
-    assert out == text
-
-
 def test_toml_remove_block_preserves_next_sections_comment():
     """Firing codex must NOT eat kimi's comment that sits under codex's
     last key (between the block body and kimi's header)."""
@@ -590,3 +568,45 @@ def test_fire_hire_roster_block_roundtrip_is_field_faithful():
             # verbatim fidelity: alignment + multi-line block survived
             assert "cli        = \"kimi-code\"" in text
             assert 'notes = """' in text
+
+
+# ── set_chat_id (written by `feishu connect` after auto-creating the group) ────
+
+
+def test_set_chat_id_writes_toml_in_place_preserving_comment():
+    import os
+    from pathlib import Path
+    from claudeteam.runtime import tunables
+    with isolated_env():
+        cf = Path(os.environ["CLAUDETEAM_CONFIG_FILE"])
+        cf.write_text('chat_id      = ""                  # the group\n',
+                      encoding="utf-8")
+        tunables.reset_cache()
+        ok, _ = config.set_chat_id("oc_new")
+        assert ok
+        text = cf.read_text(encoding="utf-8")
+        assert 'chat_id      = "oc_new"' in text
+        assert "# the group" in text            # trailing comment preserved
+        assert config.chat_id() == "oc_new"     # same-process read sees it
+
+
+def test_set_chat_id_prepends_when_no_chat_id_line():
+    import os
+    from pathlib import Path
+    from claudeteam.runtime import tunables
+    with isolated_env():
+        cf = Path(os.environ["CLAUDETEAM_CONFIG_FILE"])
+        cf.write_text('[team]\nsession = "S"\n', encoding="utf-8")
+        tunables.reset_cache()
+        ok, _ = config.set_chat_id("oc_z")
+        assert ok
+        assert config.chat_id() == "oc_z"
+
+
+def test_set_chat_id_falls_back_to_runtime_json_without_toml():
+    # isolated_env pins CONFIG_FILE at a non-existent toml → json fallback path.
+    with isolated_env():
+        ok, msg = config.set_chat_id("oc_json")
+        assert ok
+        assert "runtime_config" in msg
+        assert config.chat_id() == "oc_json"

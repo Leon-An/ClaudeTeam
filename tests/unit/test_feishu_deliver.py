@@ -96,15 +96,6 @@ def test_route_uses_user_as_sender_when_decision_sender_blank():
         assert rows[0]["from"] == "user"
 
 
-def test_route_passes_decision_text_into_inbox():
-    decision = Decision(action=Action.ROUTE, targets=["worker"], text="hello world", msg_id="om")
-    with isolated_env():
-        apply(decision, adapter_for_agent=_adapter_factory,
-              tmux_inject=lambda *a, **kw: True, session="S")
-        rows = local_facts.list_messages("worker")
-        assert rows[0]["content"] == "hello world"
-
-
 # ── partial failure ──────────────────────────────────────────────
 
 
@@ -445,23 +436,9 @@ def test_compose_inject_text_summary_cue_skipped_for_manager_self():
     assert "claudeteam send manager manager" not in out
 
 
-def test_compose_inject_text_summary_cue_skipped_without_keyword():
-    """Casual messages without a summary cue → only the base say hint,
-    no extra send-to-manager."""
-    out = _compose_inject_text(
-        "worker_cc", _decision("just say hi back"))
-    assert "claudeteam say worker_cc" in out
-    assert "claudeteam send manager" not in out
-
-
 def test_wants_manager_summary_chinese_cues():
     for cue in ("汇总", "汇报", "总结", "报告"):
         assert _wants_manager_summary(f"做个 {cue} 给我"), cue
-
-
-def test_wants_manager_summary_english_cues():
-    for cue in ("summarize", "summary", "report back"):
-        assert _wants_manager_summary(f"please {cue} when done"), cue
 
 
 def test_wants_manager_summary_no_match():

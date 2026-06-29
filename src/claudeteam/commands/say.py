@@ -18,7 +18,7 @@ from claudeteam.feishu import chat as feishu_chat
 from claudeteam.feishu.cards import simple_card
 from claudeteam.runtime import config
 from claudeteam.store import local_facts
-from claudeteam.util import env_str, error_exit, pop_bool_flag, pop_flag, usage_error
+from claudeteam.util import env_str, error_exit, maybe_print_help, pop_bool_flag, pop_flag, usage_error
 
 
 USAGE = (
@@ -199,13 +199,15 @@ def _parse(argv: list[str]) -> _Args | None:
 
 
 def main(argv: list[str]) -> int:
+    if maybe_print_help(argv, USAGE):
+        return 0
     args = _parse(argv)
     if args is None:
         return usage_error(USAGE)
 
     chat = config.chat_id()
     if not chat:
-        return error_exit("❌ chat_id not set in runtime_config.json")
+        return error_exit("❌ chat_id not set in claudeteam.toml")
 
     profile = config.lark_profile()
 

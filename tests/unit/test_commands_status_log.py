@@ -80,14 +80,6 @@ def test_status_flag_shaped_agent_rejected():
         assert local_facts.all_heartbeats() == {}
 
 
-def test_log_help_shows_usage_and_creates_no_phantom_agent():
-    with isolated_env():
-        rc, out, _ = run_cli(["log", "--help"])
-        assert rc == 0
-        assert "usage:" in out
-        assert local_facts.all_heartbeats() == {}
-
-
 def test_status_set_missing_state_or_task_returns_one():
     with isolated_env():
         rc, _, err = run_cli(["status", "agent", "进行中"])

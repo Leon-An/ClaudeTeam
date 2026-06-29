@@ -10,7 +10,7 @@ import shlex
 from pathlib import Path
 
 from .base import AuthSlots, CliAdapter
-from .claude_code import agent_home
+from claudeteam.runtime.paths import agent_home
 
 
 def codex_home(agent: str) -> str:

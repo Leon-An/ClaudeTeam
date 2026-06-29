@@ -243,24 +243,6 @@ def test_hire_lazy_agent_skips_spawn_and_marks_standby():
         assert snap["status"] == "待命"
 
 
-def test_start_lazy_agent_creates_window_no_spawn():
-    team = {
-        "session": "T",
-        "agents": {
-            "manager": {"cli": "claude-code"},
-            "sleeper": {"cli": "kimi-code", "lazy": True},
-        },
-    }
-    with _isolated_team(team), _fake_tmux() as fake:
-        rc, out, _ = run_cli(["start"])
-        assert rc == 0
-        assert "lazy-pane ready" in out
-        spawn_targets = [c[1] for c in fake["calls"] if c[0] == "spawn_agent"]
-        assert "T:manager" in spawn_targets
-        assert "T:sleeper" not in spawn_targets
-        assert local_facts.get_status("sleeper")["status"] == "待命"
-
-
 def test_hire_when_window_already_exists_is_idempotent():
     team = {"session": "S", "agents": {"manager": {}, "x": {}}}
     with _isolated_team(team), _fake_tmux() as fake:

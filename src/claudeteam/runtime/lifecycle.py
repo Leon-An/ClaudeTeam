@@ -41,7 +41,7 @@ from claudeteam.util import env_str
 
 # env vars to propagate from the operator's shell into every spawned pane
 # so worker agents' shell-out calls (via Bash tool) see the deployment's
-# state dir instead of falling back to ~/.claudeteam.
+# state dir instead of re-deriving a different one from the pane's own cwd.
 #
 # FEISHU_APP_*/LARKSUITE_CLI_APP_* are propagated too: when the
 # tmux server was started by an earlier checkout's `claudeteam up`, new
@@ -155,7 +155,7 @@ def _ensure_claude_agent_home(agent: str) -> None:
     doesn't exist), silently skip and let claude fall back to its
     default `$HOME` discovery.
     """
-    from claudeteam.agents.claude_code import agent_home as _agent_home
+    from claudeteam.runtime.paths import agent_home as _agent_home
     home = Path(_agent_home(agent))
     claude_dir = home / ".claude"
     try:
@@ -196,12 +196,24 @@ def _ensure_claude_agent_home(agent: str) -> None:
             # `security` missing / keychain locked / subprocess timeout →
             # silent skip and fall through to the host-file branch below.
             pass
+    # Docker/Linux: the shared /root/.claude/.credentials.json is bind-mounted
+    # and the watchdog rotates its OAuth token — SYMLINK the per-agent file to it
+    # so a refresh reaches every pane (a copy goes stale the moment the watchdog
+    # rotates the shared token; that was the bug). macOS took the keychain branch
+    # above (where /root/.claude isn't readable), so this is a no-op there.
+    cred_target = Path("/root/.claude/.credentials.json")
+    if not keychain_extracted and not cred_link.exists() and _path_readable(cred_target):
+        try:
+            cred_link.symlink_to(cred_target)
+        except OSError:
+            pass
     if not keychain_extracted and not cred_link.exists():
         user_creds = Path.home() / ".claude" / ".credentials.json"
         if user_creds.exists():
             try:
-                # Copy, not symlink: claude's atomic-write replaces the
-                # symlink with a plain file anyway, so start with one.
+                # Copy — last resort (no keychain, no shared target). claude's
+                # atomic-write replaces a symlink with a plain file on refresh,
+                # so a plain file is the honest starting point here.
                 cred_link.write_bytes(user_creds.read_bytes())
             except OSError:
                 pass
@@ -217,13 +229,6 @@ def _ensure_claude_agent_home(agent: str) -> None:
             '  }\n'
             '}\n'
         )
-    cred_link = claude_dir / ".credentials.json"
-    cred_target = Path("/root/.claude/.credentials.json")
-    if _path_readable(cred_target) and not cred_link.exists():
-        try:
-            cred_link.symlink_to(cred_target)
-        except OSError:
-            pass
     projects_link = claude_dir / "projects"
     projects_target = Path("/root/.claude/projects")
     if _path_readable(projects_target) and not projects_link.exists():
@@ -274,10 +279,10 @@ def _ensure_claude_agent_home(agent: str) -> None:
 # ~/.kimi/config.toml — there is nothing to isolate and nothing to seed.
 # (In the prod container, worker_kimi has no agent-home at all.) If kimi
 # ever gains HOME isolation, add its seed entry here.
-_CLI_CRED_SEEDS: dict[str, tuple[str, str | None]] = {
+_CLI_CRED_SEEDS: dict[str, tuple[str, str | tuple[str, ...] | None]] = {
     "codex":  (".codex/auth.json", None),
     "gemini": (".gemini/oauth_creds.json", "GEMINI_API_KEY"),
-    "qwen":   (".qwen/oauth_creds.json", "OPENAI_API_KEY"),
+    "qwen":   (".qwen/oauth_creds.json", ("DASHSCOPE_API_KEY", "OPENAI_API_KEY")),
 }
 
 
@@ -307,9 +312,14 @@ def _seed_cli_credentials(agent: str, cli: str) -> None:
     if spec is None:
         return
     rel, skip_env = spec
-    if skip_env and env_str(skip_env):
+    # Skip seeding the OAuth file when the operator authenticates by API key —
+    # check ALL of the CLI's key vars (qwen: DASHSCOPE *and* OPENAI). Otherwise we
+    # symlink an OAuth file that makes agent_auth resolve 'login' and blank the key
+    # the operator actually set.
+    skip_envs = (skip_env,) if isinstance(skip_env, str) else (skip_env or ())
+    if any(env_str(e) for e in skip_envs):
         return
-    from claudeteam.agents.claude_code import agent_home as _agent_home
+    from claudeteam.runtime.paths import agent_home as _agent_home
     src = Path.home() / rel
     dst = Path(_agent_home(agent)) / rel
     if dst.exists() or dst.is_symlink() or not _path_readable(src):
@@ -350,7 +360,7 @@ def _ensure_agent_home(agent: str, cli: str) -> None:
     if cli == "claude-code":
         _ensure_claude_agent_home(agent)
         return
-    from claudeteam.agents.claude_code import agent_home as _agent_home
+    from claudeteam.runtime.paths import agent_home as _agent_home
     try:
         Path(_agent_home(agent)).mkdir(parents=True, exist_ok=True)
     except OSError:
@@ -361,8 +371,9 @@ def _ensure_agent_home(agent: str, cli: str) -> None:
 def pane_env_prefix() -> str:
     """Build a shell env prefix that, prepended to a spawn_cmd, makes the
     spawned process inherit CLAUDETEAM_STATE_DIR and the Feishu env so
-    worker agents calling `claudeteam say` write to the project state
-    dir, not `~/.claudeteam`.
+    worker agents calling `claudeteam say` write to the team's state dir —
+    the resolved path is passed explicitly so the pane never re-derives a
+    different one from its own cwd.
     """
     parts = [f"CLAUDETEAM_STATE_DIR={shlex.quote(str(paths.state_dir()))}"]
     for var in _PROPAGATED_ENV:
@@ -465,7 +476,7 @@ def provision_pane(agent: str, target: tmux.Target) -> str:
     cfg = team.get("agents", {}).get(agent)
     if cfg is None:
         import sys
-        print(f"  ⚠️ {agent}: agent {agent!r} not in team.json", file=sys.stderr)
+        print(f"  ⚠️ {agent}: agent {agent!r} not in claudeteam.toml", file=sys.stderr)
         return CONFIG_ERROR
     cli = cfg.get("cli", "claude-code")
     # Inline agent_model resolution: per-agent override → env var →

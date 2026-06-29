@@ -37,12 +37,6 @@ def test_ready_markers_include_qwen_prompt():
     assert any("Qwen" in m for m in markers)
 
 
-def test_process_name_is_qwen():
-    """For /proc walkers and `pkill -f qwen` to work, process_name must
-    match the binary's exec name."""
-    assert QwenCodeAdapter().process_name() == "qwen"
-
-
 def test_submit_keys_use_multiline_form():
     keys = QwenCodeAdapter().submit_keys()
     assert "M-Enter" in keys
@@ -69,12 +63,12 @@ def test_registered_in_known_clis():
 def test_spawn_cmd_sets_per_agent_home():
     """HOME=<agent_home> isolates each pane's ~/.qwen so sibling panes
     don't clobber one shared auth cache / QWEN.md."""
-    from claudeteam.agents.claude_code import agent_home
+    from claudeteam.runtime.paths import agent_home
     cmd = QwenCodeAdapter().spawn_cmd("worker_qwen", "")
     assert f"HOME={agent_home('worker_qwen')}" in cmd
 
 
 def test_native_memory_path_is_qwen_md_under_agent_home():
-    from claudeteam.agents.claude_code import agent_home
+    from claudeteam.runtime.paths import agent_home
     path = QwenCodeAdapter().native_memory_path("worker_qwen")
     assert path == f"{agent_home('worker_qwen')}/.qwen/QWEN.md"

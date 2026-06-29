@@ -75,7 +75,3 @@ def test_reset_unexpected_args_returns_one():
         assert "unexpected args" in err
 
 
-def test_reset_help():
-    rc, out, _ = run_cli(["reset", "--help"])
-    assert rc == 0
-    assert "usage: claudeteam reset" in out

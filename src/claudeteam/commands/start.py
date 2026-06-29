@@ -17,7 +17,7 @@ def main(argv: list[str]) -> int:
     team = config.load_team()
     agents = team.get("agents", {})
     if not agents:
-        return error_exit("❌ team.json has no agents")
+        return error_exit("❌ claudeteam.toml has no agents")
 
     session = team.get("session", "ClaudeTeam")
     agent_list = sorted(agents)
@@ -60,7 +60,7 @@ def main(argv: list[str]) -> int:
         elif outcome == lifecycle.SPAWN_FAILED:
             warn(f"⚠️  failed to spawn CLI in {agent} pane")
         elif outcome == lifecycle.CONFIG_ERROR:
-            warn(f"⚠️  {agent} skipped: bad cli config in team.json")
+            warn(f"⚠️  {agent} skipped: bad cli config in claudeteam.toml")
         elif outcome == lifecycle.READY_NO_INIT:
             warn(f"⚠️  {agent} CLI didn't show ready marker in 60s; "
                  f"identity init prompt skipped")
@@ -70,4 +70,6 @@ def main(argv: list[str]) -> int:
 
     tail = f" ({skipped_fired} fired, skipped)" if skipped_fired else ""
     print(f"✅ team {session} started ({provisioned} agents){tail}")
+    # The crew "reports in" via the manager-driven roll-call that `up` kicks off
+    # once the router is live (see up._summon_roster) — not a system-posted card.
     return 0

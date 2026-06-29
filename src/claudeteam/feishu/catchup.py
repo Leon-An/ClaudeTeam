@@ -257,7 +257,12 @@ def pending_lines(chat_id: str, *,
         def list_fn():
             return _chat.list_recent(chat_id, profile=profile,
                                      page_size=page_size, as_user=as_user)
-    msgs = list_fn() or []
+    raw = list_fn()
+    if raw is None:
+        warn("⚠️ catchup: 拉历史消息失败（鉴权/代理？）—— 本次补漏跳过；"
+             "bot-only 部署请确认 send_as=bot 或用户 OAuth 就绪")
+        return []
+    msgs = raw
     fresh = _newer_than(msgs, cursor_ct, cursor_ms=cursor_ms,
                         lookback_ms=_catchup_lookback_ms())
     cap = _catchup_max_messages()

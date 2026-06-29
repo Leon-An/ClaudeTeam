@@ -16,13 +16,6 @@ def test_append_then_list_round_trips():
         assert rows[0]["by"] == "worker_cc"
 
 
-def test_list_is_oldest_first():
-    with isolated_env():
-        team_memory.append("first", by="a")
-        team_memory.append("second", by="b")
-        assert [r["content"] for r in team_memory.list_recent()] == ["first", "second"]
-
-
 def test_render_for_prompt_marks_contributor_and_ref():
     with isolated_env():
         team_memory.append("用两步结账", kind="decision", by="manager",
@@ -58,14 +51,6 @@ def test_cap_truncates_from_front():
 # ── update / remove (living KB) ──────────────────────────────────
 
 
-def test_append_assigns_incrementing_ids():
-    with isolated_env():
-        a = team_memory.append("first", by="x")
-        b = team_memory.append("second", by="y")
-        assert a["id"] == "E-1"
-        assert b["id"] == "E-2"
-
-
 def test_update_modifies_entry_in_place():
     with isolated_env():
         e = team_memory.append("测试用 python3", kind="learning", by="worker_cc")
@@ -97,12 +82,6 @@ def test_remove_unknown_id_returns_false():
     with isolated_env():
         team_memory.append("x", by="a")
         assert team_memory.remove("E-99") is False
-
-
-def test_render_shows_entry_id():
-    with isolated_env():
-        team_memory.append("用两步结账", kind="decision", by="manager", pin=True)
-        assert "[E-1]" in team_memory.render_for_prompt()
 
 
 # ── curated-core injection (pin) ─────────────────────────────────

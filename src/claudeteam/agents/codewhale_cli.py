@@ -20,7 +20,7 @@ import shlex
 from claudeteam.util import env_str
 
 from .base import CliAdapter, OPENAI_COMPAT_AUTH
-from .claude_code import agent_home
+from claudeteam.runtime.paths import agent_home
 
 
 # Single-line printf rendering config.toml. %s slots: provider, model, provider,
@@ -30,7 +30,7 @@ from .claude_code import agent_home
 #   `--yolo` (see spawn_cmd).
 # - [shell_environment_policy] inherit = "all": CodeWhale's shell tool runs in a
 #   SANITIZED env by default (codex heritage) that strips CLAUDETEAM_STATE_DIR —
-#   so `claudeteam inbox/read/say` hit ~/.claudeteam instead of the deployment's
+#   so `claudeteam inbox/read/say` fall back to the default state dir, not the deployment's
 #   /data/state, the inbox always reads empty, and every read is "no such
 #   message". inherit="all" passes the pane env through. Verified: with it, a
 #   codewhale shell-out sees CLAUDETEAM_STATE_DIR=/data/state.

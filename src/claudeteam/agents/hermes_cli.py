@@ -17,7 +17,7 @@ from __future__ import annotations
 import shlex
 
 from .base import CliAdapter, OPENAI_COMPAT_AUTH
-from .claude_code import agent_home
+from claudeteam.runtime.paths import agent_home
 
 # Raw printf rendering config.yaml; %s slots = model, base_url.
 _CFG_PRINTF = (

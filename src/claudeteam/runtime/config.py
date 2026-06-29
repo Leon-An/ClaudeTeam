@@ -82,7 +82,7 @@ def load_team() -> dict:
     toml_team = tunables.load().get("team")
     if isinstance(toml_team, dict) and toml_team:
         return {
-            "session": toml_team.get("session", "ClaudeTeam"),
+            "session": toml_team.get("session") or default_session_name(),
             "agents": dict(toml_team.get("agents", {})),
             "default_model": toml_team.get("default_model", "opus"),
         }
@@ -340,8 +340,21 @@ def restore_agent_block(name: str, block_text: str) -> tuple[bool, str]:
     return (True, f"restored [team.agents.{name}] block to {cf}")
 
 
+def default_session_name() -> str:
+    """Per-team default tmux session name, derived from the config's location —
+    the same identity `state_dir` uses (减2). Without this two teams on one host
+    both default to the literal "ClaudeTeam" on the shared tmux socket, so team
+    B's `down`/`fire` would kill team A's panes. Used as `init`'s default AND
+    `session_name()`'s fallback. Pure (no toml read) so `init` can call it
+    before the toml exists."""
+    from claudeteam.runtime import paths
+    stem = "".join(c if (c.isalnum() or c in "_-") else "-"
+                   for c in paths.config_file().parent.name) or "team"
+    return f"ClaudeTeam-{stem}"
+
+
 def session_name() -> str:
-    return load_team().get("session", "ClaudeTeam")
+    return (load_team().get("session") or "").strip() or default_session_name()
 
 
 def agent_names() -> list[str]:
@@ -352,7 +365,7 @@ def agent_config(agent: str) -> dict:
     """Return the per-agent dict from team.json. Raises KeyError on miss."""
     agents = load_team().get("agents", {})
     if agent not in agents:
-        raise KeyError(f"agent {agent!r} not in team.json")
+        raise KeyError(f"agent {agent!r} not in claudeteam.toml")
     return dict(agents[agent])
 
 
@@ -388,6 +401,33 @@ def chat_id() -> str:
     if toml_val:
         return str(toml_val)
     return load_runtime_config().get("chat_id", "")
+
+
+def set_chat_id(value: str) -> tuple[bool, str]:
+    """Persist the top-level `chat_id` — written by `feishu connect` after the
+    bot auto-creates the team group. Replaces claudeteam.toml's top-level
+    `chat_id = "..."` value in place (preserving its trailing comment), falling
+    back to runtime_config.json when toml isn't the active config. Resets the
+    tunables cache so a same-process read sees the new value. Idempotent."""
+    import re
+    from claudeteam.runtime import paths, tunables
+    cf = paths.config_file()
+    if cf.exists():
+        text = cf.read_text(encoding="utf-8")
+        pat = re.compile(r'^(chat_id\s*=\s*)"[^"]*"(.*)$', re.MULTILINE)
+        new_text, n = pat.subn(lambda m: f'{m.group(1)}"{value}"{m.group(2)}', text)
+        if n == 0:  # no chat_id line present — prepend one
+            new_text = f'chat_id = "{value}"\n' + text
+        try:
+            cf.write_text(new_text, encoding="utf-8")
+        except OSError as e:
+            return (False, f"cannot write {cf}: {e}")
+        tunables.reset_cache()
+        return (True, f"set chat_id in {cf}")
+    rc = load_runtime_config()
+    rc["chat_id"] = value
+    save_runtime_config(rc)
+    return (True, f"set chat_id in {runtime_config_file()}")
 
 
 def lark_profile() -> str:

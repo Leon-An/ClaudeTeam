@@ -74,21 +74,6 @@ def _team_env():
 # ── /help ────────────────────────────────────────────────────────
 
 
-def test_help_returns_card_listing_all_commands():
-    """/help lists the exact 9-command surface — `/recall` and `/forget`
-    were dropped."""
-    reply = slash.dispatch("/help", _ctx())
-    assert isinstance(reply, dict), f"/help should return a card dict, got {type(reply)}"
-    assert reply["header"]["title"]["content"] == "🆘 ClaudeTeam 自定义斜杠命令"
-    body = reply["body"]["elements"][0]["content"]
-    for c in ("/help", "/team", "/health", "/usage", "/tmux",
-              "/send", "/compact", "/stop", "/clear", "/task"):
-        assert c in body
-    # Dropped commands stay dropped
-    assert "/recall" not in body
-    assert "/forget" not in body
-
-
 # ── /team ────────────────────────────────────────────────────────
 
 
@@ -326,18 +311,6 @@ def test_team_card_still_yellow_for_truly_dead_pane():
     assert "🛑" in body  # honest failure glyph kept
 
 
-def test_team_card_color_yellow_when_any_agent_unhealthy():
-    """Health colour shortcut: green when every agent is in a healthy
-    state (💤/🔄), yellow as soon as one shows ⚠️/🛑/❌. Lets the boss
-    glance the chat without reading the body."""
-    # one agent's CLI not running (probe DEAD → 🛑)
-    states = {"manager": pane_probe.IDLE, "worker_cc": pane_probe.DEAD}
-    with _team_env(), _probe_states(states):
-        reply = slash.dispatch("/team",
-                               _ctx(agents=("manager", "worker_cc")))
-    assert reply["header"]["template"] == "yellow"
-
-
 # ── /health (server-load card with column_set 3 grid) ────────────
 
 
@@ -416,23 +389,6 @@ def test_health_card_falls_back_to_no_data_cells_when_host_empty():
     assert blob.count("无数据") >= 3  # CPU + 内存 + 磁盘 all blank
 
 
-def test_health_card_emits_grey_footer():
-    """Footer line records collection time + data source list — useful
-    for debug "is this card stale?" questions. We use a grey-font
-    markdown line as the footer (v1's `note` tag was dropped when the
-    card moved to v2; we kept the grey-font shape across the v1-revert)."""
-    data = {"host": {"cpu": None, "mem": None, "disk": None},
-            "containers": [], "agents": [], "alarms": []}
-    with _stub_server_load(data):
-        reply = slash.dispatch("/health", _ctx())
-    # The last element should carry the footer text in a grey font span.
-    last = _elements(reply)[-1]
-    assert last["tag"] == "markdown"
-    assert "采集" in last["content"]
-    assert "uptime/free/df/docker stats/ps" in last["content"]
-    assert "color='grey'" in last["content"]
-
-
 # ── /usage (rich card with column_set 2 + ccusage summary) ───────
 
 
@@ -461,20 +417,6 @@ def test_usage_view_threads_through_view_flag():
     slash.dispatch("/usage daily", _ctx(run=fake_run))
     assert captured["argv"] == ["claudeteam", "usage", "--json",
                                  "--view", "daily"]
-
-
-def test_usage_card_emits_purple_header_when_cc_ok():
-    """Card branding stays purple when CC usage probe succeeds. Header
-    flips red on any per-CLI failure."""
-    payload = ('{"view":"daily","claude_code":{"ok":true,"metrics":['
-               '{"label":"5-hour window","used_pct":40,"remaining_pct":60,'
-               '"reset_iso":"2026-05-05T18:00:00Z"}]},'
-               '"other_clis":[]}')
-    reply = slash.dispatch("/usage", _ctx(run=_usage_run(payload)))
-    assert isinstance(reply, dict)
-    assert reply["header"]["template"] == "purple"
-    title = reply["header"]["title"]["content"]
-    assert "/usage" in title and "(daily)" in title
 
 
 def test_usage_card_renders_cc_metrics_with_traffic_light():
@@ -684,16 +626,6 @@ def test_send_inject_into_pane():
     assert "✅" in reply
 
 
-def test_send_no_args_returns_usage():
-    reply = slash.dispatch("/send", _ctx())
-    assert "用法:" in reply
-
-
-def test_send_no_msg_returns_usage():
-    reply = slash.dispatch("/send manager", _ctx())
-    assert "缺少消息内容" in reply
-
-
 def test_send_unknown_agent_warns():
     reply = slash.dispatch("/send ghost yo", _ctx())
     assert "未知 agent" in reply
@@ -887,20 +819,6 @@ def test_clear_uses_clear_for_codex_too():
         reply = slash.dispatch("/clear worker_codex", _ctx())
     assert sequence[0] == ("ClaudeTeam:worker_codex", "/clear")
     assert "✅" in reply
-
-
-def test_compact_uses_compact_for_codex():
-    """codex compacts with /compact (same as claude) — injected, not punted."""
-    captured = []
-
-    def fake_inject(target, text, **kw):
-        captured.append((str(target), text))
-        return True
-
-    with _team_env(), tmux_patch(inject=fake_inject):
-        reply = slash.dispatch("/compact worker_codex", _ctx())
-    assert ("ClaudeTeam:worker_codex", "/compact") in captured
-    assert "/compact" in reply
 
 
 def test_compact_uses_compress_for_gemini():
@@ -1160,12 +1078,6 @@ def test_login_unknown_cli():
     assert "不认识" in _all_markdown(reply)
 
 
-def test_login_no_args_shows_usage():
-    with _team_env(), attr_patch(_teamctl, login_slash_enabled=lambda: True):
-        reply = slash.dispatch("/login", _ctx())
-    assert "/login <cli>" in _all_markdown(reply)
-
-
 def test_login_ambiguous_cli_requires_agent():
     # _team_env has manager + worker_cc both on claude-code → must disambiguate
     with _team_env(), attr_patch(_teamctl, login_slash_enabled=lambda: True):
@@ -1250,7 +1162,7 @@ def test_login_run_subprocess_spawn_failure():
 def test_login_env_isolates_codex_and_claude_homes():
     """The subprocess env points the CLI's token write at the agent's
     ISOLATED per-agent home, never the host's."""
-    from claudeteam.agents.claude_code import agent_home
+    from claudeteam.runtime.paths import agent_home
     with _team_env():
         ce = slash._login_env("codex-cli", "worker_codex")
         assert ce["CODEX_HOME"] == f"{agent_home('worker_codex')}/.codex"

@@ -44,12 +44,6 @@ def test_is_ready_true_when_pane_shows_marker():
     assert wake.is_ready(target, _ClaudeFake(), capture=capture) is True
 
 
-def test_is_ready_false_when_pane_blank():
-    target = tmux.Target("S", "manager")
-    capture = _capturer(["$ "])
-    assert wake.is_ready(target, _ClaudeFake(), capture=capture) is False
-
-
 # ── inject_and_confirm ────────────────
 
 

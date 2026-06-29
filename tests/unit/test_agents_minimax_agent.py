@@ -15,7 +15,10 @@ def test_spawn_provisions_config_from_env_then_launches():
     cmd = MiniMaxAgentAdapter().spawn_cmd("worker_mm", "deepseek-v4-flash")
     # Mini-Agent has no endpoint env var → spawn writes config.yaml from the
     # operator's OPENAI_* env + the agent's model, THEN launches the binary.
-    assert "$HOME/.mini-agent/config" in cmd
+    # HOME is pinned under the agent's isolated home so two minimax agents (or
+    # teams) don't share one global ~/.mini-agent (the leak this closed).
+    assert "agents/worker_mm" in cmd and "HOME=" in cmd
+    assert "/.mini-agent/config" in cmd and "$HOME/.mini-agent" not in cmd
     assert "$OPENAI_API_KEY" in cmd and "$OPENAI_BASE_URL" in cmd
     assert "provider: " in cmd            # yaml: provider: "openai"
     assert "config.yaml" in cmd

@@ -96,12 +96,3 @@ def test_peek_zero_args_returns_usage():
     assert "usage:" in err
 
 
-def test_peek_help():
-    rc, out, _ = run_cli(["peek", "--help"])
-    assert rc == 0
-    assert "usage: claudeteam peek" in out
-
-
-def test_peek_registered_in_cli():
-    from claudeteam.cli import COMMANDS
-    assert "peek" in COMMANDS

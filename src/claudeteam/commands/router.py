@@ -1,9 +1,9 @@
 """`claudeteam router`
 
-Long-running event subscriber: spawns `lark-cli event +subscribe`
-(direct binary preferred, npx fallback — see
-`feishu/lark.resolve_cli_prefix`) and feeds each NDJSON line into
-the routing loop (`feishu/subscribe.process_lines`).
+Long-running event subscriber: spawns the `@larksuite/channel` sidecar
+(`node scripts/feishu_channel/sidecar.js run`, the official WebSocket →
+NDJSON ingress) and feeds each NDJSON line into the routing loop
+(`feishu/subscribe.process_lines`).
 
 Boot order:
   1. Validate chat_id + agents (fast-fail BEFORE pidlock so up.py
@@ -13,7 +13,7 @@ Boot order:
   3. Replay `pending_lines(chat_id)` to backfill anything received
      while the daemon was down (catchup-on-restart cursor).
   4. Spawn the subscribe subprocess in its own session (so
-     SIGTERMing the daemon kills the entire npx → node → lark-cli
+     SIGTERMing the daemon kills the entire node sidecar
      tree via killpg).
   5. Spawn a daemon thread that polls the subscribe child's exit
      code every ~20s and self-SIGTERMs when it dies (lark-cli
@@ -32,6 +32,7 @@ processes left by a SIGKILL'd predecessor before respawning.
 """
 from __future__ import annotations
 
+import collections
 import os
 import signal
 import subprocess
@@ -47,33 +48,26 @@ from claudeteam.runtime import config, paths, pidlock, tunables, wake
 from claudeteam.util import error_exit, maybe_print_help, warn
 
 
-def _build_subscribe_cmd(profile: str, *,
-                         resolve_prefix=lark.resolve_cli_prefix) -> list[str]:
-    """Build the lark-cli `event +subscribe` argv.
+def _build_subscribe_cmd(profile: str = "", *,
+                         sidecar=lark.sidecar_path) -> list[str]:
+    """Build the Feishu event-ingress argv: the `@larksuite/channel` sidecar's
+    `run` mode (`node scripts/feishu_channel/sidecar.js run`).
 
-    Prefix comes from `lark.resolve_cli_prefix` (direct binary first,
-    `npx @larksuite/cli` fallback). Tests inject `resolve_prefix=`
-    so the argv shape is deterministic regardless of what's
-    installed locally.
+    The sidecar opens the official long-connection WebSocket and emits each
+    inbound message as one NDJSON line in the lark-cli `--compact` flat shape
+    that `feishu.subscribe.process_lines` already parses — so the whole
+    routing loop downstream is unchanged. App creds reach it via
+    `lark.subprocess_env()` (the same env the Popen uses), not the argv.
 
-    Note on --force: previously included to bypass the single-instance
-    lock from a possibly-zombie previous daemon. lark-cli 1.0.21+ docs
-    that flag explicitly: "UNSAFE: server randomly splits events across
-    connections, each instance only receives a subset". Removing it
-    means events flow to one connection (ours); the lock file at
-    ~/.lark-cli/locks/subscribe_<app_id>.lock is fcntl-advisory, so it
-    auto-releases on process exit. claudeteam's own pidlock + the
-    watchdog respawn keep us at one daemon at a time, so the
-    single-instance lock is harmless.
+    Tests inject `sidecar=` so the argv is deterministic. `profile` is unused
+    now (the sidecar binds to the resolved app creds, not a lark-cli profile)
+    but kept in the signature so the daemon call site stays as-is.
+
+    Replaces the former `lark-cli event +subscribe` argv: that path silently
+    dropped its WebSocket on macOS and split events across connections under
+    the old `--force`; the SDK long-connection is the supported ingress.
     """
-    return [
-        *resolve_prefix(),
-        *(["--profile", profile] if profile else []),
-        "event", "+subscribe",
-        "--event-types", "im.message.receive_v1",
-        "--compact", "--quiet",
-        "--as", "bot",
-    ]
+    return ["node", str(sidecar()), "run"]
 
 
 def _build_agent_adapters(agents_dict: dict) -> dict:
@@ -281,9 +275,50 @@ def _subscribe_rotate_reason(idle: float, threshold: float, events_seen: int) ->
             f"(threshold {threshold:.0f}s) — rotating subscribe for respawn")
 
 
+# Signatures in the sidecar's OWN output (its stderr is merged into stdout, so
+# these flow through process_lines and get bad_json-dropped) that mean "the
+# WebSocket never came up" — the failure that, un-surfaced, just looks like a
+# silent router respawn loop. Lowercased for case-insensitive match.
+_WS_FAIL_MARKERS = ("ws connect failed", "connect failed", "reconnect",
+                    "persistent connection", "长连接")
+
+
+def _diagnose_sidecar_exit(returncode, recent_lines) -> None:
+    """When the sidecar dies, surface WHY — instead of its error output getting
+    bad_json-dropped by process_lines and lost in a watchdog respawn loop. Prints
+    the sidecar's last lines, and when they carry a WebSocket-connect-failure
+    signature, the two console/proxy fixes that actually resolve it. Best-effort:
+    never raises (a diagnostic must not add a second failure)."""
+    try:
+        tail = [l for l in list(recent_lines or []) if l.strip()][-12:]
+    except RuntimeError:        # deque mutated mid-iteration by the writer thread
+        tail = []
+    if tail:
+        print("     ↳ sidecar 最后输出：")
+        for l in tail:
+            print(f"       {l}")
+    blob = "\n".join(tail).lower()
+    if any(m in blob for m in _WS_FAIL_MARKERS):
+        print("     ↳ 诊断：sidecar 的 WebSocket(长连接)没建起来。最常见两条：")
+        print("       1) 该应用没开长连接订阅 → 飞书开发者后台 → 事件与回调 → 订阅方式")
+        print("          → 改成「使用长连接接收事件/回调」(不是 Webhook URL)，保存。")
+        print("       2) HTTPS_PROXY 挡了 WebSocket → 启动前 `export LARK_CLI_NO_PROXY=1`")
+        print("          (或写进 $CLAUDETEAM_SECRETS_FILE / shell profile)。")
+
+
+def _tee_recent(stream, sink):
+    """Yield each line from `stream` while keeping the last N in `sink` (a bounded
+    deque) — so a sidecar that dies mid-stream leaves its final output visible for
+    `_diagnose_sidecar_exit` instead of it scrolling past as bad_json drops."""
+    for line in stream:
+        sink.append(line.rstrip("\n"))
+        yield line
+
+
 def _watch_subscribe_health(proc: subprocess.Popen, stop_event: threading.Event,
                             last_event_at: list[float],
-                            events_seen: list[int]) -> None:
+                            events_seen: list[int],
+                            recent_lines=None) -> None:
     """Background thread: kill the daemon if the subscribe child dies OR
     stops delivering events.
 
@@ -313,6 +348,7 @@ def _watch_subscribe_health(proc: subprocess.Popen, stop_event: threading.Event,
     while not stop_event.wait(period_s):
         if proc.poll() is not None:
             print(f"  ⚠️ subscribe child exited (rc={proc.returncode}); router will exit so watchdog can respawn")
+            _diagnose_sidecar_exit(proc.returncode, recent_lines)
             os.kill(os.getpid(), signal.SIGTERM)
             return
         idle = time.monotonic() - last_event_at[0]
@@ -369,7 +405,7 @@ def main(argv: list[str]) -> int:
 
     agents = config.agent_names()
     if not agents:
-        return error_exit("❌ team.json has no agents")
+        return error_exit("❌ claudeteam.toml has no agents")
 
     pid_file = paths.router_pid_file()
     if not pidlock.acquire(pid_file, name="router"):
@@ -415,9 +451,13 @@ def main(argv: list[str]) -> int:
     stop_watchdog = threading.Event()
     last_event_at = [time.monotonic()]
     events_seen = [0]  # genuine handled events this process (idle vs stalled)
+    # Bounded tail of the sidecar's raw output so that when it dies, the health
+    # thread can show its last lines (the real WS-failure reason) instead of the
+    # error scrolling past as bad_json drops. See _tee_recent / _diagnose_sidecar_exit.
+    recent_lines: collections.deque = collections.deque(maxlen=30)
     threading.Thread(
         target=_watch_subscribe_health,
-        args=(proc, stop_watchdog, last_event_at, events_seen),
+        args=(proc, stop_watchdog, last_event_at, events_seen, recent_lines),
         daemon=True,
     ).start()
 
@@ -488,7 +528,7 @@ def main(argv: list[str]) -> int:
                 dropped_stale=catchup_meta.get("dropped_stale", 0),
                 slash_skipped=cstats.drops_by_reason.get("catchup_slash_skip", 0))
 
-        stats = process_lines(proc.stdout, **loop_kwargs)
+        stats = process_lines(_tee_recent(proc.stdout, recent_lines), **loop_kwargs)
         print(f"router exited: handled={stats.handled} dropped={stats.dropped}")
         return 0 if proc.wait() == 0 else 1
     except KeyboardInterrupt:

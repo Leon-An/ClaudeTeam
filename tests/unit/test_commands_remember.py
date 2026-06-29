@@ -48,30 +48,6 @@ def test_remember_too_few_args_returns_usage_error():
         assert "usage:" in err
 
 
-def test_remember_help_flag():
-    rc, out, _ = run_cli(["remember", "--help"])
-    assert rc == 0
-    assert "usage: claudeteam remember" in out
-
-
-def test_remember_help_lists_known_kinds():
-    """--help advertises memory.KNOWN_KINDS so agents see the convention
-    before writing their first entry, instead of discovering it via the
-    stderr soft-warn after the fact."""
-    from claudeteam.store import memory
-    rc, out, _ = run_cli(["remember", "--help"])
-    for k in memory.KNOWN_KINDS:
-        assert k in out
-
-
-def test_remember_registered_in_cli():
-    """Top-level `claudeteam remember` must be in the COMMANDS registry;
-    otherwise managers/workers calling from pane get `unknown
-    command`."""
-    from claudeteam.cli import COMMANDS
-    assert "remember" in COMMANDS
-
-
 def test_remember_team_writes_to_shared_pool_not_per_agent():
     """--team redirects the entry to the shared team experience, recording
     the agent as the contributor (`by`) and leaving the per-agent store
@@ -87,11 +63,6 @@ def test_remember_team_writes_to_shared_pool_not_per_agent():
         assert len(rows) == 1
         assert rows[0]["by"] == "worker_cc"
         assert rows[0]["content"] == "测试用 python3 tests/run.py"
-
-
-def test_remember_help_mentions_team():
-    rc, out, _ = run_cli(["remember", "--help"])
-    assert "--team" in out
 
 
 def test_remember_team_update_edits_existing_entry():

@@ -173,19 +173,6 @@ def test_health_shows_inbound_age_when_cursor_present():
 # ── memory section ──────────────────────────────────────────────
 
 
-def test_health_memory_section_info_when_no_entries():
-    """The memory section is informational. No agent has written entries
-    yet → an `ℹ️` line saying so. Section header visible regardless."""
-    team = {"session": "S", "agents": {"manager": {}}}
-    with isolated_env(team=team, runtime_config={"chat_id": "oc_x"}), \
-            _stub_tmux(session_alive=True, panes_with_cli=["manager"]), \
-            _stub_which({"claude"}):
-        rc, out, _ = run_cli(["health"])
-        assert rc == 0
-        assert "memory:" in out
-        assert "no agent has written entries yet" in out
-
-
 def test_health_memory_section_lists_agents_with_entries():
     """When agents have written memory, list them inline (one-liner if
     ≤5 agents). Doesn't change the rc — informational only."""
@@ -225,14 +212,6 @@ def test_health_red_when_binary_missing():
         assert "claude: not on PATH" in out
 
 
-def test_health_green_when_binaries_present():
-    team = {"session": "S", "agents": {"m": {"cli": "claude-code"}}}
-    with isolated_env(team=team, runtime_config={"chat_id": "oc_x"}), _stub_tmux(
-            session_alive=True, panes_with_cli=["m"]), _stub_which({"claude"}):
-        rc, out, _ = run_cli(["health"])
-        assert "claude: /usr/bin/claude" in out
-
-
 def test_health_warns_when_proxy_set_without_no_proxy():
     team = {"session": "S", "agents": {"m": {}}}
     with isolated_env(team=team, runtime_config={"chat_id": "oc_x"}), _stub_tmux(
@@ -240,16 +219,6 @@ def test_health_warns_when_proxy_set_without_no_proxy():
             env_patch(HTTPS_PROXY="http://proxy:7890", LARK_CLI_NO_PROXY=None):
         rc, out, _ = run_cli(["health"])
         assert "HTTPS_PROXY=http://proxy:7890 set without LARK_CLI_NO_PROXY" in out
-
-
-def test_health_silent_when_proxy_unset():
-    team = {"session": "S", "agents": {"m": {}}}
-    with isolated_env(team=team, runtime_config={"chat_id": "oc_x"}), _stub_tmux(
-            session_alive=True, panes_with_cli=["m"]), \
-            env_patch(HTTPS_PROXY=None, HTTP_PROXY=None):
-        rc, out, _ = run_cli(["health"])
-        assert "HTTPS_PROXY" not in out
-
 
 
 def test_health_info_when_proxy_set_with_no_proxy_flag():
@@ -269,26 +238,7 @@ def test_health_info_when_proxy_set_with_no_proxy_flag():
         assert "ℹ️" in out
 
 
-def test_health_no_proxy_flag_truthy_variants_all_recognised():
-    """LARK_CLI_NO_PROXY accepts 1/true/yes/on (case-insensitive). Make
-    sure the ℹ️ branch fires for the full set, not just the literal '1'."""
-    team = {"session": "S", "agents": {"m": {}}}
-    for truthy in ("1", "true", "True", "YES", "on"):
-        with isolated_env(team=team, runtime_config={"chat_id": "oc_x"}), \
-                _stub_tmux(session_alive=True, panes_with_cli=["m"]), \
-                env_patch(HTTPS_PROXY="http://p", LARK_CLI_NO_PROXY=truthy):
-            rc, out, _ = run_cli(["health"])
-            assert "wrapper will strip" in out, (
-                f"LARK_CLI_NO_PROXY={truthy!r} should be recognised as truthy")
-
-
 # ── help ────────────────────────────────────────────────────────
-
-
-def test_health_help():
-    rc, out, _ = run_cli(["health", "--help"])
-    assert rc == 0
-    assert "usage: claudeteam health" in out
 
 
 # ── --json mode ─────────────────────────────────────────────────

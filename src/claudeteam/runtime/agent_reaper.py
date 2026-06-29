@@ -68,9 +68,9 @@ def reap(agents, *, session: str, respawn: Callable[[str], bool],
             log(f"  ⏳ {a} dead but within respawn cooldown "
                 f"({cooldown_s:.0f}s) — leaving for lazy-wake")
             continue
-        last_respawn[a] = t
         try:
             if respawn(a):
+                last_respawn[a] = t
                 out.append(a)
                 log(f"  ♻️  respawned dead agent {a}")
             else:
