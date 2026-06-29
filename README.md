@@ -1,10 +1,16 @@
+<h1 align="center">ClaudeTeam</h1>
+
+<p align="center"><b>Turn one prompt into a dynamic AI team.</b></p>
+
+<p align="center">
+  <img src="docs/media/team-templates.png" alt="Five ready-made ClaudeTeam domain teams — software dev, automated research, marketing growth, data analysis, content ops — each a manager + workers collaborating" width="900" />
+</p>
+
 <p align="center">
   <b>English</b> · <a href="docs/README_zh.md">简体中文</a>
 </p>
 
-<p align="center">
-  <img src="docs/media/architecture.png" alt="ClaudeTeam — turn one prompt into a dynamic AI team: a manager agent selects capabilities, hires/fires workers on demand, runs them as a loop or workflow, with persistent memory and self-reflection, all driven from Feishu" width="900" />
-</p>
+<p align="center"><sub>Five ready-made domain teams ship in <a href="templates/"><code>templates/</code></a> — software dev · automated research · marketing growth · data analysis · content ops. Copy one and tweak, or let the manager build yours from scratch.</sub></p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
@@ -15,7 +21,6 @@
 </p>
 
 <p align="center">
-  <b>Turn one prompt into a dynamic AI team.</b><br/>
   A manager agent hires and fires workers on demand, orchestrates them as a loop or a workflow,
   remembers across tasks, reflects and improves — and you drive the whole crew from a Feishu group chat on your phone.
 </p>
@@ -51,6 +56,10 @@ Any of these can run as an agent in the same team (see the [adapter table](#mult
 The default team is all Claude Code, so `claude` alone runs it; the rest are optional — add whichever you have.
 
 ---
+
+<p align="center">
+  <img src="docs/media/architecture.png" alt="ClaudeTeam — turn one prompt into a dynamic AI team: a manager agent selects capabilities, hires/fires workers on demand, runs them as a loop or workflow, with persistent memory and self-reflection, all driven from Feishu" width="900" />
+</p>
 
 ## Quick start
 
