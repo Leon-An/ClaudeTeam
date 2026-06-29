@@ -1,14 +1,19 @@
 """`claudeteam feishu <subcommand>` — Feishu app lifecycle.
 
 `feishu connect` registers the bot ClaudeTeam talks through and auto-creates the
-team group. Two modes:
+team group. Three modes:
 
-  • DEFAULT — **guided self-built app**. You create a 企业自建应用 in the console
-    (a few clicks), and the command hands you a ONE-CLICK permission deep-link
-    that pre-selects every scope ClaudeTeam needs — crucially `im:message.group_msg`,
-    the *sensitive* scope that lets the bot receive un-@'d group messages (plain
-    text + slash commands + catchup recovery). It then verifies the scope landed,
-    creates the team group, and persists creds. Full group UX; no Playwright.
+  • DEFAULT — **browser-automated 自建应用**. Drives the Feishu console in a
+    headed browser to create + scope + publish a self-built app that holds
+    `im:message.group_msg`, the *sensitive* scope that lets the bot receive
+    un-@'d group messages (plain text + slash + catchup). Scan the login QR
+    once; the 7 console stages then run automatically. On any console-UI drift
+    it **falls back to --manual**, so a broken selector degrades to "click it
+    yourself" rather than a hard stop.
+
+  • `--manual` — the same self-built app, but **you do the console clicks**,
+    guided step-by-step with a ONE-CLICK permission deep-link (pre-selects every
+    scope incl. `im:message.group_msg`). The robust fallback; no Playwright.
 
   • `--quick` — **one-scan PersonalAgent** (`@larksuite/channel` device-flow QR).
     Zero console clicks, but Feishu won't grant a PersonalAgent app
@@ -33,11 +38,13 @@ from claudeteam.util import (
 
 
 USAGE = (
-    "usage: claudeteam feishu connect [--quick] [--group-name NAME] "
+    "usage: claudeteam feishu connect [--quick|--manual] [--group-name NAME] "
     "[--tenant feishu|lark]\n"
     "  Register a Feishu/Lark bot for this team + auto-create the team group.\n"
-    "  (default)  guided 自建应用: paste App ID/Secret from the console; full\n"
-    "             perms — un-@'d group messages reach the manager, slash, catchup.\n"
+    "  (default)  browser-automates a 自建应用 (un-@'d group messages work):\n"
+    "             scan the login QR once, the rest is auto; falls back to\n"
+    "             --manual if the console UI drifted.\n"
+    "  --manual   step-by-step console guide (no browser automation).\n"
     "  --quick    one-scan device-flow QR (zero console) but the group needs @bot\n"
     "             and catchup is limited.\n"
     "  --group-name NAME     name for the auto-created group (default: ClaudeTeam).\n"
@@ -124,6 +131,49 @@ def _run_sidecar(mode: str, *, extra_env: dict | None = None) -> dict | None:
             except json.JSONDecodeError:
                 continue
     return None
+
+
+def _creator_path() -> Path:
+    """Resolve scripts/feishu_bot_creator/create_feishu_bot.js (sibling of the
+    sidecar; honors CLAUDETEAM_FEISHU_CREATOR_DIR)."""
+    env = os.environ.get("CLAUDETEAM_FEISHU_CREATOR_DIR")
+    base = Path(env) if env else lark.sidecar_path().parent.parent / "feishu_bot_creator"
+    return base / "create_feishu_bot.js"
+
+
+def _run_bot_creator(name: str, tenant: str) -> tuple[str, str] | None:
+    """Drive the Playwright bot-creator to stand up a PUBLISHED self-built app
+    that holds im:message.group_msg (so the bot replies to un-@'d group
+    messages). The creator opens a headed browser; the operator scans the login
+    QR once, then the 7 console stages run automatically. stdio is inherited so
+    the operator sees the QR + live progress; on success the App ID/Secret are
+    read from the creator's state file. Returns (app_id, app_secret), or None on
+    ANY failure (creator/deps missing, non-zero exit, unreadable state) so the
+    caller falls back to the manual guided flow."""
+    creator = _creator_path()
+    if not creator.exists():
+        print(f"  ℹ️ 未找到 bot-creator（{creator}）— 回退手动")
+        return None
+    if not (creator.parent / "node_modules" / "playwright").exists():
+        print(f"  ℹ️ bot-creator 依赖未安装；先在 {creator.parent} 跑 "
+              f"`npm install`（会下载 Chromium）— 本次回退手动")
+        return None
+    try:
+        rc = subprocess.run(
+            ["node", str(creator), "create", name],
+            env={**os.environ, "FEISHU_TENANT": tenant}).returncode
+    except OSError as e:
+        print(f"  ℹ️ 无法运行 bot-creator: {e} — 回退手动")
+        return None
+    if rc != 0:
+        return None
+    try:
+        data = json.loads(
+            (creator.parent / ".state" / f"{name}.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    aid, sec = data.get("appId"), data.get("appSecret")
+    return (str(aid), str(sec)) if aid and sec else None
 
 
 def _sidecar_ready() -> str:
@@ -262,12 +312,39 @@ def _connect_quick(argv: list[str]) -> int:
     return _create_group_and_persist(app_id, app_secret, group_name, owner=owner)
 
 
+# ── DEFAULT: browser-automate the self-built app (un-@'d group messages) ──────
+def _connect_auto(argv: list[str], *, run_creator=None, prompt=input) -> int:
+    """Drive the Feishu console in a browser to stand up a published self-built
+    app with im:message.group_msg, then create the group. Scan the login QR
+    once; the rest is automated. Falls back to the manual guided flow on ANY
+    automation failure (Feishu UI drift) — a broken selector degrades to "click
+    it yourself", never a hard stop."""
+    rest = list(argv)
+    group_name = pop_flag(rest, "--group-name") or "ClaudeTeam"
+    tenant = pop_flag(rest, "--tenant") or "feishu"
+    if (rc := reject_extra_args(rest, USAGE)) is not None:
+        return rc
+    run_creator = run_creator or _run_bot_creator
+    print("=== 浏览器自动注册飞书【自建应用】（群里免 @）：扫一次登录码，其余自动点 ===")
+    print("（撞上飞书后台改版会自动回退到手动引导，不卡死）\n")
+    creds = run_creator("ClaudeTeam", tenant)
+    if not creds:
+        print("\n⚠️ 浏览器自动化未完成 — 回退到手动引导：\n")
+        return _connect_guided(argv, prompt=prompt)
+    app_id, app_secret = creds
+    lark.save_app_creds(app_id=app_id, app_secret=app_secret, tenant=tenant)
+    print(f"✅ 应用已创建并发布：{app_id}（凭据已存 state/feishu_app.json）")
+    return _create_group_and_persist(app_id, app_secret, group_name)
+
+
 def _connect(argv: list[str]) -> int:
     rest = list(argv)
     try:
         if pop_bool_flag(rest, "--quick"):
             return _connect_quick(rest)
-        return _connect_guided(rest)
+        if pop_bool_flag(rest, "--manual"):
+            return _connect_guided(rest)
+        return _connect_auto(rest)
     except (EOFError, KeyboardInterrupt):
         # No stdin / non-TTY (a piped or CI invocation) or ^C mid-prompt — the
         # guided flow's input() prompts raise here. Abort cleanly instead of

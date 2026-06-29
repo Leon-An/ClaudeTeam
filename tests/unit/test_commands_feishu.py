@@ -1,14 +1,16 @@
 """Tests for `claudeteam feishu connect`.
 
-Two modes:
-  • default = guided self-built app (prompts for App ID/Secret, hands a permission
+Three modes:
+  • default = browser-automated self-built app (the Playwright bot-creator); on
+    any automation failure it falls back to the guided flow.
+  • --manual = guided self-built app (prompts for App ID/Secret, hands a permission
     deep-link, verifies im:message.group_msg landed, creates the group).
   • --quick = one-scan PersonalAgent device flow (warns if group_msg can't be had).
 
-The node sidecar (network + interactive QR) is the one thing we can't run in a
-unit test, so we stub `feishu._run_sidecar` with a recorder that returns the
-canned per-mode JSON the real sidecar emits, and inject `prompt=` for the
-guided flow's console inputs.
+The node sidecar + the Playwright bot-creator (network + interactive browser) are
+the things we can't run in a unit test, so we stub `feishu._run_sidecar` /
+`feishu._run_bot_creator` with recorders that return canned results, and inject
+`prompt=` for the guided flow's console inputs.
 """
 from __future__ import annotations
 
@@ -17,7 +19,7 @@ import io
 import os
 from pathlib import Path
 
-from helpers import attr_patch, isolated_env, run_cli
+from helpers import attr_patch, env_patch, isolated_env, run_cli
 from claudeteam.commands import feishu
 from claudeteam.feishu import lark
 from claudeteam.runtime import config, tunables
@@ -135,10 +137,13 @@ def test_connect_rejects_unknown_flag():
 def test_connect_aborts_cleanly_on_eof_non_tty():
     # REGRESSION (dogfood #4): a piped / non-TTY invocation makes the guided
     # flow's input() raise EOFError. connect must abort rc=1 with a friendly
-    # message, not dump an EOFError traceback through the generic cli handler.
+    # message, not dump an EOFError traceback. (Default now routes through
+    # _connect_auto, which falls back to guided when the browser creator is
+    # unavailable — so force that fallback to reach the input() path.)
     def boom(*_a, **_k):
         raise EOFError
-    with attr_patch(feishu, _connect_guided=boom):
+    with attr_patch(feishu, _run_bot_creator=lambda *a, **k: None,
+                    _connect_guided=boom):
         rc, _, err = run_cli(["feishu", "connect"])
     assert rc == 1
     assert "已取消" in err or "非交互" in err
@@ -198,3 +203,60 @@ def test_feishu_unknown_subcommand_errors():
     rc, _, err = run_cli(["feishu", "bogus"])
     assert rc != 0
     assert "unknown feishu subcommand" in err
+
+
+# ── default: browser-automated self-built app + graceful fallback ─────────────
+
+
+def test_default_auto_creates_app_then_group():
+    """Default (no flag) drives the browser bot-creator → published self-built
+    app, then creates the group. No device-flow register, no scope re-verify —
+    the creator already published with group_msg, so it's just create-group."""
+    stub = _SidecarStub(granted={"im:message.group_msg"})
+    with isolated_env(team={"agents": {"manager": {"cli": "claude-code"}}}) as tmp:
+        _seed_toml()
+        with _stub_sidecar(stub, tmp), attr_patch(
+                feishu, _run_bot_creator=lambda name, tenant: ("cli_auto", "autosecret")):
+            rc, out, err = run_cli(["feishu", "connect"])
+        assert rc == 0, err
+        assert lark.load_app_creds()["app_id"] == "cli_auto"
+        assert config.chat_id() == "oc_new"
+        assert stub.calls == ["create-group"]   # auto: no register / scopes
+
+
+def test_default_auto_falls_back_to_manual_when_creator_fails():
+    """The whole point of the fallback: browser automation failing (Feishu UI
+    drift → creator returns None) DEGRADES to the manual guided flow, never a
+    hard stop."""
+    calls = []
+    with isolated_env(team={"agents": {"manager": {"cli": "claude-code"}}}):
+        _seed_toml()
+        with attr_patch(feishu,
+                        _run_bot_creator=lambda *a, **k: None,
+                        _connect_guided=lambda argv, **k: calls.append("guided") or 0):
+            rc, out, _ = run_cli(["feishu", "connect"])
+        assert rc == 0
+        assert calls == ["guided"]   # fell back to manual
+        assert "回退" in out          # and told the operator so
+
+
+def test_manual_flag_forces_guided_skips_creator():
+    """--manual skips browser automation entirely → straight to the guided
+    console steps; the creator is never invoked."""
+    calls = []
+    with isolated_env(team={"agents": {"manager": {"cli": "claude-code"}}}):
+        _seed_toml()
+        with attr_patch(feishu,
+                        _run_bot_creator=lambda *a, **k: calls.append("creator") or ("x", "y"),
+                        _connect_guided=lambda argv, **k: calls.append("guided") or 0):
+            rc, _, _ = run_cli(["feishu", "connect", "--manual"])
+        assert rc == 0
+        assert calls == ["guided"]   # creator never ran
+
+
+def test_run_bot_creator_returns_none_when_creator_absent():
+    """Missing creator (or its node deps) → None, which is what makes
+    _connect_auto fall back instead of crashing."""
+    with isolated_env(), env_patch(CLAUDETEAM_FEISHU_CREATOR_DIR="/no/such/dir"):
+        with contextlib.redirect_stdout(io.StringIO()):
+            assert feishu._run_bot_creator("ClaudeTeam", "feishu") is None
