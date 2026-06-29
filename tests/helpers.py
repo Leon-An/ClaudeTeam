@@ -60,6 +60,20 @@ class CallRecorder:
         return self.result
 
 
+class KwRecorder:
+    """Like CallRecorder but for keyword-style callables (e.g. chat.send_text's
+    `sidecar_send=`) — records positional args as a tuple + kwargs verbatim, with
+    no `list()`-coercion of the first arg (which would char-split a string id)."""
+
+    def __init__(self, result=None):
+        self.calls: list[dict] = []
+        self.result = result
+
+    def __call__(self, *args, **kwargs):
+        self.calls.append({"args": args, "kwargs": dict(kwargs)})
+        return self.result
+
+
 @contextlib.contextmanager
 def isolated_env(*, team: dict | None = None, runtime_config: dict | None = None):
     """Set CLAUDETEAM_STATE_DIR (always) + optionally TEAM_FILE / RUNTIME_CONFIG.

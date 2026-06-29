@@ -165,6 +165,28 @@ async function doCreateGroup() {
   log(`✅ 群已创建：${chatId}（已邀请 ${invite || "—"}）`);
 }
 
+// ── send: SDK egress — post AS THE BOT using the connected app's creds, NOT
+// lark-cli (whose macOS keychain may hold a stale/different app and silently
+// hijack the sender → "Bot can NOT be out of the chat"). One-shot. ────────────
+async function doSend() {
+  const { appId, appSecret } = appCreds();
+  const chatId = process.env.FEISHU_CHAT_ID || "";
+  const replyTo = process.env.FEISHU_REPLY_TO || "";
+  const msgType = process.env.FEISHU_MSG_TYPE || "text";
+  const content = process.env.FEISHU_CONTENT || "";
+  if (!content || (!chatId && !replyTo)) {
+    log("✗ send 缺少 FEISHU_CONTENT 和 FEISHU_CHAT_ID/FEISHU_REPLY_TO"); process.exit(2);
+  }
+  const channel = createLarkChannel({ appId, appSecret });
+  const res = replyTo
+    ? await channel.rawClient.im.v1.message.reply({
+        path: { message_id: replyTo }, data: { msg_type: msgType, content } })
+    : await channel.rawClient.im.v1.message.create({
+        params: { receive_id_type: "chat_id" },
+        data: { receive_id: chatId, msg_type: msgType, content } });
+  emit({ event: "sent", message_id: res.data?.message_id ?? null, chat_id: chatId || null });
+}
+
 // ── run: official WebSocket channel → NDJSON on stdout ────────────────────────
 async function doRun() {
   const { appId, appSecret } = appCreds();
@@ -218,15 +240,16 @@ const MODES = {
   register: doRegister,
   scopes: doScopes,
   "create-group": doCreateGroup,
+  send: doSend,
   run: doRun,
 };
 // One-shot modes resolve and must exit (createLarkChannel keeps timers/sockets
 // alive); only `run` stays up, held by its WebSocket + heartbeat interval.
-const ONESHOT = new Set(["register", "scopes", "create-group"]);
+const ONESHOT = new Set(["register", "scopes", "create-group", "send"]);
 const mode = process.argv[2];
 const fail = (e) => {
   log("✗", e instanceof LarkChannelError ? `${e.code}: ${e.message}` : (e?.stack || e?.message || e));
   process.exit(1);
 };
 if (MODES[mode]) MODES[mode]().then(() => { if (ONESHOT.has(mode)) process.exit(0); }).catch(fail);
-else { log("usage: sidecar.js register | scopes | create-group | run"); process.exit(2); }
+else { log("usage: sidecar.js register | scopes | create-group | send | run"); process.exit(2); }
