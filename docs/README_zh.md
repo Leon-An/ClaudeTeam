@@ -1,10 +1,16 @@
+<h1 align="center">ClaudeTeam</h1>
+
+<p align="center"><b>把一句话，变成一支动态 AI 团队。</b></p>
+
+<p align="center">
+  <img src="media/team-templates.png" alt="ClaudeTeam 五套现成领域团队——软件开发、自动化科研、营销增长、数据分析、内容运营——每套都是主管 + 员工协作" width="900" />
+</p>
+
 <p align="center">
   <a href="../README.md">English</a> · <b>简体中文</b>
 </p>
 
-<p align="center">
-  <img src="media/architecture.png" alt="ClaudeTeam —— 把一句话变成一支动态 AI 团队：主管 agent 选能力、按需招工裁员、用循环或工作流编排，带持久记忆和自我反思，全程在飞书里遥控" width="900" />
-</p>
+<p align="center"><sub><a href="../templates/"><code>templates/</code></a> 里有五套现成领域团队——软件开发 · 自动化科研 · 营销增长 · 数据分析 · 内容运营。拷一套改改,或让主管现搭一支。</sub></p>
 
 <p align="center">
   <a href="../LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
@@ -15,7 +21,6 @@
 </p>
 
 <p align="center">
-  <b>把一句话，变成一支动态 AI 团队。</b><br/>
   主管 agent 按需招工、裁员，把员工编排成循环或工作流，跨任务记忆，会反思、会进化 ——
   而你，在手机上的一个飞书群里遥控整支班子。
 </p>
@@ -50,6 +55,10 @@
 默认团队全是 Claude Code，所以装个 `claude` 就能跑；其余都是可选的 —— 你有哪个就加哪个。
 
 ---
+
+<p align="center">
+  <img src="media/architecture.png" alt="ClaudeTeam —— 把一句话变成一支动态 AI 团队：主管 agent 选能力、按需招工裁员、用循环或工作流编排，带持久记忆和自我反思，全程在飞书里遥控" width="900" />
+</p>
 
 ## 快速开始
 
