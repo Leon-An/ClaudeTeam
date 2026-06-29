@@ -14,6 +14,7 @@ from __future__ import annotations
 from helpers import attr_patch, env_patch, isolated_env, run_cli
 from claudeteam.commands.router import (
     _build_subscribe_cmd,
+    _diagnose_sidecar_exit,
     _load_seen_msg_ids,
     _make_on_progress,
     _notify_catchup_skips,
@@ -241,6 +242,41 @@ def test_watch_subscribe_health_self_terminates_on_child_exit():
         assert sigterms[0][1] == signal.SIGTERM
     finally:
         os.kill = real_kill
+
+
+def test_diagnose_sidecar_exit_surfaces_ws_failure_hint():
+    """When the sidecar's last output shows a WebSocket-connect failure, the exit
+    diagnostic must NAME the two fixes (enable 长连接 / LARK_CLI_NO_PROXY) instead
+    of the real error getting bad_json-dropped + lost in a respawn loop."""
+    import io, contextlib
+    recent = ["[info]: ws client connecting",
+              "[error]: '[ws]', 'ws connect failed'",
+              "[ws] reconnect... 放弃"]
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        _diagnose_sidecar_exit(1, recent)
+    out = buf.getvalue()
+    assert "长连接" in out and "LARK_CLI_NO_PROXY" in out, out
+    assert "ws connect failed" in out, "should echo the sidecar's own last lines"
+
+
+def test_diagnose_sidecar_exit_no_ws_signature_prints_tail_only():
+    """A clean/unknown exit still shows the tail (for debugging) but must NOT fire
+    the WS-specific 长连接/proxy advice — that'd be a misleading false lead."""
+    import io, contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        _diagnose_sidecar_exit(0, ["handled event om_x", "router quiet"])
+    out = buf.getvalue()
+    assert "router quiet" in out
+    assert "长连接" not in out and "LARK_CLI_NO_PROXY" not in out, out
+
+
+def test_diagnose_sidecar_exit_tolerates_none_recent_lines():
+    """recent_lines=None (no buffer / older call site) must not raise."""
+    import io, contextlib
+    with contextlib.redirect_stdout(io.StringIO()):
+        _diagnose_sidecar_exit(1, None)  # must simply not raise
 
 
 # ── persisted dedup set (state/router.seen) ──────────────────────

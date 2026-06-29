@@ -342,12 +342,30 @@ pane; the boss can also send them — they zero-LLM dispatch through the router)
 
 A non-interactive terminal (piped / non-TTY) or a Ctrl-C gives "cancelled (no
 input / non-interactive terminal)" — re-run it in an **interactive** terminal.
-The DEFAULT (browser-automated) mode needs a **desktop browser**, so it can't run
+The no-flag (browser-automated) mode needs a **desktop browser**, so it can't run
 on a headless server — there, run it on a desktop machine and copy
 `state/feishu_app.json` + `chat_id` over (or use `--quick` / `--manual`, which need
-no browser). If the console UI changed under it, the default mode falls back to
-`--manual`; you can also force `--manual` to click through it yourself. `--quick`
-prints its QR before waiting for your scan.
+no browser). If the console UI changed under it, it falls back to `--manual`; you
+can also force `--manual` to click through it yourself. `--quick` prints its QR
+before waiting for your scan.
+
+### Group messages get no response after `up` / router keeps restarting
+
+Usually the **sidecar's WebSocket (long connection) never came up** — the router
+spawns the sidecar to receive events; if it can't connect it errors out and exits,
+the router exits with it, the watchdog respawns it, and round it goes. The router
+log shows `⚠️ subscribe child exited` followed by a **`↳ sidecar 最后输出` + `↳ 诊断`**
+block; the two fixes it points to:
+1. **The app has no long-connection subscription** → Feishu console → Events &
+   callbacks → subscription mode → switch to "Receive events via long connection"
+   (NOT Webhook URL), save. (`--quick` usually sets this up; check it on a
+   hand-built app.)
+2. **An HTTPS_PROXY is blocking the WebSocket** → `export LARK_CLI_NO_PROXY=1`
+   before launch, or set it in `$CLAUDETEAM_SECRETS_FILE` (default `<state>/.env`)
+   / your shell profile.
+
+Ingress works the moment the sidecar connects; if it IS connected but the group is
+still silent, check the manager's `claude` login (entries below).
 
 ### `claude: not found` / `codex: not found` in a pane
 

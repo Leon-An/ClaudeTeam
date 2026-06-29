@@ -32,6 +32,7 @@ processes left by a SIGKILL'd predecessor before respawning.
 """
 from __future__ import annotations
 
+import collections
 import os
 import signal
 import subprocess
@@ -274,9 +275,50 @@ def _subscribe_rotate_reason(idle: float, threshold: float, events_seen: int) ->
             f"(threshold {threshold:.0f}s) — rotating subscribe for respawn")
 
 
+# Signatures in the sidecar's OWN output (its stderr is merged into stdout, so
+# these flow through process_lines and get bad_json-dropped) that mean "the
+# WebSocket never came up" — the failure that, un-surfaced, just looks like a
+# silent router respawn loop. Lowercased for case-insensitive match.
+_WS_FAIL_MARKERS = ("ws connect failed", "connect failed", "reconnect",
+                    "persistent connection", "长连接")
+
+
+def _diagnose_sidecar_exit(returncode, recent_lines) -> None:
+    """When the sidecar dies, surface WHY — instead of its error output getting
+    bad_json-dropped by process_lines and lost in a watchdog respawn loop. Prints
+    the sidecar's last lines, and when they carry a WebSocket-connect-failure
+    signature, the two console/proxy fixes that actually resolve it. Best-effort:
+    never raises (a diagnostic must not add a second failure)."""
+    try:
+        tail = [l for l in list(recent_lines or []) if l.strip()][-12:]
+    except RuntimeError:        # deque mutated mid-iteration by the writer thread
+        tail = []
+    if tail:
+        print("     ↳ sidecar 最后输出：")
+        for l in tail:
+            print(f"       {l}")
+    blob = "\n".join(tail).lower()
+    if any(m in blob for m in _WS_FAIL_MARKERS):
+        print("     ↳ 诊断：sidecar 的 WebSocket(长连接)没建起来。最常见两条：")
+        print("       1) 该应用没开长连接订阅 → 飞书开发者后台 → 事件与回调 → 订阅方式")
+        print("          → 改成「使用长连接接收事件/回调」(不是 Webhook URL)，保存。")
+        print("       2) HTTPS_PROXY 挡了 WebSocket → 启动前 `export LARK_CLI_NO_PROXY=1`")
+        print("          (或写进 $CLAUDETEAM_SECRETS_FILE / shell profile)。")
+
+
+def _tee_recent(stream, sink):
+    """Yield each line from `stream` while keeping the last N in `sink` (a bounded
+    deque) — so a sidecar that dies mid-stream leaves its final output visible for
+    `_diagnose_sidecar_exit` instead of it scrolling past as bad_json drops."""
+    for line in stream:
+        sink.append(line.rstrip("\n"))
+        yield line
+
+
 def _watch_subscribe_health(proc: subprocess.Popen, stop_event: threading.Event,
                             last_event_at: list[float],
-                            events_seen: list[int]) -> None:
+                            events_seen: list[int],
+                            recent_lines=None) -> None:
     """Background thread: kill the daemon if the subscribe child dies OR
     stops delivering events.
 
@@ -306,6 +348,7 @@ def _watch_subscribe_health(proc: subprocess.Popen, stop_event: threading.Event,
     while not stop_event.wait(period_s):
         if proc.poll() is not None:
             print(f"  ⚠️ subscribe child exited (rc={proc.returncode}); router will exit so watchdog can respawn")
+            _diagnose_sidecar_exit(proc.returncode, recent_lines)
             os.kill(os.getpid(), signal.SIGTERM)
             return
         idle = time.monotonic() - last_event_at[0]
@@ -408,9 +451,13 @@ def main(argv: list[str]) -> int:
     stop_watchdog = threading.Event()
     last_event_at = [time.monotonic()]
     events_seen = [0]  # genuine handled events this process (idle vs stalled)
+    # Bounded tail of the sidecar's raw output so that when it dies, the health
+    # thread can show its last lines (the real WS-failure reason) instead of the
+    # error scrolling past as bad_json drops. See _tee_recent / _diagnose_sidecar_exit.
+    recent_lines: collections.deque = collections.deque(maxlen=30)
     threading.Thread(
         target=_watch_subscribe_health,
-        args=(proc, stop_watchdog, last_event_at, events_seen),
+        args=(proc, stop_watchdog, last_event_at, events_seen, recent_lines),
         daemon=True,
     ).start()
 
@@ -481,7 +528,7 @@ def main(argv: list[str]) -> int:
                 dropped_stale=catchup_meta.get("dropped_stale", 0),
                 slash_skipped=cstats.drops_by_reason.get("catchup_slash_skip", 0))
 
-        stats = process_lines(proc.stdout, **loop_kwargs)
+        stats = process_lines(_tee_recent(proc.stdout, recent_lines), **loop_kwargs)
         print(f"router exited: handled={stats.handled} dropped={stats.dropped}")
         return 0 if proc.wait() == 0 else 1
     except KeyboardInterrupt:

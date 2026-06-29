@@ -316,6 +316,19 @@ cd /path/to/team-b && claudeteam up
 （或改用不需要浏览器的 `--quick` / `--manual`）。控制台界面在它脚下变了，它会自动退回
 `--manual`；你也可以直接指定 `--manual` 自己点一遍。`--quick` 会先打印二维码再等你扫。
 
+### `up` 后群里发消息没反应 / router 反复重启
+
+多半是 **sidecar 的 WebSocket(长连接)没建起来**——router 起 sidecar 收事件，sidecar 连不上
+就吐错退出，router 跟着退出、watchdog 再拉起，如此循环。router 日志里会看到
+`⚠️ subscribe child exited` 紧跟一段 **`↳ sidecar 最后输出` + `↳ 诊断`**，照它两条修：
+1. **该应用没开长连接订阅** → 飞书开发者后台 → 事件与回调 → 订阅方式 → 改成「使用长连接接收
+   事件/回调」(不是 Webhook URL)，保存。(`--quick` 一般自动配好；手动建的应用要查这项。)
+2. **HTTPS_PROXY 代理挡了 WebSocket** → 启动前 `export LARK_CLI_NO_PROXY=1`，或写进
+   `$CLAUDETEAM_SECRETS_FILE`(默认 `<state>/.env`)/ shell profile。
+
+入站只要 sidecar 连上就通；若 sidecar 连上了、群里还是没反应，才去查 manager 的 `claude`
+登录态（见下条）。
+
 ### pane 里 `claude: not found` / `codex: not found`
 
 pane 继承启动它的那个 shell 的 `$PATH`。如果你开了个新终端、忘了
