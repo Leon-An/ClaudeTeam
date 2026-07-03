@@ -54,6 +54,7 @@ _PROPAGATED_ENV = (
     "LARK_CLI_PROFILE",
     "LARK_CLI_NO_PROXY",
     "CLAUDETEAM_LARK_SEND_AS",
+    "CLAUDETEAM_CONFIG_FILE",
     "CLAUDETEAM_TEAM_FILE",
     "CLAUDETEAM_RUNTIME_CONFIG",
     "CLAUDETEAM_DEFAULT_MODEL",
@@ -66,6 +67,20 @@ _PROPAGATED_ENV = (
     "FEISHU_APP_SECRET",
     "LARKSUITE_CLI_APP_ID",
     "LARKSUITE_CLI_APP_SECRET",
+    # Claude Code provider/model overrides. Tools such as ccswitch commonly
+    # write these into ~/.claude/settings.json; team.sh can also load them from
+    # a team-local .env. Propagate them explicitly so panes spawned from an old
+    # tmux server environment do not fall back to Claude Code defaults.
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME",
+    "CLAUDE_CODE_ATTRIBUTION_HEADER",
 )
 
 
@@ -135,6 +150,70 @@ def _mark_project_trusted(claude_json: Path, workdir: Path) -> None:
     entry["hasTrustDialogAccepted"] = True
     try:
         claude_json.write_text(json.dumps(data))
+    except OSError:
+        pass
+
+
+def _operator_claude_settings_env() -> dict[str, str]:
+    """Env overrides from the operator's Claude Code settings.
+
+    ccswitch writes provider/model selections into ~/.claude/settings.json under
+    `env`. ClaudeTeam runs each agent with an isolated HOME, so those overrides
+    need to be projected into the per-agent settings file at provision time.
+    """
+    try:
+        data = json.loads((Path.home() / ".claude" / "settings.json").read_text())
+    except (OSError, ValueError):
+        return {}
+    env = data.get("env") if isinstance(data, dict) else None
+    if not isinstance(env, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key, val in env.items():
+        if isinstance(key, str) and val is not None:
+            out[key] = str(val)
+    return out
+
+
+def _ensure_claude_settings(settings: Path) -> None:
+    """Write/refresh the per-agent Claude Code settings.
+
+    Preserve existing per-agent settings, enforce the unattended flags
+    ClaudeTeam needs, and merge the operator's settings.env so ccswitch-style
+    provider/model overrides survive HOME isolation.
+    """
+    try:
+        data = json.loads(settings.read_text()) if settings.exists() else {}
+    except (OSError, ValueError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+
+    data["skipDangerousModePermissionPrompt"] = True
+    data["hasCompletedOnboarding"] = True
+    data.setdefault("theme", "dark")
+
+    permissions = data.get("permissions")
+    if not isinstance(permissions, dict):
+        permissions = {}
+    allow = permissions.get("allow")
+    if not isinstance(allow, list):
+        allow = []
+    for item in ("Bash", "Edit", "Read", "Write"):
+        if item not in allow:
+            allow.append(item)
+    permissions["allow"] = allow
+    data["permissions"] = permissions
+
+    env = data.get("env")
+    if not isinstance(env, dict):
+        env = {}
+    env.update(_operator_claude_settings_env())
+    if env:
+        data["env"] = env
+
+    try:
+        settings.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
     except OSError:
         pass
 
@@ -217,18 +296,7 @@ def _ensure_claude_agent_home(agent: str) -> None:
                 cred_link.write_bytes(user_creds.read_bytes())
             except OSError:
                 pass
-    settings = claude_dir / "settings.json"
-    if not settings.exists():
-        settings.write_text(
-            '{\n'
-            '  "skipDangerousModePermissionPrompt": true,\n'
-            '  "hasCompletedOnboarding": true,\n'
-            '  "theme": "dark",\n'
-            '  "permissions": {\n'
-            '    "allow": ["Bash", "Edit", "Read", "Write"]\n'
-            '  }\n'
-            '}\n'
-        )
+    _ensure_claude_settings(claude_dir / "settings.json")
     projects_link = claude_dir / "projects"
     projects_target = Path("/root/.claude/projects")
     if _path_readable(projects_target) and not projects_link.exists():

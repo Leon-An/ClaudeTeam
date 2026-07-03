@@ -11,18 +11,32 @@ while [ -L "$SCRIPT_PATH" ]; do
   esac
 done
 SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" >/dev/null 2>&1 && pwd)"
-TEAM_DIR="$(pwd)"
+
+# When this file lives in ClaudeTeam itself it acts as a template and can be
+# run from a sibling team directory. Once copied into a team directory, anchor
+# all operations to the script's own directory so calls from any cwd stay on
+# the right claudeteam.toml/state pair.
+if [ -f "$SCRIPT_DIR/pyproject.toml" ] && [ -d "$SCRIPT_DIR/src/claudeteam" ]; then
+  TEAM_DIR="$(pwd)"
+else
+  TEAM_DIR="$SCRIPT_DIR"
+fi
+TEAM_DIR="$(cd -P "$TEAM_DIR" >/dev/null 2>&1 && pwd)"
 TEAM_NAME="$(basename "$TEAM_DIR")"
 DEFAULT_SESSION="${TEAM_NAME}Team"
+export CLAUDETEAM_CONFIG_FILE="$TEAM_DIR/claudeteam.toml"
+export CLAUDETEAM_STATE_DIR="$TEAM_DIR/state"
+cd "$TEAM_DIR"
 
 usage() {
   cat <<EOF
 usage: ./team.sh <command> [args...]
 
-Copy this file into a new team directory beside ClaudeTeam, then run it there.
+Copy this file into a new team directory beside ClaudeTeam, then run it there
+or call it by absolute path; it anchors to its own team directory.
 
 Common:
-  init [args...]           claudeteam init --session ${DEFAULT_SESSION} --no-connect, then create .env template
+  init [args...]           claudeteam init --session ${DEFAULT_SESSION} --no-connect, prepare Feishu deps + .env
   connect [args...]        claudeteam feishu connect
   hooks [args...]          claudeteam install-hooks
   up [args...]             claudeteam up
@@ -73,6 +87,16 @@ ensure_env_template() {
 FEISHU_APP_ID=cli_xxxxxxxxxxxxxxx
 FEISHU_APP_SECRET=
 FEISHU_TENANT=feishu
+
+# Optional Claude Code provider overrides for this team.
+# Leave blank to inherit your normal Claude Code/ccswitch settings on restart.
+# Fill these to pin this team to a specific Anthropic-compatible endpoint.
+ANTHROPIC_BASE_URL=
+ANTHROPIC_AUTH_TOKEN=
+ANTHROPIC_MODEL=
+ANTHROPIC_DEFAULT_OPUS_MODEL=
+ANTHROPIC_DEFAULT_SONNET_MODEL=
+ANTHROPIC_DEFAULT_HAIKU_MODEL=
 EOF
   echo "created .env template; fill FEISHU_APP_ID/FEISHU_APP_SECRET if reusing an existing bot"
 }
@@ -95,16 +119,92 @@ find_claudeteam_dir() {
   return 1
 }
 
+ensure_claudeteam_venv() {
+  local source_dir
+  if ! source_dir="$(find_claudeteam_dir)"; then
+    echo "error: cannot find nearby ClaudeTeam source directory; cannot create venv" >&2
+    return 127
+  fi
+  if [ -x "$source_dir/.venv/bin/claudeteam" ]; then
+    return 0
+  fi
+  if command -v claudeteam >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local py="${PYTHON:-python3}"
+  if [ ! -x "$source_dir/.venv/bin/python" ]; then
+    echo "creating ClaudeTeam venv: $source_dir/.venv"
+    "$py" -m venv "$source_dir/.venv"
+  fi
+  cat >"$source_dir/.venv/bin/claudeteam" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." >/dev/null 2>&1 && pwd)"
+export PYTHONPATH="$SOURCE_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
+exec "$SOURCE_DIR/.venv/bin/python" -m claudeteam.cli "$@"
+EOF
+  chmod +x "$source_dir/.venv/bin/claudeteam"
+  if [ ! -x "$source_dir/.venv/bin/claudeteam" ]; then
+    echo "error: failed to create claudeteam entrypoint in venv" >&2
+    return 1
+  fi
+  echo "created ClaudeTeam venv: $source_dir/.venv/bin/claudeteam"
+}
+
+ensure_feishu_channel_deps() {
+  local source_dir
+  if ! source_dir="$(find_claudeteam_dir)"; then
+    echo "error: cannot find nearby ClaudeTeam source directory; cannot prepare Feishu channel deps" >&2
+    return 127
+  fi
+
+  local sidecar_dir="$source_dir/scripts/feishu_channel"
+  local marker="$sidecar_dir/node_modules/@larksuite/channel"
+  if [ -d "$marker" ]; then
+    return 0
+  fi
+  if [ ! -f "$sidecar_dir/package.json" ]; then
+    echo "warning: Feishu channel package not found at $sidecar_dir; skipping Node deps" >&2
+    return 0
+  fi
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "error: Feishu channel deps are missing, but npm is not on PATH" >&2
+    echo "       install Node.js/npm, then rerun ./team.sh init" >&2
+    return 127
+  fi
+
+  echo "installing Feishu channel deps: $sidecar_dir"
+  if ! (cd "$sidecar_dir" && npm install --omit=dev --no-fund --no-audit); then
+    echo "error: failed to install Feishu channel deps in $sidecar_dir" >&2
+    return 1
+  fi
+  if [ ! -d "$marker" ]; then
+    echo "error: npm install finished, but @larksuite/channel is still missing" >&2
+    echo "       expected: $marker" >&2
+    return 1
+  fi
+}
+
 claudeteam_cmd() {
   load_env_file
+
+  local source_dir
+  if source_dir="$(find_claudeteam_dir)"; then
+    if [ "${CLAUDETEAM_TEAM_SH_IGNORE_VENV:-}" != "1" ] && \
+        [ -x "$source_dir/.venv/bin/claudeteam" ]; then
+      export PATH="$source_dir/.venv/bin:$PATH"
+      command claudeteam "$@"
+      return
+    fi
+  fi
 
   if command -v claudeteam >/dev/null 2>&1; then
     command claudeteam "$@"
     return
   fi
 
-  local source_dir
-  if source_dir="$(find_claudeteam_dir)"; then
+  if [ -n "${source_dir:-}" ]; then
     PYTHONPATH="$source_dir/src${PYTHONPATH:+:$PYTHONPATH}" python3 -m claudeteam.cli "$@"
     return
   fi
@@ -126,6 +226,16 @@ has_session_arg() {
 
 run_init() {
   local rc
+  ensure_claudeteam_venv
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    return "$rc"
+  fi
+  ensure_feishu_channel_deps
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    return "$rc"
+  fi
   if has_session_arg "$@"; then
     claudeteam_cmd init "$@"
     rc=$?
@@ -154,6 +264,8 @@ copy_to() {
 doctor() {
   echo "team_dir: $TEAM_DIR"
   echo "default_session: $DEFAULT_SESSION"
+  echo "config_file: $CLAUDETEAM_CONFIG_FILE"
+  echo "state_dir: $CLAUDETEAM_STATE_DIR"
 
   if source_dir="$(find_claudeteam_dir)"; then
     echo "ClaudeTeam source: $source_dir"
@@ -163,6 +275,8 @@ doctor() {
 
   if command -v claudeteam >/dev/null 2>&1; then
     echo "claudeteam: $(command -v claudeteam)"
+  elif [ -n "${source_dir:-}" ] && [ -x "$source_dir/.venv/bin/claudeteam" ]; then
+    echo "claudeteam: $source_dir/.venv/bin/claudeteam"
   else
     echo "claudeteam: not on PATH; will use nearby source if available"
   fi

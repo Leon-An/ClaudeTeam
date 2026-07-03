@@ -31,6 +31,15 @@ def test_pane_env_prefix_always_includes_state_dir():
     assert prefix.startswith("CLAUDETEAM_STATE_DIR=")
 
 
+def test_pane_env_prefix_propagates_config_file_when_set():
+    """Agents shelling out after cd'ing elsewhere must still read the
+    team's claudeteam.toml, not ./claudeteam.toml from their current cwd."""
+    with isolated_env(team={"agents": {"a": {}}}), env_patch(
+            CLAUDETEAM_CONFIG_FILE="/tmp/yuanliu/claudeteam.toml"):
+        prefix = pane_env_prefix()
+    assert "CLAUDETEAM_CONFIG_FILE=/tmp/yuanliu/claudeteam.toml" in prefix
+
+
 def test_pane_env_prefix_propagates_lark_profile_when_set():
     with isolated_env(team={"agents": {"a": {}}}), env_patch(
             LARK_CLI_PROFILE="prod"):
@@ -68,6 +77,22 @@ def test_pane_env_prefix_propagates_feishu_app_credentials():
     assert "FEISHU_APP_SECRET=newSecret123" in prefix
     assert "LARKSUITE_CLI_APP_ID=cli_NEW" in prefix
     assert "LARKSUITE_CLI_APP_SECRET=newSecret123" in prefix
+
+
+def test_pane_env_prefix_propagates_claude_provider_env():
+    """Team .env may pin Claude Code to a ccswitch-compatible provider.
+    Those vars must be embedded in the pane spawn prefix so a stale tmux
+    server env cannot make agents fall back to Claude Code defaults."""
+    with isolated_env(team={"agents": {"a": {}}}), env_patch(
+            ANTHROPIC_BASE_URL="https://example.invalid/anthropic",
+            ANTHROPIC_AUTH_TOKEN="auth-token",
+            ANTHROPIC_MODEL="provider-model",
+            ANTHROPIC_DEFAULT_OPUS_MODEL="provider-opus"):
+        prefix = pane_env_prefix()
+    assert "ANTHROPIC_BASE_URL=https://example.invalid/anthropic" in prefix
+    assert "ANTHROPIC_AUTH_TOKEN=auth-token" in prefix
+    assert "ANTHROPIC_MODEL=provider-model" in prefix
+    assert "ANTHROPIC_DEFAULT_OPUS_MODEL=provider-opus" in prefix
 
 
 def test_pane_env_prefix_shell_quotes_paths_with_spaces():
@@ -398,6 +423,41 @@ def test_ensure_claude_agent_home_overwrites_stale_creds_each_call():
         # Second call must replace the file with v2's content
         assert "v2-tok" in cred.read_text(), \
             "stale snapshot not overwritten on re-provision"
+
+
+def test_ensure_claude_agent_home_inherits_operator_settings_env_for_ccswitch():
+    """ccswitch writes Claude provider/model overrides into the operator's
+    ~/.claude/settings.json `env`. ClaudeTeam gives each agent an isolated
+    HOME, so those env overrides must be projected into the agent settings
+    or spawned panes fall back to Claude Code's default provider/model."""
+    import json
+    import platform
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        operator_home = Path(d) / "operator"
+        operator_claude = operator_home / ".claude"
+        operator_claude.mkdir(parents=True)
+        (operator_claude / "settings.json").write_text(json.dumps({
+            "env": {
+                "ANTHROPIC_BASE_URL": "https://example.invalid/anthropic",
+                "ANTHROPIC_MODEL": "provider-model",
+                "ANTHROPIC_DEFAULT_OPUS_MODEL": "provider-opus",
+            }
+        }), encoding="utf-8")
+
+        with isolated_env(team={"agents": {"manager": {"cli": "claude-code"}}}), \
+                env_patch(HOME=str(operator_home)), \
+                attr_patch(platform, system=lambda: "Linux"):
+            lifecycle._ensure_claude_agent_home("manager")
+            settings = (Path(paths.agent_home("manager"))
+                        / ".claude" / "settings.json")
+            data = json.loads(settings.read_text(encoding="utf-8"))
+
+    assert data["env"]["ANTHROPIC_BASE_URL"] == "https://example.invalid/anthropic"
+    assert data["env"]["ANTHROPIC_MODEL"] == "provider-model"
+    assert data["env"]["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "provider-opus"
+    assert data["skipDangerousModePermissionPrompt"] is True
+    assert "Bash" in data["permissions"]["allow"]
 
 
 # ── _ensure_agent_home (wave2 A: per-agent HOME for every CLI) ────
