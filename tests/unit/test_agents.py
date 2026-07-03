@@ -241,6 +241,39 @@ def test_ensure_workdir_trusted_writes_entry_when_config_missing(tmp_path=None):
         assert 'trust_level = "trusted"' in text
 
 
+def test_ensure_workdir_trusted_seeds_missing_config_from_operator_codex_config():
+    import tempfile
+    from pathlib import Path
+    from claudeteam.agents.codex_cli import ensure_workdir_trusted
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        cfg = root / "agent" / ".codex" / "config.toml"
+        seed = root / "operator" / ".codex" / "config.toml"
+        seed.parent.mkdir(parents=True)
+        seed.write_text(
+            'model = "gpt-5.1-codex-max"\n'
+            'model_provider = "deepseek"\n'
+            '\n'
+            '[model_providers.deepseek]\n'
+            'base_url = "https://api.deepseek.example/v1"\n',
+            encoding="utf-8",
+        )
+
+        ensure_workdir_trusted(
+            Path("/team/yuanliu"),
+            config_path=cfg,
+            seed_config_path=seed,
+        )
+
+        text = cfg.read_text(encoding="utf-8")
+        assert 'model = "gpt-5.1-codex-max"' in text
+        assert 'model_provider = "deepseek"' in text
+        assert '[model_providers.deepseek]' in text
+        assert '[projects."/team/yuanliu"]' in text
+        assert 'trust_level = "trusted"' in text
+
+
 def test_ensure_workdir_trusted_appends_when_other_entries_present():
     import tempfile
     from pathlib import Path
@@ -267,5 +300,4 @@ def test_ensure_workdir_trusted_idempotent_when_entry_exists():
         ensure_workdir_trusted(Path("/already/here"), config_path=cfg)
         # File unchanged
         assert cfg.read_text(encoding="utf-8") == original
-
 

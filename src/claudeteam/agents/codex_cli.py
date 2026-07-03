@@ -22,15 +22,26 @@ def codex_home(agent: str) -> str:
 
 
 def ensure_workdir_trusted(workdir: Path,
-                           config_path: Path | None = None) -> None:
+                           config_path: Path | None = None,
+                           seed_config_path: Path | None = None) -> None:
     """Pre-trust `workdir` in CODEX_HOME/config.toml so the first-run
     "Do you trust this directory?" prompt doesn't block a freshly-spawned
     pane. Idempotent: a no-op if the entry already exists.
 
-    `config_path` is injectable for tests (and per-agent provisioning).
+    When provisioning a per-agent CODEX_HOME, seed a missing config from the
+    operator's ~/.codex/config.toml first so provider/model defaults survive
+    HOME isolation. `config_path` / `seed_config_path` are injectable for tests.
     """
     cfg = config_path or (Path.home() / ".codex" / "config.toml")
     entry = f'[projects."{workdir}"]\ntrust_level = "trusted"\n'
+    if not cfg.exists():
+        seed = seed_config_path or (Path.home() / ".codex" / "config.toml")
+        try:
+            if seed != cfg and seed.exists():
+                cfg.parent.mkdir(parents=True, exist_ok=True)
+                cfg.write_text(seed.read_text(encoding="utf-8"), encoding="utf-8")
+        except OSError:
+            pass
     if cfg.exists():
         existing = cfg.read_text(encoding="utf-8")
         if f'[projects."{workdir}"]' in existing:
