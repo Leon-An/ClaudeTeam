@@ -193,7 +193,8 @@ claudeteam_cmd() {
   if source_dir="$(find_claudeteam_dir)"; then
     if [ "${CLAUDETEAM_TEAM_SH_IGNORE_VENV:-}" != "1" ] && \
         [ -x "$source_dir/.venv/bin/claudeteam" ]; then
-      export PATH="$source_dir/.venv/bin:$PATH"
+      export CLAUDETEAM_BIN_DIR="$source_dir/.venv/bin"
+      export PATH="$CLAUDETEAM_BIN_DIR:$PATH"
       command claudeteam "$@"
       return
     fi

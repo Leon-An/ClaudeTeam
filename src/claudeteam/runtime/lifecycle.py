@@ -444,6 +444,11 @@ def pane_env_prefix() -> str:
     different one from its own cwd.
     """
     parts = [f"CLAUDETEAM_STATE_DIR={shlex.quote(str(paths.state_dir()))}"]
+    bin_dir = env_str("CLAUDETEAM_BIN_DIR")
+    if bin_dir:
+        current_path = os.environ.get("PATH", "")
+        path_value = bin_dir if not current_path else f"{bin_dir}:{current_path}"
+        parts.append(f"PATH={shlex.quote(path_value)}")
     for var in _PROPAGATED_ENV:
         val = env_str(var)
         if val:

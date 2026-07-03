@@ -233,6 +233,7 @@ def test_adjacent_venv_claudeteam_is_preferred_when_available():
         fake.write_text(
             "#!/usr/bin/env bash\n"
             "printf '%s\\n' \"$PWD\" > \"$TEAM_TEST_LOG\"\n"
+            "printf 'CLAUDETEAM_BIN_DIR=%s\\n' \"${CLAUDETEAM_BIN_DIR:-}\" >> \"$TEAM_TEST_LOG\"\n"
             "case \"$PATH\" in\n"
             "  *\"$TEAM_EXPECTED_VENV_BIN\"*) printf 'VENV_ON_PATH=yes\\n' >> \"$TEAM_TEST_LOG\" ;;\n"
             "  *) printf 'VENV_ON_PATH=no\\n' >> \"$TEAM_TEST_LOG\" ;;\n"
@@ -251,7 +252,12 @@ def test_adjacent_venv_claudeteam_is_preferred_when_available():
         rc, lines, _out, err = _run_script_file(script, team_dir, env, "health")
 
         assert rc == 0, err
-        assert lines == [str(team_dir.resolve()), "VENV_ON_PATH=yes", "health"]
+        assert lines == [
+            str(team_dir.resolve()),
+            f"CLAUDETEAM_BIN_DIR={venv_bin.resolve()}",
+            "VENV_ON_PATH=yes",
+            "health",
+        ]
 
 
 def test_init_creates_adjacent_venv_when_missing():

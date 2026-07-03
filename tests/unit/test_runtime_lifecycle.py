@@ -40,6 +40,16 @@ def test_pane_env_prefix_propagates_config_file_when_set():
     assert "CLAUDETEAM_CONFIG_FILE=/tmp/yuanliu/claudeteam.toml" in prefix
 
 
+def test_pane_env_prefix_prefers_claudeteam_bin_dir_on_path():
+    """Agents should resolve `claudeteam` from the team's managed venv before
+    any older global install on PATH."""
+    with isolated_env(team={"agents": {"a": {}}}), env_patch(
+            CLAUDETEAM_BIN_DIR="/opt/ClaudeTeam/.venv/bin",
+            PATH="/usr/local/bin:/usr/bin:/bin"):
+        prefix = pane_env_prefix()
+    assert "PATH=/opt/ClaudeTeam/.venv/bin:/usr/local/bin:/usr/bin:/bin" in prefix
+
+
 def test_pane_env_prefix_propagates_lark_profile_when_set():
     with isolated_env(team={"agents": {"a": {}}}), env_patch(
             LARK_CLI_PROFILE="prod"):
