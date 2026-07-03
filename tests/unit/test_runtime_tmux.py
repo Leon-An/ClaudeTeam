@@ -117,13 +117,14 @@ def test_inject_returns_false_if_submit_key_fails():
     assert ok is False
 
 
-def test_spawn_agent_sends_command_then_enter():
+def test_spawn_agent_uses_respawn_pane_without_echoing_command():
     rec = _Recorder()
     spawn_agent(Target("S", "w"), "claude --model sonnet", run=rec)
-    assert rec.calls == [
-        ["tmux", "send-keys", "-l", "-t", "S:w", "claude --model sonnet"],
-        ["tmux", "send-keys", "-t", "S:w", "Enter"],
-    ]
+    assert len(rec.calls) == 2
+    assert rec.calls[0][:5] == ["tmux", "respawn-pane", "-k", "-t", "S:w"]
+    assert rec.calls[0][5].endswith("claude --model sonnet")
+    assert "send-keys" not in rec.calls[0]
+    assert rec.calls[1] == ["tmux", "clear-history", "-t", "S:w"]
 
 
 # ── _default_run resilience ──────────────────────────────────────

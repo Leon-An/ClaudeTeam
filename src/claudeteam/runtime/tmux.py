@@ -153,7 +153,15 @@ def inject(target: Target, text: str, *, submit_keys: list[str] | None = None,
 
 def spawn_agent(target: Target, spawn_cmd: str, *,
                 run: Callable = _default_run) -> bool:
-    """Drop a CLI spawn command into a pane and press Enter to start it."""
-    if not send_text(target, spawn_cmd, run=run):
+    """Start a CLI in the pane without echoing the spawn command.
+
+    `send-keys -l <cmd>; Enter` visibly typed the whole launch line into the
+    pane. Claude/Codex then read that line from terminal history and treated it
+    as a user instruction. `respawn-pane` runs the shell command directly, and
+    `clear-history` drops any older launch lines from tmux scrollback.
+    """
+    cmd = f"printf '\\033c'; {spawn_cmd}"
+    if not _ok(["tmux", "respawn-pane", "-k", "-t", str(target), cmd], run):
         return False
-    return send_keys(target, "Enter", run=run)
+    _ok(["tmux", "clear-history", "-t", str(target)], run)
+    return True
